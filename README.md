@@ -149,6 +149,10 @@ tests/               MCP smoke test, latency bench
 fixtures/tiny-ts/    a small repo with the tricky cases (re-export, rename, same-name method and function)
 ```
 
+## License
+
+MIT (`LICENSE`). The vendored SQLite is public domain; see `NOTICE`.
+
 ## Credits
 
 - Tool names, arguments and name-path matching follow
