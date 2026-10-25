@@ -58,15 +58,16 @@ proc.stdin.write(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initial
 
 const tools = (await rpc("tools/list")).result.tools.map((t: any) => t.name);
 check(`tools/list: ${tools.join(", ")}`, tools.includes("find_symbol") && tools.includes("find_referencing_symbols") &&
-  tools.includes("get_callers") && tools.includes("get_callees"));
+  tools.includes("get_callers") && tools.includes("get_callees") &&
+  tools.includes("find_implementations") && tools.includes("get_type_hierarchy"));
 
 const add = await tool("find_symbol", { name_path_pattern: "Store/add", include_body: true });
 check("find_symbol Store/add: one method at src/store.ts:11", add.length === 1 && add[0].kind === "method" &&
   add[0].relative_path === "src/store.ts" && add[0].line === 11 && add[0].body.includes("this.items.set"));
 
 const totals = await tool("find_symbol", { name_path_pattern: "total" });
-check("find_symbol total: the function and the method stay apart",
-  totals.map((s: any) => s.name_path).sort().join(",") === "Store/total,total");
+check("find_symbol total: the function, the method and the override stay apart",
+  totals.map((s: any) => s.name_path).sort().join(",") === "CappedStore/total,Store/total,total");
 
 const fmt = await tool("find_referencing_symbols", { name_path: "format" });
 const fmtRefs = fmt[0].references.map((r: any) => `${r.relative_path}:${r.line}`);
@@ -97,6 +98,18 @@ const names = callees.callees.map((c: any) => c.name_path);
 check("get_callees of Store/add: DEFAULT_WEIGHT, and Map/set from the typescript package",
   names.includes("DEFAULT_WEIGHT") &&
   callees.callees.some((c: any) => c.name_path === "Map/set" && c.package.startsWith("typescript ")));
+
+const impls = await tool("find_implementations", { name_path: "Weighed" });
+check("find_implementations Weighed: Box and Crate",
+  impls.implementations.map((s: any) => s.name_path).sort().join(",") === "Box,Crate");
+
+const overrides = await tool("find_implementations", { name_path: "Weighed/weigh" });
+check("find_implementations of an interface method finds both implementations",
+  overrides.implementations.map((s: any) => s.name_path).sort().join(",") === "Box/weigh,Crate/weigh");
+
+const th = await tool("get_type_hierarchy", { name_path: "CappedStore/total" });
+check("get_type_hierarchy: CappedStore/total overrides Store/total",
+  th.supertypes.length === 1 && th.supertypes[0].name_path === "Store/total" && th.subtypes.length === 0);
 
 const info = await tool("index_info", {});
 check("index_info reports counts", Number(info.symbols) > 0 && Number(info.occurrences) > 0);

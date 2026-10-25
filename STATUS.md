@@ -28,6 +28,14 @@ as_of: 2026-10-25
   refreshed in 0.23 s and matched a fresh build on all 802,618 dumped rows.
 - Published: github.com/shetautnetjer/Swan (public, MIT).
 
+## 2026-10-25 (later still): implementations and type hierarchy
+
+- Flattener writes `relationships.tsv` from SCIP relationships; schema 4
+  adds a `relationships` table, refreshed per file like occurrences.
+- Tools `find_implementations`, `get_type_hierarchy`; smoke test and
+  refresh check cover them. AEON: 471 relationships; `Backend` has 9
+  implementations (5 ms).
+
 ## Next
 
 1. Bake-off reported 2026-10-25 (README "Against the code-map bake-off"):

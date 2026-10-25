@@ -18,7 +18,7 @@ import std;
 import os;
 import dictionary;
 
-let SCHEMA_VERSION = 3;
+let SCHEMA_VERSION = 4;
 
 let SCHEMA = """
     CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
@@ -38,6 +38,15 @@ let SCHEMA = """
         in_repo INTEGER NOT NULL
     );
     CREATE UNIQUE INDEX symbols_scip ON symbols (scip);
+    CREATE TABLE relationships (
+        symbol_id INTEGER NOT NULL,      -- implements, overrides or is typed as ...
+        related_id INTEGER NOT NULL,     -- ... this one
+        file TEXT NOT NULL,              -- where symbol_id is defined
+        is_impl INTEGER NOT NULL,
+        is_ref INTEGER NOT NULL,
+        is_typedef INTEGER NOT NULL,
+        is_def INTEGER NOT NULL
+    );
     CREATE TABLE occurrences (
         symbol_id INTEGER NOT NULL,
         file TEXT NOT NULL,
@@ -59,6 +68,9 @@ let INDEXES = """
     CREATE INDEX occurrences_symbol ON occurrences (symbol_id, is_def);
     CREATE INDEX occurrences_file ON occurrences (file, start_line);
     CREATE INDEX occurrences_enclosing ON occurrences (enclosing_id);
+    CREATE INDEX relationships_symbol ON relationships (symbol_id);
+    CREATE INDEX relationships_related ON relationships (related_id);
+    CREATE INDEX relationships_file ON relationships (file);
     """;
 
 struct Sym {
@@ -88,6 +100,9 @@ fn index_main(dir: const u8[:], db_path: const u8[:], root: const u8[:], refresh
     let b = text.len;
     guard read_file(str(dir, "/extents.tsv"), text) else { abort(str("cannot read ", dir, "/extents.tsv")); }
     let c = text.len;
+    // Optional: rows flattened before relationships existed have none.
+    read_file(str(dir, "/relationships.tsv"), text);
+    let r = text.len;
     guard read_file(str(dir, "/occurrences.tsv"), text) else { abort(str("cannot read ", dir, "/occurrences.tsv")); }
     let d = text.len;
 
@@ -137,6 +152,7 @@ fn index_main(dir: const u8[:], db_path: const u8[:], root: const u8[:], refresh
     let get_hash = prepare_or_die(db, "SELECT hash FROM files WHERE file = ?1");
     let put_file = prepare_or_die(db, "INSERT OR REPLACE INTO files VALUES (?1, ?2, ?3)");
     let drop_occ = prepare_or_die(db, "DELETE FROM occurrences WHERE file = ?1");
+    let drop_rel = prepare_or_die(db, "DELETE FROM relationships WHERE file = ?1");
     let reset_defs = prepare_or_die(db, """
         UPDATE symbols SET def_file = NULL, def_line = NULL, def_col = NULL,
                            body_start = NULL, body_end = NULL, in_repo = 0
@@ -157,6 +173,8 @@ fn index_main(dir: const u8[:], db_path: const u8[:], root: const u8[:], refresh
             if refresh {
                 swan_bind_text(drop_occ, 1, file);
                 step_done(drop_occ);
+                swan_bind_text(drop_rel, 1, file);
+                step_done(drop_rel);
                 swan_bind_text(reset_defs, 1, file);
                 step_done(reset_defs);
             }
@@ -174,6 +192,7 @@ fn index_main(dir: const u8[:], db_path: const u8[:], root: const u8[:], refresh
         swan_finalize(gone);
         exec_or_die(db, """
             DELETE FROM occurrences WHERE file NOT IN (SELECT file FROM temp.seen);
+            DELETE FROM relationships WHERE file NOT IN (SELECT file FROM temp.seen);
             UPDATE symbols SET def_file = NULL, def_line = NULL, def_col = NULL,
                                body_start = NULL, body_end = NULL, in_repo = 0
             WHERE def_file NOT IN (SELECT file FROM temp.seen);
@@ -183,6 +202,7 @@ fn index_main(dir: const u8[:], db_path: const u8[:], root: const u8[:], refresh
     swan_finalize(get_hash);
     swan_finalize(put_file);
     swan_finalize(drop_occ);
+    swan_finalize(drop_rel);
     swan_finalize(reset_defs);
     swan_finalize(put_seen);
 
@@ -263,7 +283,7 @@ fn index_main(dir: const u8[:], db_path: const u8[:], root: const u8[:], refresh
     // occurrences.tsv: symbol, file, start_line, start_col, end_line, end_col, def|ref
     let ins_occ = prepare_or_die(db, "INSERT INTO occurrences VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)");
     var occ_count = 0;
-    each_split(text[c..d], '\n') {
+    each_split(text[r..d], '\n') {
         guard it.len > 0;
         let f = split(it, '\t');
         guard changed.contains(f[1]);
@@ -293,6 +313,28 @@ fn index_main(dir: const u8[:], db_path: const u8[:], root: const u8[:], refresh
         occ_count++;
     };
     swan_finalize(ins_occ);
+
+    // relationships.tsv: symbol, file, related_symbol, flags (impl,ref,type,def)
+    let ins_rel = prepare_or_die(db, "INSERT INTO relationships VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)");
+    var rel_count = 0;
+    each_split(text[c..r], '\n') {
+        guard it.len > 0;
+        let f = split(it, '\t');
+        guard f.len >= 4 && changed.contains(f[1]);
+        let k = intern(f[0]);
+        let j = intern(f[2]);
+        let flags = split(f[3], ',');
+        swan_bind_int(ins_rel, 1, syms[k].db_id);
+        swan_bind_int(ins_rel, 2, syms[j].db_id);
+        swan_bind_text(ins_rel, 3, f[1]);
+        swan_bind_int(ins_rel, 4, if flags.contains("impl") { 1 } else { 0 });
+        swan_bind_int(ins_rel, 5, if flags.contains("ref") { 1 } else { 0 });
+        swan_bind_int(ins_rel, 6, if flags.contains("type") { 1 } else { 0 });
+        swan_bind_int(ins_rel, 7, if flags.contains("def") { 1 } else { 0 });
+        step_done(ins_rel);
+        rel_count++;
+    };
+    swan_finalize(ins_rel);
     swan_finalize(find_sym);
     swan_finalize(add_sym);
 
@@ -328,7 +370,7 @@ fn index_main(dir: const u8[:], db_path: const u8[:], root: const u8[:], refresh
 
     // A symbol nothing mentions any more goes.
     if refresh {
-        exec_or_die(db, "DELETE FROM symbols WHERE in_repo = 0 AND id NOT IN (SELECT symbol_id FROM occurrences);");
+        exec_or_die(db, "DELETE FROM symbols WHERE in_repo = 0 AND id NOT IN (SELECT symbol_id FROM occurrences) AND id NOT IN (SELECT related_id FROM relationships);");
     }
 
     let ins_meta = prepare_or_die(db, "INSERT OR REPLACE INTO meta VALUES (?1, ?2)");
@@ -359,6 +401,6 @@ fn index_main(dir: const u8[:], db_path: const u8[:], root: const u8[:], refresh
     }
     print(if refresh { "swan refresh: " } else { "swan index: " }, changed.count, " of ", hashes.count,
           " files rewritten", if removed > 0 { str(", ", removed, " removed") } else { str("") },
-          "; ", occ_count, " occurrences written; map has ", n_syms, " symbols, ", n_occ,
+          "; ", occ_count, " occurrences and ", rel_count, " relationships written; map has ", n_syms, " symbols, ", n_occ,
           " occurrences -> ", db_path, " in ", ((clock() - t0) * 1000.0) as i64, " ms");
 }

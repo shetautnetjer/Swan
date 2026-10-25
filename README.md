@@ -20,7 +20,8 @@ package's name and version. The roadmap, most valuable first:
 2. Per-file refresh, so the map stays current while the agent edits: done
    (`swan refresh`, `scripts/refresh-repo.sh`).
 3. Tests for a symbol (partly there: `get_callers` flags test files).
-4. Types and implementations, from SCIP relationships.
+4. Implementations and type hierarchy, from SCIP relationships: done
+   (`find_implementations`, `get_type_hierarchy`).
 5. Dependency insight: which packages and versions the code leans on.
 6. Live errors, from `tsc` or a language server (not SCIP).
 7. Hot and fragile code, from git history.
@@ -75,6 +76,8 @@ only that whole path. Lines and columns in answers are 1-based.
 | `get_symbols_overview` | `relative_path` (file or directory) | every symbol defined there, in order |
 | `get_callers` | `name_path`, `relative_path?`, `depth?` (1 to 5), `max_results?` | who uses the symbol, and who uses those: the impact radius, with each caller's distance and whether it is test code, and a summary of affected symbols, files and test files |
 | `get_callees` | `name_path`, `relative_path?`, `max_results?` | what the symbol's body uses, with counts; dependency symbols show their package and version |
+| `find_implementations` | `name_path`, `relative_path?`, `max_results?` | what implements, extends or overrides it (classes behind an interface, overrides of a method), with distance |
+| `get_type_hierarchy` | `name_path`, `relative_path?`, `depth?`, `max_results?` | supertypes and subtypes, from SCIP relationships |
 | `index_info` | none | repo root, build time, counts: for judging staleness |
 
 ## Use
@@ -111,6 +114,7 @@ bake-off's `index.scip`:
 | `find_referencing_symbols` | 1.0 to 2.1 ms median, p95 under 3.6 ms | 260 to 510 references, each with its source line |
 | `get_callers`, depth 3 | 20 to 26 ms, fresh process | `getBackend`: 768 symbols in 355 files, 180 of them test files |
 | `get_callees` | 0.9 ms, fresh process | 82 symbols used by `createRuntime` |
+| `find_implementations` | 5 ms, fresh process | `Backend` interface: 9 implementing classes, several of them test fakes |
 
 These are a first slice's numbers, not a qualified benchmark. Correctness
 against Serena is the bake-off's job and is not claimed here.

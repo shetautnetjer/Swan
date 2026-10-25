@@ -18,8 +18,8 @@ The JetBrains back end adds refactoring tools that LSP lacks.
 | `find_referencing_symbols` | `find_referencing_symbols` (with enclosing symbol and source line) | done |
 | `get_symbols_overview` | `get_symbols_overview` (file or directory) | done |
 | `find_declaration` | covered by `find_symbol`; no "declaration at this file and line" lookup | partial |
-| `find_implementations` | missing (SCIP has `is_implementation` relationships; not flattened yet) | missing |
-| JetBrains `type_hierarchy` | missing (same SCIP relationships) | missing |
+| `find_implementations` | `find_implementations` (classes, subclasses, method overrides, any depth) | done |
+| JetBrains `type_hierarchy` | `get_type_hierarchy` (supertypes and subtypes) | done |
 | `get_diagnostics_for_file` / `_for_symbol` | missing (needs `tsc` or a language server; SCIP has no live errors) | missing |
 | JetBrains `list_inspections` / `run_inspections` | missing | missing |
 | (no Serena equivalent) | `get_callers` impact radius, `get_callees`, `index_info` | Swan only |
@@ -78,7 +78,7 @@ but TypeScript has been run through Swan.
 
 | Feature | Value to AYA | Data source | Effort |
 |---|---|---|---|
-| Find implementations, type hierarchy | high: "who implements this interface" before changing it | SCIP relationships (in the data, not flattened) | small |
+| Find implementations, type hierarchy | high: "who implements this interface" before changing it | SCIP relationships | done 2026-10-25 |
 | Symbol-level edits (`replace_symbol_body`, `insert_after_symbol`) | high: edits by symbol, not by line number | Swan's body ranges; refresh afterwards | small to medium |
 | Dead-code finding | medium: exported symbols with zero references | SCIP, one SQL query | small |
 | Hover docs | medium | SCIP `documentation` (first line kept now; keep all of it) | small |
@@ -90,8 +90,7 @@ but TypeScript has been run through Swan.
 
 ## 4. Recommended next steps
 
-1. **Implementations and type hierarchy:** flatten SCIP relationships and add
-   `find_implementations`. Small, closes a Serena gap.
+1. ~~Implementations and type hierarchy~~: done.
 2. **Freshness and dead code:** stamp each answer with whether its file
    changed since indexing, and add `find_unused_symbols`. Both are small, and
    freshness is what makes the map safe to trust.
