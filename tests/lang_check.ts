@@ -32,5 +32,41 @@ if (run("js")) {
   check("js: the repo was not written to (no tsconfig.json appeared)", !(await Bun.file("fixtures/tiny-js/tsconfig.json").exists()));
 }
 
+if (run("python")) {
+  // A copy with its own virtualenv holding `requests`, made with uv.
+  const w = "data/py-check";
+  sh(["rm", "-rf", w]);
+  sh(["mkdir", "-p", w]);
+  sh(["cp", "-r", "fixtures/tiny-py", `${w}/repo`]);
+  sh(["uv", "venv", "-q", `${w}/repo/.venv`]);
+  sh(["uv", "pip", "install", "-q", "--python", `${w}/repo/.venv/bin/python`, "requests==2.32.5"]);
+  sh(["bin/swan", "map", `${w}/repo`, `${w}/map`]);
+  sh(["bin/swan", "check", `${w}/repo`, `${w}/map`]);
+  const q = (...a: string[]) => JSON.parse(sh(["bin/swan", "query", `${w}/map/swan.db`, ...a]));
+  check("python: Square and Circle implement Shape",
+    q("impls", "Shape").implementations.map((s: any) => s.name_path).sort().join(",") === "Circle,Square");
+  check("python: both area() methods override Shape.area",
+    q("hierarchy", "Shape/area").subtypes.map((s: any) => s.name_path).sort().join(",") === "Circle/area,Square/area");
+  const callees = q("callees", "fetch_status").callees;
+  check("python: requests.get resolves to the venv's requests 2.32.5",
+    callees.some((c: any) => c.name_path === "get" && c.package === "requests 2.32.5"), callees);
+  check("python: pyright finds no errors in the clean fixture (requests imports resolve)", q("diagfile", ".").map_total.errors === 0);
+  check("python: top-level functions and methods are told apart",
+    q("symbol", "total_area")[0]?.kind === "function" && q("symbol", "Square/area")[0]?.kind === "method");
+
+  // Break Square's constructor; pyright should report it in Square's callers.
+  const srv = Bun.spawnSync(["bin/swan", "serve", `${w}/map/swan.db`], {
+    stdin: Buffer.from(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "replace_symbol_body",
+      arguments: { name_path: "Square/__init__", relative_path: "shapes/__init__.py",
+        body: "def __init__(self, side: float, unit: str) -> None:\n        self.side = side\n        self.unit = unit" } } }) + "\n"),
+    stdout: "pipe" });
+  check("python: replace_symbol_body on a method", !JSON.parse(srv.stdout.toString()).result.isError, srv.stdout.toString());
+  sh(["bin/swan", "check", `${w}/repo`, `${w}/map`]);
+  const diag = q("diag", "Square", "shapes/__init__.py").diagnostics;
+  const inSyms = diag.filter((d: any) => d.severity === "error").map((d: any) => d.in_symbol).sort();
+  check("python: pyright's errors land in Square's callers, report and ShapeTests.test_square",
+    inSyms.includes("report") && inSyms.includes("ShapeTests/test_square"), diag);
+}
+
 console.log(failures ? `${failures} check(s) failed` : "all language checks passed");
 process.exit(failures ? 1 : 0);

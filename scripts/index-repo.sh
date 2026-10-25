@@ -1,9 +1,5 @@
 #!/usr/bin/env bash
-# Maps a repository: every SCIP indexer it needs -> flatten -> swan index.
+# Maps a repository (or refreshes its map): `swan map` runs every SCIP
+# indexer it needs, flattens, and indexes. Kept for older callers.
 #   scripts/index-repo.sh <repo> <out-dir>
-# Leaves <out-dir>/index-<language>.scip, the TSV rows, and <out-dir>/swan.db.
-# The repo itself is only read.
-set -euo pipefail
-here="$(cd "$(dirname "$0")/.." && pwd)"
-"$here/scripts/scip-run.sh" "$1" "$2"
-"$here/bin/swan" index "$2" "$2/swan.db" "$(cd "$1" && pwd)"
+exec "$(cd "$(dirname "$0")/.." && pwd)/bin/swan" map "$1" "$2"

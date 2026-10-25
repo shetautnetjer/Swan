@@ -21,9 +21,11 @@ as_of: 2026-10-25
 Swan has no live compiler: Goose cannot start processes, and a language
 server per repo is what Swan exists to avoid. So:
 
-1. `tools/diagnostics.ts` runs each language's own checker, `tsc --noEmit`
-   and `cargo check --message-format=json`, and writes `diagnostics.tsv`.
-   `scripts/diagnose-repo.sh` runs it and then `swan diagnostics`.
+1. `swan check <repo> <out-dir>` (or the MCP tool `check_errors`) runs each
+   language's own checker: `tsc --noEmit` with the repo's tsconfig, `cargo
+   check --message-format=json`, and `pyright --outputjson` against the
+   repo's interpreter. Goose starts them through the C shim's `swan_run`
+   and parses their output itself.
 2. `swan diagnostics` loads the rows and pins each one to the innermost
    symbol it falls in, or to its file's module for top-level code.
 3. `get_diagnostics` answers three questions:
@@ -43,7 +45,11 @@ with `depth: 1`. What broke shows up where it broke, in the callers.
 
 - Diagnostics are as fresh as the last check (tsc on the fixture is about a
   second; `cargo check` on a 4-crate workspace about 4 s once built).
-- Python has no checker wired in yet: pyright is not installed here.
+- pyright runs in its "standard" mode unless the repo configures it, which
+  on untyped code reports a lot (40,000 on the Python repo below, mostly
+  optional-member and attribute access). Ask per symbol, or use
+  `errors_only`, rather than reading the whole list.
+- tsc runs only for repos with their own tsconfig.json.
 - A diagnostic in a file Swan never mapped has no symbol.
 - Like Serena's tool, this reports what the compiler says. It does not guess
   at bugs the compiler cannot see. `get_callers`, `find_unused_symbols` and

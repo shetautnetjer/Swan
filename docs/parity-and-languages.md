@@ -73,7 +73,7 @@ Both runs used private repos, read-only. Only the findings are recorded here.
 
 **Python: scip-python 0.6.8 on a 2,853-file research repo (22 MB of .py).**
 - SCIP run: 132 s and 10 GB of memory. The default Node heap ran out at
-  4.4 GB, so `scripts/scip-run.sh` raises it (`SWAN_NODE_HEAP_MB`, default
+  4.4 GB, so `swan map` raises it (`SWAN_NODE_HEAP_MB`, default
   16000).
 - Swan's own work: flatten 1.5 s, `swan index` 2.6 s. The map has 1,162,302
   occurrences, 3,186 inheritance links and 150,745 symbols.
@@ -86,8 +86,16 @@ Both runs used private repos, read-only. Only the findings are recorded here.
 - Gaps:
   - scip-python sets no SCIP kind, so Swan reads `def`/`class` from the
     signature.
-  - It needs `pip` to list installed packages. Without pip, Swan passes an
-    empty environment, and third-party packages resolve as names only.
+  - It needs `pip` to list installed packages. Without pip, `swan map` now
+    builds the same list from Python's own `importlib.metadata`, and uses the
+    repo's `.venv`/`venv` when there is one. Outside symbols then carry their
+    package and version (`requests 2.32.5` in `fixtures/tiny-py`). Some
+    standard-library members still come out labelled with the project's
+    name instead of `python-stdlib`: a scip-python quirk, harmless to
+    queries.
+  - Rechecked on 2026-10-25 with the new pipeline: the same 10 functions,
+    the same result (110 of rg's 122 lines, every one real). `swan map` took
+    159 s, 139 s of it scip-python. `swan check` (pyright) took 56 s.
   - String-based dynamic access is invisible.
 - Inheritance works: `find_implementations` on `TestCase` lists its 1,727
   subclasses.
@@ -123,7 +131,7 @@ workspace (21 .rs files), mapped together with its one Python file.**
     `impl/Tile/Area/area`.
   - rust-analyzer logs "definition should have been in an SCIP document"
     for a few symbols (6 here).
-  - It runs `cargo` and writes build output. `scripts/scip-run.sh` points
+  - It runs `cargo` and writes build output. `swan map` points
     `CARGO_TARGET_DIR` into the output folder. Cargo still writes a
     `Cargo.lock` into a repo that has none, so map a copy of such a repo.
 
@@ -133,7 +141,7 @@ TypeScript-specific spots. `kind_word` reads scip-typescript's signature
 wording, and test-file detection uses JS naming. Done 2026-10-25: a
 `language` column, kinds from the signature, then SCIP's kind, then the
 descriptor (so Python's `def` is a function or method), Python test-file
-names, and `scripts/scip-run.sh` running every indexer a repo needs.
+names, and `swan map` running every indexer a repo needs.
 
 ## 3. IDE features beyond the finished roadmap steps
 

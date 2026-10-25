@@ -95,6 +95,8 @@ Every answer about a file that changed after the SCIP run carries
 ```bash
 scripts/fetch-tools.sh                          # Goose and rust-analyzer (sha256-pinned) into .tools/, scip-typescript and scip-python into tools/
 scripts/build.sh                                # bin/swan
+bin/swan map <repo> data/<name>                 # every indexer the repo needs -> map (refreshes if it exists)
+bin/swan check <repo> data/<name>               # tsc / cargo check / pyright -> diagnostics in the map
 scripts/index-repo.sh <ts-repo> data/<name>     # index.scip, TSV rows, swan.db
 scripts/refresh-repo.sh <ts-repo> data/<name>   # after edits: rerun SCIP, rewrite only changed files
 scripts/diagnose-repo.sh <ts-repo> data/<name>  # tsc / cargo check, loaded into the map
@@ -172,8 +174,8 @@ The bake-off made two recommendations:
   a type use or an import. A class's callees are what its own body uses
   outside its methods; ask about a method for what that method uses.
 
-- Tried with TypeScript, Python and Rust (`scripts/scip-run.sh` picks the
-  indexers). Go, Java, C/C++, C# and Ruby are untried. What each tried
+- Tried with TypeScript, JavaScript (.js/.mjs/.cjs), Python and Rust
+  (`swan map` picks the indexers). Go, Java, C/C++, C# and Ruby are untried. What each tried
   indexer misses is in `docs/parity-and-languages.md`.
 - scip-typescript has no per-file mode, so every refresh reruns it over the
   whole repo (~17 s on the repo above). Swan's own part is 0.23 s.

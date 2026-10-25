@@ -52,7 +52,7 @@ fn is_stale(file: const u8[:]) -> bool {
     return m > fresh_scip_time && m != edited_mtime(file);
 }
 
-// When the SCIP run started: the marker scripts/scip-run.sh leaves, or else
+// When the SCIP run started: the marker `swan map` leaves, or else
 // index.scip beside the rows, or the rows themselves.
 fn scip_time_of(dir: const u8[:]) -> i64 {
     let started = swan_mtime_ns(str(dir, "/scip-started"));

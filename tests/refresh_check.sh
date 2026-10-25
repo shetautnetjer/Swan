@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Edits a copy of the fixture, reruns SCIP, and checks that `swan refresh` of
-# the old map gives exactly what a fresh `swan index` of the new rows gives.
+# the old map gives exactly what a fresh `swan map` of the edited repo gives.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 work=data/refresh-check
@@ -17,11 +17,10 @@ rm "$work/repo/src/format.ts"
 sed -i 's/^export class Crate implements Weighed {$/export class Crate {/' "$work/repo/src/kinds.ts"
 sed -i 's|^export { format as formatItem } from "./format";$|export const formatItem = (x: unknown) => String(x);|' "$work/repo/src/index.ts"
 sed -i 's|^import { total } from "./format";$|const total = (xs: Item[]) => xs.length;|' "$work/repo/src/main.ts"
-scripts/scip-run.sh "$work/repo" "$work/after" >/dev/null 2>&1
+bin/swan map "$work/repo" "$work/after" >/dev/null 2>&1      # a fresh build of the edited repo
 bin/swan refresh "$work/after" "$work/refreshed.db"
-bin/swan index "$work/after" "$work/fresh.db" "$PWD/$work/repo" >/dev/null
 python3 tests/dump.py "$work/refreshed.db" | grep -v '^F' > "$work/refreshed.txt"
-python3 tests/dump.py "$work/fresh.db" | grep -v '^F' > "$work/fresh.txt"
+python3 tests/dump.py "$work/after/swan.db" | grep -v '^F' > "$work/fresh.txt"
 if diff -u "$work/fresh.txt" "$work/refreshed.txt" > "$work/diff.txt"; then
   echo "ok   refresh matches a fresh build ($(wc -l < "$work/fresh.txt") rows)"
 else

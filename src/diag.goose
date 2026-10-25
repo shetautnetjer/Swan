@@ -1,5 +1,5 @@
 // Where errors are, and where an edit could cause them. The compilers'
-// own diagnostics (tools/diagnostics.ts runs tsc and cargo check) are loaded
+// own diagnostics (`swan check` runs tsc, cargo check and pyright) are loaded
 // into the map and pinned to the innermost symbol they fall in. A question
 // about a symbol can then take in its callers too. This is Serena's
 // get_diagnostics_for_symbol with check_symbol_references, and the use that
@@ -29,7 +29,7 @@ let DIAG_TABLE = """
 
 // `swan diagnostics <dir> <db>`: replaces the map's diagnostics with
 // <dir>/diagnostics.tsv.
-fn diagnostics_main(dir: const u8[:], db_path: const u8[:]) {
+fn diagnostics_main(dir: const u8[:], db_path: const u8[:], report: u8[>..]&) {
     let t0 = clock();
     var text: u8[>..] = [];
     let path = str(dir, "/diagnostics.tsv");
@@ -75,7 +75,7 @@ fn diagnostics_main(dir: const u8[:], db_path: const u8[:]) {
     swan_finalize(m);
     exec_or_die(db, "COMMIT;");
     swan_db_close(db);
-    print("swan diagnostics: ", n, " loaded (", errors, " errors) into ", db_path, " in ",
+    format(report, "swan diagnostics: ", n, " loaded (", errors, " errors) into ", db_path, " in ",
           ((clock() - t0) * 1000.0) as i64, " ms");
 }
 

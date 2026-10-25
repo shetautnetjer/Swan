@@ -14,10 +14,14 @@ import .graph;
 import .fresh;
 import .edit;
 import .diag;
+import .run;
+import .pipeline;
 
 fn usage() {
     write_stderr("""
-        usage: swan index <flattened-dir> <db> [repo-root]
+        usage: swan map <repo> <out-dir>        index every language in the repo (or refresh)
+               swan check <repo> <out-dir>      run tsc / cargo check / pyright into the map
+               swan index <flattened-dir> <db> [repo-root]
                swan refresh <flattened-dir> <db> [repo-root]
                swan diagnostics <dir-with-diagnostics.tsv> <db>
                swan query <db> symbol|refs|uses|overview|callers|callees|impls|hierarchy|unused|info|diag|diagfile <arg> [relative_path]
@@ -40,9 +44,13 @@ fn main() {
     let a = args();
     if a.len < 2 { usage(); }
     if a[1] == "index" && a.len >= 4 {
-        index_main(a[2], a[3], if a.len > 4 { a[4] } else { "" }, false);
+        var report: u8[>..] = [];
+        index_main(a[2], a[3], if a.len > 4 { a[4] } else { "" }, false, report);
+        print(report);
     } else if a[1] == "refresh" && a.len >= 4 {
-        index_main(a[2], a[3], if a.len > 4 { a[4] } else { "" }, true);
+        var report: u8[>..] = [];
+        index_main(a[2], a[3], if a.len > 4 { a[4] } else { "" }, true, report);
+        print(report);
     } else if a[1] == "query" && a.len >= 5 {
         let db = open_db(a[2]);
         let rel = if a.len > 5 { a[5] } else { "" };
@@ -61,8 +69,20 @@ fn main() {
         else if a[3] == "hierarchy" { get_type_hierarchy(db, a[4], rel, 3, 200, out); }
         else { usage(); }
         print(out);
+    } else if a[1] == "map" && a.len == 4 {
+        var report: u8[>..] = [];
+        let ok = map_main(a[2], a[3], report);
+        print(report);
+        if !ok { exit(1); }
+    } else if a[1] == "check" && a.len == 4 {
+        var report: u8[>..] = [];
+        let ok = check_main(a[2], a[3], report);
+        print(report);
+        if !ok { exit(1); }
     } else if a[1] == "diagnostics" && a.len == 4 {
-        diagnostics_main(a[2], a[3]);
+        var report: u8[>..] = [];
+        diagnostics_main(a[2], a[3], report);
+        print(report);
     } else if a[1] == "serve" && a.len == 3 {
         serve_main(a[2]);
     } else { usage(); }

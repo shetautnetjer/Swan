@@ -104,7 +104,8 @@ fn field_int(s: const u8[:]) -> i64 {
     return v;
 }
 
-fn index_main(dir: const u8[:], db_path: const u8[:], root: const u8[:], refresh: bool) {
+// Appends a one-line account of what it did to `report`.
+fn index_main(dir: const u8[:], db_path: const u8[:], root: const u8[:], refresh: bool, report: u8[>..]&) {
     let t0 = clock();
     var text: u8[>..] = [];
     let a = text.len;
@@ -424,7 +425,7 @@ fn index_main(dir: const u8[:], db_path: const u8[:], root: const u8[:], refresh
     if !refresh {
         guard rename_file(tmp, db_path) else { abort(str("swan index: cannot rename ", tmp, " to ", db_path)); }
     }
-    print(if refresh { "swan refresh: " } else { "swan index: " }, changed.count, " of ", hashes.count,
+    format(report, if refresh { "swan refresh: " } else { "swan index: " }, changed.count, " of ", hashes.count,
           " files rewritten", if removed > 0 { str(", ", removed, " removed") } else { str("") },
           "; ", occ_count, " occurrences and ", rel_count, " relationships written; map has ", n_syms, " symbols, ", n_occ,
           " occurrences -> ", db_path, " in ", ((clock() - t0) * 1000.0) as i64, " ms");

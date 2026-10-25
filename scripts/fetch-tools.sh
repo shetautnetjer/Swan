@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Fetches the pinned Goose compiler and rust-analyzer into .tools/ and the
-# SCIP indexers for TypeScript and Python into tools/node_modules. Nothing is
+# SCIP indexers for TypeScript and Python, and pyright, into tools/node_modules. Nothing is
 # installed system-wide.
 set -euo pipefail
 cd "$(dirname "$0")/.."

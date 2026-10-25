@@ -47,7 +47,7 @@ as_of: 2026-10-25
 ## 2026-10-25 (late): Python and Rust
 
 - scip-python 0.6.8 and rust-analyzer 2026-10-19 wired in through
-  `scripts/scip-run.sh` (language detection, empty pip env, Node heap,
+  `scripts/scip-run.sh` (since replaced by `swan map`; language detection, empty pip env, Node heap,
   CARGO_TARGET_DIR kept out of the repo). Schema 5 adds `symbols.language`;
   kinds are portable across languages.
 - Tested on two private repos: a Python research repo, and a copy of a
@@ -74,10 +74,21 @@ as_of: 2026-10-25
 
 ## 2026-10-25 (late night): diagnostics
 
-- `tools/diagnostics.ts` (tsc, cargo check) + `swan diagnostics` +
+- `tools/diagnostics.ts` (since replaced by `swan check`) + `swan diagnostics` +
   `get_diagnostics` with caller depth; `scripts/diagnose-repo.sh`.
   `tests/diag_check.ts` breaks fixture copies (TS and Rust) and checks the
   errors land in the callers. Design notes: docs/diagnostics.md.
+
+## 2026-10-26: Goose runs the pipeline; Python done properly; JS without tsconfig
+
+- C shim gains `swan_run` (fork/exec, pipes, timeout) and realpath; Goose
+  orchestrates `swan map` and `swan check`, also exposed as the MCP tools
+  `update_map` and `check_errors`. scip-run.sh and tools/diagnostics.ts are
+  gone; the scripts now call swan.
+- Python: venv detection, importlib.metadata package list when pip is
+  missing, pyright 1.1.414 diagnostics. fixtures/tiny-py + tests/lang_check.ts.
+- JS: .js/.mjs/.cjs repos without a tsconfig mapped with a generated one
+  outside the repo. fixtures/tiny-js.
 
 ## Next
 
