@@ -1,0 +1,5 @@
+// Swan's native part: SQLite (vendored amalgamation) and the thin shim over it.
+c_sources = ["../native/swan_sqlite.c", "../vendor/sqlite/sqlite3.c"];
+c_include = ["../vendor/sqlite"];
+c_defines = ["SQLITE_OMIT_LOAD_EXTENSION=1", "SQLITE_THREADSAFE=0", "SQLITE_DQS=0", "SQLITE_DEFAULT_MEMSTATUS=0"];
+output = "swan";

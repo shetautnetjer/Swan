@@ -1,0 +1,8 @@
+{
+  "name": "swan-tools",
+  "private": true,
+  "description": "Swan's indexer-side helpers: SCIP generation and flattening",
+  "dependencies": {
+    "@sourcegraph/scip-typescript": "0.5.2"
+  }
+}
