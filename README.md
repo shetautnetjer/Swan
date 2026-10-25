@@ -17,7 +17,8 @@ indexers cover both: they record references into dependencies with each
 package's name and version. The roadmap, most valuable first:
 
 1. Call graph and impact radius: done (`get_callers`, `get_callees`).
-2. Per-file refresh, so the map stays current while the agent edits.
+2. Per-file refresh, so the map stays current while the agent edits: done
+   (`swan refresh`, `scripts/refresh-repo.sh`).
 3. Tests for a symbol (partly there: `get_callers` flags test files).
 4. Types and implementations, from SCIP relationships.
 5. Dependency insight: which packages and versions the code leans on.
@@ -82,9 +83,10 @@ only that whole path. Lines and columns in answers are 1-based.
 scripts/fetch-tools.sh                          # Goose v2026.3 (sha256-pinned) into .tools/, scip-typescript into tools/
 scripts/build.sh                                # bin/swan
 scripts/index-repo.sh <ts-repo> data/<name>     # index.scip, TSV rows, swan.db
+scripts/refresh-repo.sh <ts-repo> data/<name>   # after edits: rerun SCIP, rewrite only changed files
 bin/swan serve data/<name>/swan.db              # MCP over stdio
 bin/swan query data/<name>/swan.db refs getBackend   # the same answers on the command line
-scripts/test.sh                                 # build, map the fixture, drive the MCP end to end
+scripts/test.sh                                 # build, map the fixture, drive the MCP end to end, check refresh
 ```
 
 An MCP client entry looks like:
@@ -102,7 +104,8 @@ bake-off's `index.scip`:
 |---|---|---|
 | scip-typescript | ~17 s | bake-off log; full rerun only |
 | flatten | 0.6 s | 706,200 occurrences, 93,363 symbols, 15,791 extents |
-| `swan index` | 0.75 s | 145 MB peak RSS; 135 MB database |
+| `swan index` | 1.25 s | 2,309 files; 135 MB database |
+| `swan refresh`, one file edited | 0.23 s | 244 rows rewritten; result identical to a fresh build. 0.22 s of it is reading and fingerprinting all rows, so a no-op refresh costs the same |
 | MCP cold start | 4.9 ms | spawn + initialize + first `find_referencing_symbols` |
 | `find_symbol` | 0.03 to 0.05 ms median | |
 | `find_referencing_symbols` | 1.0 to 2.1 ms median, p95 under 3.6 ms | 260 to 510 references, each with its source line |
@@ -138,11 +141,13 @@ The bake-off made two recommendations:
 - **Lookup by short name:** already in Swan. Its `name` and `name_path`
   columns are indexed, so `find_symbol isRecord` returns the candidates and
   `relative_path` picks one.
-- **Incremental per-file reindex:** not built yet. Swan's schema is the
-  bake-off's SQLite shape, where one file updated in 17 ms. Its safe-update
-  advice applies here too: after a SCIP rerun, compare rows file by file and
-  replace only the files that changed. The SCIP rerun itself (~16.5 s, full
-  repo only) stays the real bottleneck.
+- **Incremental per-file reindex:** built, following its safe-update advice.
+  `swan refresh` fingerprints each file's rows from the new SCIP run and
+  rewrites only the files whose rows changed, in one transaction. Those
+  include files whose resolution changed because of an edit elsewhere. On the
+  same one-file edit it took 0.23 s against the bake-off's 17 ms, because
+  Swan reads and fingerprints every row instead of being handed the edited
+  file's rows. Either way the SCIP rerun (~16.5 s) is the real cost.
 
 ## Limits of this slice
 
@@ -152,8 +157,8 @@ The bake-off made two recommendations:
 
 - TypeScript only, through scip-typescript. Other SCIP indexers (Python,
   Rust, Go, Java) should work unchanged but have not been tried.
-- Refresh is a full rebuild (SCIP rerun ~17 s on the repo above, then under 2 s for
-  Swan). The schema allows per-file replacement; it is not written yet.
+- scip-typescript has no per-file mode, so every refresh reruns it over the
+  whole repo (~17 s on the repo above). Swan's own part is 0.23 s.
 - Read-only: no Serena-style edits (`replace_symbol_body`, `insert_after_symbol`).
 - File paths are stored as text on every row; a files table would shrink the
   database severalfold.
@@ -163,7 +168,8 @@ The bake-off made two recommendations:
 
 ```
 src/swan.goose       CLI: index | query | serve
-src/index.goose      builds the map into SQLite (atomic: writes .tmp, renames)
+src/index.goose      builds (atomic: writes .tmp, renames) or refreshes the map
+src/graph.goose      callers and callees
 src/scip.goose       SCIP symbol grammar: name, kind, name path
 src/query.goose      the tool queries, as JSON
 src/serve.goose      MCP JSON-RPC over stdio
@@ -172,7 +178,7 @@ src/swan.build       Goose sidecar: compiles the shim and SQLite with the progra
 native/swan_sqlite.c the shim
 vendor/sqlite/       SQLite 3.54.1 amalgamation (public domain)
 tools/               scip-flatten.ts, scip-typescript
-tests/               MCP smoke test, latency bench
+tests/               MCP smoke test, refresh-vs-fresh check, latency bench
 fixtures/tiny-ts/    a small repo with the tricky cases (re-export, rename, same-name method and function)
 ```
 

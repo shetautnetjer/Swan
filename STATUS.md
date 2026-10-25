@@ -16,10 +16,23 @@ as_of: 2026-10-25
   any language besides TypeScript, incremental refresh.
 - Not done: registered as an MCP server for AYA (no AYA config was changed).
 
+## 2026-10-25 (later): roadmap steps 1 and 2
+
+- Call graph: `get_callers` (impact radius to depth 5, test flags, summary)
+  and `get_callees` (with dependency package versions). Covered by the MCP
+  smoke test. AEON depth-3 impact: 20 to 26 ms.
+- Per-file refresh: `swan refresh` / `scripts/refresh-repo.sh`. Schema 3
+  (files table with row fingerprints; ids stable across refreshes).
+  `tests/refresh_check.sh` edits the fixture, reruns SCIP, and checks the
+  refreshed map equals a fresh build. On AEON a simulated one-file edit
+  refreshed in 0.23 s and matched a fresh build on all 802,618 dumped rows.
+- Published: github.com/shetautnetjer/Swan (public, MIT).
+
 ## Next
 
 1. Bake-off reported 2026-10-25 (README "Against the code-map bake-off"):
    Swan already has the SQLite fresh-start win; per-file refresh is next.
 2. Register `bin/swan serve <db>` with AYA's MCP config once the owner says so.
-3. Per-file refresh: rerun SCIP, replace one file's rows in SQLite.
+3. Roadmap 3 to 8 in the README (tests for a symbol, SCIP relationships,
+   dependency insight, live errors, git churn, more languages).
 4. Files table to shrink the database; Python via scip-python.

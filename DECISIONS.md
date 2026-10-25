@@ -31,3 +31,14 @@ start/end line/col, def|ref). Swan adds `symbols.tsv` (signature) and
 `extents.tsv` (definition spans, from SCIP's enclosing_range), which is how it
 reports the symbol each reference sits inside. One difference: Swan replaces
 tabs and newlines in symbol names with spaces; the bake-off escapes them.
+
+## 2026-10-25 — Refresh by fingerprinting each file's rows
+
+scip-typescript only reruns whole repos, so `swan refresh` takes the full
+new rows, hashes each file's rows, and rewrites the files whose hash differs
+(plus removed files), in one transaction. This catches files changed
+indirectly by an edit elsewhere, which an edited-files list would miss.
+Enclosing symbols are file-local, so unchanged files need no rework, and
+symbol ids stay stable (looked up by SCIP symbol, unique index). A full build
+uses the same code with every file marked changed. Cost: reading every row
+(0.22 s on AEON) even when nothing changed; fine next to the 16.5 s SCIP run.

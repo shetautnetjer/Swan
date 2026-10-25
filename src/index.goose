@@ -1,23 +1,73 @@
-// `swan index`: builds the code map from the flattened SCIP rows
-// (tools/scip-flatten.ts) into SQLite. Goose does the map work: it interns
-// symbols, parses their names and kinds, and finds the symbol each reference
-// sits inside. SQLite stores the result and answers queries. The database is
-// written beside its final path and renamed over it, so a reader never sees
-// half an index.
+// `swan index` and `swan refresh`: build or update the code map from the
+// flattened SCIP rows (tools/scip-flatten.ts) in SQLite. Goose does the map
+// work: it interns symbols, parses their names and kinds, and finds the
+// symbol each reference sits inside. SQLite stores the result and answers
+// queries.
+//
+// Both commands take the same input: the rows of a whole SCIP run, which is
+// the only kind scip-typescript makes. Each file's rows are fingerprinted.
+// `index` writes every file into a new database beside its final path and
+// renames it over, so a reader never sees half an index. `refresh` compares
+// fingerprints with the ones stored and rewrites only the files whose rows
+// changed, in one transaction. A file's rows change when the file was edited
+// and also when an edit elsewhere changed how it resolves (a rename, a moved
+// export), so this stays exact. Which symbol a reference sits inside depends
+// only on its own file's definitions, so unchanged files need no rework.
 
 import std;
 import os;
 import dictionary;
 
-let SCHEMA_VERSION = 2;
+let SCHEMA_VERSION = 3;
+
+let SCHEMA = """
+    CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
+    CREATE TABLE files (file TEXT PRIMARY KEY, hash TEXT NOT NULL, rows INTEGER NOT NULL);
+    CREATE TABLE symbols (
+        id INTEGER PRIMARY KEY,
+        scip TEXT NOT NULL,
+        name TEXT NOT NULL,
+        name_path TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        signature TEXT NOT NULL,
+        def_file TEXT,
+        def_line INTEGER,
+        def_col INTEGER,
+        body_start INTEGER,
+        body_end INTEGER,
+        in_repo INTEGER NOT NULL
+    );
+    CREATE UNIQUE INDEX symbols_scip ON symbols (scip);
+    CREATE TABLE occurrences (
+        symbol_id INTEGER NOT NULL,
+        file TEXT NOT NULL,
+        start_line INTEGER NOT NULL,
+        start_col INTEGER NOT NULL,
+        end_line INTEGER NOT NULL,
+        end_col INTEGER NOT NULL,
+        is_def INTEGER NOT NULL,
+        enclosing_id INTEGER
+    );
+    """;
+
+// Created after a full build's bulk load, which is faster than keeping them
+// up to date row by row.
+let INDEXES = """
+    CREATE INDEX symbols_name ON symbols (name);
+    CREATE INDEX symbols_name_path ON symbols (name_path);
+    CREATE INDEX symbols_def_file ON symbols (def_file);
+    CREATE INDEX occurrences_symbol ON occurrences (symbol_id, is_def);
+    CREATE INDEX occurrences_file ON occurrences (file, start_line);
+    CREATE INDEX occurrences_enclosing ON occurrences (enclosing_id);
+    """;
 
 struct Sym {
-    scip: const u8[:],
-    sig: const u8[:],
+    db_id: i64,
     def_file: const u8[:],
     line: i64, col: i64,             // the definition's name
     body_start: i64, body_end: i64,  // its whole span, -1 if SCIP gave none
     has_def: bool,
+    touched: bool,                   // its row needs writing
 }
 
 struct Ext { id: i64, sl: i64, sc: i64, el: i64, ec: i64 }
@@ -30,7 +80,7 @@ fn field_int(s: const u8[:]) -> i64 {
     return v;
 }
 
-fn index_main(dir: const u8[:], db_path: const u8[:], root: const u8[:]) {
+fn index_main(dir: const u8[:], db_path: const u8[:], root: const u8[:], refresh: bool) {
     let t0 = clock();
     var text: u8[>..] = [];
     let a = text.len;
@@ -41,26 +91,138 @@ fn index_main(dir: const u8[:], db_path: const u8[:], root: const u8[:]) {
     guard read_file(str(dir, "/occurrences.tsv"), text) else { abort(str("cannot read ", dir, "/occurrences.tsv")); }
     let d = text.len;
 
+    // symbols.tsv: symbol, display_name, kind, enclosing_symbol, signature/doc line
+    var sigs = dictionary<const u8[:], const u8[:]> {};
+    each_split(text[a..b], '\n') {
+        guard it.len > 0;
+        let f = split(it, '\t');
+        sigs.insert(f[0], if f.len > 4 { f[4] } else { f[0][0..0] });
+    };
+
+    // Each file's fingerprint: its extent and occurrence rows, in order.
+    var hashes = dictionary<const u8[:], u64> {};
+    var rows = dictionary<const u8[:], i64> {};
+    each_split(text[b..d], '\n') { line =>
+        guard line.len > 0;
+        let f = split(line, '\t');
+        hashes.update(f[1], 0) { h => h = hash_combine(h, hash(line)); };
+        rows.update(f[1], 0) { n => n += 1; };
+    };
+
+    // The database: a new one beside its final name, or the existing one.
+    let tmp = str(db_path, ".tmp");
+    let path = if refresh { db_path } else { tmp };
+    if !refresh && file_exists(tmp) { delete_file(tmp); }
+    if refresh && !file_exists(db_path) { abort(str("swan refresh: no index at ", db_path, "; run swan index first")); }
+    var err: u8[>..] = [];
+    let db = swan_db_open(path, err);
+    if db == 0 { abort(str("swan: cannot open ", path, ": ", err)); }
+    if refresh {
+        var version: u8[>..] = [];
+        meta_value(db, "schema_version", version);
+        if version != str(SCHEMA_VERSION) {
+            abort(str("swan refresh: index schema ", version, ", this swan writes ", SCHEMA_VERSION,
+                      "; rebuild it with swan index"));
+        }
+        exec_or_die(db, "BEGIN;");
+    } else {
+        exec_or_die(db, "PRAGMA journal_mode = OFF; PRAGMA synchronous = OFF;");
+        exec_or_die(db, SCHEMA);
+        exec_or_die(db, "BEGIN;");
+    }
+
+    // Which files to rewrite: those whose fingerprint differs from the stored
+    // one (all of them in a new database), and those no longer in the rows.
+    var changed = dictionary<const u8[:], bool> {};
+    let get_hash = prepare_or_die(db, "SELECT hash FROM files WHERE file = ?1");
+    let put_file = prepare_or_die(db, "INSERT OR REPLACE INTO files VALUES (?1, ?2, ?3)");
+    let drop_occ = prepare_or_die(db, "DELETE FROM occurrences WHERE file = ?1");
+    let reset_defs = prepare_or_die(db, """
+        UPDATE symbols SET def_file = NULL, def_line = NULL, def_col = NULL,
+                           body_start = NULL, body_end = NULL, in_repo = 0
+        WHERE def_file = ?1
+        """);
+    exec_or_die(db, "CREATE TEMP TABLE seen (file TEXT PRIMARY KEY);");
+    let put_seen = prepare_or_die(db, "INSERT INTO temp.seen VALUES (?1)");
+    hashes.each() { file, h =>
+        let fp = str(h);
+        swan_bind_text(put_seen, 1, file);
+        step_done(put_seen);
+        var stored: u8[>..] = [];
+        swan_bind_text(get_hash, 1, file);
+        if swan_step(get_hash, err) == 1 { swan_col_text(get_hash, 0, stored); }
+        swan_reset(get_hash);
+        if stored != fp {
+            changed.insert(file, true);
+            if refresh {
+                swan_bind_text(drop_occ, 1, file);
+                step_done(drop_occ);
+                swan_bind_text(reset_defs, 1, file);
+                step_done(reset_defs);
+            }
+            swan_bind_text(put_file, 1, file);
+            swan_bind_text(put_file, 2, fp);
+            let n = rows.get(file);
+            swan_bind_int(put_file, 3, if n { n } else { 0 });
+            step_done(put_file);
+        }
+    };
+    var removed = 0;
+    if refresh {
+        let gone = prepare_or_die(db, "SELECT count(*) FROM files WHERE file NOT IN (SELECT file FROM temp.seen)");
+        if swan_step(gone, err) == 1 { removed = swan_col_int(gone, 0); }
+        swan_finalize(gone);
+        exec_or_die(db, """
+            DELETE FROM occurrences WHERE file NOT IN (SELECT file FROM temp.seen);
+            UPDATE symbols SET def_file = NULL, def_line = NULL, def_col = NULL,
+                               body_start = NULL, body_end = NULL, in_repo = 0
+            WHERE def_file NOT IN (SELECT file FROM temp.seen);
+            DELETE FROM files WHERE file NOT IN (SELECT file FROM temp.seen);
+            """);
+    }
+    swan_finalize(get_hash);
+    swan_finalize(put_file);
+    swan_finalize(drop_occ);
+    swan_finalize(reset_defs);
+    swan_finalize(put_seen);
+
+    // Symbols: found in this run's rows first, then in the database, and
+    // otherwise added. A symbol keeps its id across refreshes.
     var ids = dictionary<const u8[:], i64> {};
     var syms: Sym[>..] = [];
+    let find_sym = prepare_or_die(db, "SELECT id FROM symbols WHERE scip = ?1");
+    let add_sym = prepare_or_die(db, """
+        INSERT INTO symbols (scip, name, name_path, kind, signature, in_repo)
+        VALUES (?1, ?2, ?3, ?4, ?5, 0) RETURNING id
+        """);
 
     fn intern(scip: const u8[:]) -> i64 {
         let got = ids.get(scip);
         if got { return got; }
-        let id = syms.len;
-        syms.push(Sym { scip: scip, sig: scip[0..0], def_file: scip[0..0], line: -1, col: -1,
-                        body_start: -1, body_end: -1, has_def: false });
-        ids.insert(scip, id);
-        return id;
+        var db_id = -1;
+        swan_bind_text(find_sym, 1, scip);
+        if swan_step(find_sym, err) == 1 { db_id = swan_col_int(find_sym, 0); }
+        swan_reset(find_sym);
+        if db_id < 0 {
+            var path: u8[>..] = [];
+            let name, suffix = describe(scip, path);
+            let sig = sigs.get(scip);
+            let s = if sig { sig } else { scip[0..0] };
+            swan_bind_text(add_sym, 1, scip);
+            swan_bind_text(add_sym, 2, name);
+            swan_bind_text(add_sym, 3, path);
+            swan_bind_text(add_sym, 4, kind_word(s, suffix));
+            swan_bind_text(add_sym, 5, s);
+            if swan_step(add_sym, err) != 1 { abort(str("sqlite: ", err)); }
+            db_id = swan_col_int(add_sym, 0);
+            swan_reset(add_sym);
+        }
+        let k = syms.len;
+        syms.push(Sym { db_id: db_id, def_file: scip[0..0], line: -1, col: -1,
+                        body_start: -1, body_end: -1, has_def: false, touched: false });
+        ids.insert(scip, k);
+        return k;
     }
-
-    // symbols.tsv: symbol, display_name, kind, enclosing_symbol, signature/doc line
-    each_split(text[a..b], '\n') {
-        guard it.len > 0;
-        let f = split(it, '\t');
-        let id = intern(f[0]);
-        if f.len > 4 { syms[id].sig = f[4]; }
-    };
 
     // extents.tsv: symbol, file, start_line, start_col, end_line, end_col, in
     // document order, so each file's extents are one run.
@@ -69,10 +231,13 @@ fn index_main(dir: const u8[:], db_path: const u8[:], root: const u8[:]) {
     each_split(text[b..c], '\n') {
         guard it.len > 0;
         let f = split(it, '\t');
-        let id = intern(f[0]);
-        let e = Ext { id: id, sl: field_int(f[2]), sc: field_int(f[3]), el: field_int(f[4]), ec: field_int(f[5]) };
-        syms[id].body_start = e.sl;
-        syms[id].body_end = e.el;
+        guard changed.contains(f[1]);
+        let k = intern(f[0]);
+        let e = Ext { id: syms[k].db_id, sl: field_int(f[2]), sc: field_int(f[3]),
+                      el: field_int(f[4]), ec: field_int(f[5]) };
+        syms[k].body_start = e.sl;
+        syms[k].body_end = e.el;
+        syms[k].touched = true;
         runs.update(f[1], Span { lo: exts.len, hi: exts.len }) { it.hi = exts.len + 1; };
         exts.push(e);
     };
@@ -95,60 +260,25 @@ fn index_main(dir: const u8[:], db_path: const u8[:], root: const u8[:]) {
         return best;
     }
 
-    // The database, beside its final name until it is complete.
-    let tmp = str(db_path, ".tmp");
-    if file_exists(tmp) { delete_file(tmp); }
-    var err: u8[>..] = [];
-    let db = swan_db_open(tmp, err);
-    if db == 0 { abort(str("swan index: cannot open ", tmp, ": ", err)); }
-    exec_or_die(db, """
-        PRAGMA journal_mode = OFF;
-        PRAGMA synchronous = OFF;
-        CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
-        CREATE TABLE symbols (
-            id INTEGER PRIMARY KEY,
-            scip TEXT NOT NULL,
-            name TEXT NOT NULL,
-            name_path TEXT NOT NULL,
-            kind TEXT NOT NULL,
-            signature TEXT NOT NULL,
-            def_file TEXT,
-            def_line INTEGER,
-            def_col INTEGER,
-            body_start INTEGER,
-            body_end INTEGER,
-            in_repo INTEGER NOT NULL
-        );
-        CREATE TABLE occurrences (
-            symbol_id INTEGER NOT NULL,
-            file TEXT NOT NULL,
-            start_line INTEGER NOT NULL,
-            start_col INTEGER NOT NULL,
-            end_line INTEGER NOT NULL,
-            end_col INTEGER NOT NULL,
-            is_def INTEGER NOT NULL,
-            enclosing_id INTEGER
-        );
-        BEGIN;
-        """);
-
     // occurrences.tsv: symbol, file, start_line, start_col, end_line, end_col, def|ref
     let ins_occ = prepare_or_die(db, "INSERT INTO occurrences VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)");
     var occ_count = 0;
     each_split(text[c..d], '\n') {
         guard it.len > 0;
         let f = split(it, '\t');
-        let id = intern(f[0]);
+        guard changed.contains(f[1]);
+        let k = intern(f[0]);
         let sl = field_int(f[2]);
         let sc = field_int(f[3]);
         let is_def = f[6] == "def";
-        if is_def && !syms[id].has_def {
-            syms[id].has_def = true;
-            syms[id].def_file = f[1];
-            syms[id].line = sl;
-            syms[id].col = sc;
+        if is_def && !syms[k].has_def {
+            syms[k].has_def = true;
+            syms[k].touched = true;
+            syms[k].def_file = f[1];
+            syms[k].line = sl;
+            syms[k].col = sc;
         }
-        swan_bind_int(ins_occ, 1, id);
+        swan_bind_int(ins_occ, 1, syms[k].db_id);
         swan_bind_text(ins_occ, 2, f[1]);
         swan_bind_int(ins_occ, 3, sl);
         swan_bind_int(ins_occ, 4, sc);
@@ -163,58 +293,72 @@ fn index_main(dir: const u8[:], db_path: const u8[:], root: const u8[:]) {
         occ_count++;
     };
     swan_finalize(ins_occ);
+    swan_finalize(find_sym);
+    swan_finalize(add_sym);
 
-    let ins_sym = prepare_or_die(db,
-        "INSERT INTO symbols VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)");
-    for &s, id in syms {
+    // The definitions found in rewritten files, and their current signatures.
+    let upd_sym = prepare_or_die(db, """
+        UPDATE symbols SET kind = ?2, signature = ?3, def_file = ?4, def_line = ?5, def_col = ?6,
+                           body_start = ?7, body_end = ?8, in_repo = ?9
+        WHERE id = ?1
+        """);
+    ids.each() { scip, k =>
+        let s = syms[k];
+        guard s.touched;
         var path: u8[>..] = [];
-        let name, suffix = describe(s.scip, path);
-        swan_bind_int(ins_sym, 1, id);
-        swan_bind_text(ins_sym, 2, s.scip);
-        swan_bind_text(ins_sym, 3, name);
-        swan_bind_text(ins_sym, 4, path);
-        swan_bind_text(ins_sym, 5, kind_word(s.sig, suffix));
-        swan_bind_text(ins_sym, 6, s.sig);
+        let name, suffix = describe(scip, path);
+        let sig = sigs.get(scip);
+        let sg = if sig { sig } else { scip[0..0] };
+        swan_bind_int(upd_sym, 1, s.db_id);
+        swan_bind_text(upd_sym, 2, kind_word(sg, suffix));
+        swan_bind_text(upd_sym, 3, sg);
         if s.has_def {
-            swan_bind_text(ins_sym, 7, s.def_file);
-            swan_bind_int(ins_sym, 8, s.line);
-            swan_bind_int(ins_sym, 9, s.col);
+            swan_bind_text(upd_sym, 4, s.def_file);
+            swan_bind_int(upd_sym, 5, s.line);
+            swan_bind_int(upd_sym, 6, s.col);
         }
         if s.body_start >= 0 {
-            swan_bind_int(ins_sym, 10, s.body_start);
-            swan_bind_int(ins_sym, 11, s.body_end);
+            swan_bind_int(upd_sym, 7, s.body_start);
+            swan_bind_int(upd_sym, 8, s.body_end);
         }
-        swan_bind_int(ins_sym, 12, if s.has_def { 1 } else { 0 });
-        step_done(ins_sym);
-    }
-    swan_finalize(ins_sym);
+        swan_bind_int(upd_sym, 9, if s.has_def { 1 } else { 0 });
+        step_done(upd_sym);
+    };
+    swan_finalize(upd_sym);
 
-    let ins_meta = prepare_or_die(db, "INSERT INTO meta VALUES (?1, ?2)");
+    // A symbol nothing mentions any more goes.
+    if refresh {
+        exec_or_die(db, "DELETE FROM symbols WHERE in_repo = 0 AND id NOT IN (SELECT symbol_id FROM occurrences);");
+    }
+
+    let ins_meta = prepare_or_die(db, "INSERT OR REPLACE INTO meta VALUES (?1, ?2)");
     fn meta(key: const u8[:], value: const u8[:]) {
         swan_bind_text(ins_meta, 1, key);
         swan_bind_text(ins_meta, 2, value);
         step_done(ins_meta);
     }
+    let cnt = prepare_or_die(db, "SELECT (SELECT count(*) FROM symbols), (SELECT count(*) FROM occurrences)");
+    var n_syms = 0;
+    var n_occ = 0;
+    if swan_step(cnt, err) == 1 { n_syms = swan_col_int(cnt, 0); n_occ = swan_col_int(cnt, 1); }
+    swan_finalize(cnt);
     meta("schema_version", str(SCHEMA_VERSION));
-    meta("root", root);
+    if !refresh || root.len > 0 { meta("root", root); }
     meta("source", dir);
-    meta("built_at", str(time()));
-    meta("symbols", str(syms.len));
-    meta("occurrences", str(occ_count));
+    if refresh { meta("refreshed_at", str(time())); } else { meta("built_at", str(time())); }
+    meta("symbols", str(n_syms));
+    meta("occurrences", str(n_occ));
+    meta("files", str(hashes.count));
     swan_finalize(ins_meta);
 
-    exec_or_die(db, """
-        COMMIT;
-        CREATE INDEX symbols_name ON symbols (name);
-        CREATE INDEX symbols_name_path ON symbols (name_path);
-        CREATE INDEX symbols_scip ON symbols (scip);
-        CREATE INDEX symbols_def_file ON symbols (def_file);
-        CREATE INDEX occurrences_symbol ON occurrences (symbol_id, is_def);
-        CREATE INDEX occurrences_file ON occurrences (file, start_line);
-        CREATE INDEX occurrences_enclosing ON occurrences (enclosing_id);
-        """);
+    exec_or_die(db, "COMMIT;");
+    if !refresh { exec_or_die(db, INDEXES); }
     swan_db_close(db);
-    guard rename_file(tmp, db_path) else { abort(str("swan index: cannot rename ", tmp, " to ", db_path)); }
-    print("swan index: ", syms.len, " symbols, ", occ_count, " occurrences, ", exts.len,
-          " extents -> ", db_path, " in ", ((clock() - t0) * 1000.0) as i64, " ms");
+    if !refresh {
+        guard rename_file(tmp, db_path) else { abort(str("swan index: cannot rename ", tmp, " to ", db_path)); }
+    }
+    print(if refresh { "swan refresh: " } else { "swan index: " }, changed.count, " of ", hashes.count,
+          " files rewritten", if removed > 0 { str(", ", removed, " removed") } else { str("") },
+          "; ", occ_count, " occurrences written; map has ", n_syms, " symbols, ", n_occ,
+          " occurrences -> ", db_path, " in ", ((clock() - t0) * 1000.0) as i64, " ms");
 }
