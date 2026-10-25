@@ -9,3 +9,4 @@ bun tests/mcp_smoke.ts bin/swan data/tiny-ts/swan.db
 tests/refresh_check.sh
 bun tests/edit_check.ts
 bun tests/rust_check.ts
+bun tests/diag_check.ts

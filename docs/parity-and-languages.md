@@ -20,7 +20,7 @@ The JetBrains back end adds refactoring tools that LSP lacks.
 | `find_declaration` | covered by `find_symbol`; no "declaration at this file and line" lookup | partial |
 | `find_implementations` | `find_implementations` (classes, subclasses, method overrides, any depth) | done |
 | JetBrains `type_hierarchy` | `get_type_hierarchy` (supertypes and subtypes) | done |
-| `get_diagnostics_for_file` / `_for_symbol` | missing (needs `tsc` or a language server; SCIP has no live errors) | missing |
+| `get_diagnostics_for_file` / `_for_symbol` | `get_diagnostics` (tsc and cargo check, loaded after a check; for a symbol plus its callers) | done for TS and Rust; not live |
 | JetBrains `list_inspections` / `run_inspections` | missing | missing |
 | (no Serena equivalent) | `get_callers` impact radius, `get_callees`, `index_info` | Swan only |
 

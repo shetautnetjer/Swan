@@ -83,6 +83,7 @@ only that whole path. Lines and columns in answers are 1-based.
 | `replace_symbol_body` | `name_path`, `relative_path`, `body` | replaces the whole definition; refused if the file changed since the map was built; reports how many places use the symbol |
 | `insert_after_symbol`, `insert_before_symbol` | `name_path`, `relative_path`, `body` | adds code next to a definition |
 | `rename_symbol` | `name_path`, `relative_path`, `new_name`, `apply?` | plans by default: every site, skipped aliases, conflicts, stale files; `apply` writes it |
+| `get_diagnostics` | `name_path?`, `relative_path?`, `depth?`, `errors_only?` | compiler errors (tsc, cargo check) pinned to symbols; for a symbol, also those in its callers, with distance (see `docs/diagnostics.md`) |
 | `find_unused_symbols` | `relative_path?`, `include_tests?`, `max_results?` | functions, classes, methods, types and variables nothing references or implements: removal candidates, not proof |
 | `index_info` | none | repo root, build time, counts, and the files changed since the SCIP run |
 
@@ -96,6 +97,7 @@ scripts/fetch-tools.sh                          # Goose and rust-analyzer (sha25
 scripts/build.sh                                # bin/swan
 scripts/index-repo.sh <ts-repo> data/<name>     # index.scip, TSV rows, swan.db
 scripts/refresh-repo.sh <ts-repo> data/<name>   # after edits: rerun SCIP, rewrite only changed files
+scripts/diagnose-repo.sh <ts-repo> data/<name>  # tsc / cargo check, loaded into the map
 bin/swan serve data/<name>/swan.db              # MCP over stdio
 bin/swan query data/<name>/swan.db refs getBackend   # the same answers on the command line
 scripts/test.sh                                 # build, map the fixture, drive the MCP end to end, check refresh

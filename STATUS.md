@@ -72,6 +72,13 @@ as_of: 2026-10-25
   types are now found on every line ripgrep finds them (excluding lines that
   are really other crates' same-named types).
 
+## 2026-10-25 (late night): diagnostics
+
+- `tools/diagnostics.ts` (tsc, cargo check) + `swan diagnostics` +
+  `get_diagnostics` with caller depth; `scripts/diagnose-repo.sh`.
+  `tests/diag_check.ts` breaks fixture copies (TS and Rust) and checks the
+  errors land in the callers. Design notes: docs/diagnostics.md.
+
 ## Next
 
 1. Bake-off reported 2026-10-25 (README "Against the code-map bake-off"):

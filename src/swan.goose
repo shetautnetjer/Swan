@@ -1,7 +1,7 @@
 // Swan: a code map for agents. SCIP data in, SQLite map, MCP tools out.
 //   swan index <flattened-dir> <db> [repo-root]     a new map
 //   swan refresh <flattened-dir> <db> [repo-root]   rewrite only the files whose rows changed
-//   swan query <db> symbol|refs|uses|overview|callers|callees|impls|hierarchy|unused|info <arg> [relative_path]
+//   swan query <db> symbol|refs|uses|overview|callers|callees|impls|hierarchy|unused|info|diag|diagfile <arg> [relative_path]
 //   swan serve <db>            MCP over stdio
 import std;
 import os;
@@ -13,12 +13,14 @@ import .serve;
 import .graph;
 import .fresh;
 import .edit;
+import .diag;
 
 fn usage() {
     write_stderr("""
         usage: swan index <flattened-dir> <db> [repo-root]
                swan refresh <flattened-dir> <db> [repo-root]
-               swan query <db> symbol|refs|uses|overview|callers|callees|impls|hierarchy|unused|info <arg> [relative_path]
+               swan diagnostics <dir-with-diagnostics.tsv> <db>
+               swan query <db> symbol|refs|uses|overview|callers|callees|impls|hierarchy|unused|info|diag|diagfile <arg> [relative_path]
                swan serve <db>
 
         """);
@@ -53,10 +55,14 @@ fn main() {
         else if a[3] == "callees" { get_callees(db, a[4], rel, 200, out); }
         else if a[3] == "unused" { find_unused_symbols(db, a[4], false, 200, out); }
         else if a[3] == "info" { index_info(db, out); }
+        else if a[3] == "diag" { get_diagnostics(db, a[4], rel, 2, false, 200, out); }
+        else if a[3] == "diagfile" { get_diagnostics(db, "", a[4], 0, false, 200, out); }
         else if a[3] == "impls" { find_implementations(db, a[4], rel, 200, out); }
         else if a[3] == "hierarchy" { get_type_hierarchy(db, a[4], rel, 3, 200, out); }
         else { usage(); }
         print(out);
+    } else if a[1] == "diagnostics" && a.len == 4 {
+        diagnostics_main(a[2], a[3]);
     } else if a[1] == "serve" && a.len == 3 {
         serve_main(a[2]);
     } else { usage(); }
