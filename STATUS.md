@@ -36,6 +36,14 @@ as_of: 2026-10-25
   refresh check cover them. AEON: 471 relationships; `Backend` has 9
   implementations (5 ms).
 
+## 2026-10-25 (night): freshness and unused code
+
+- `stale: true` on any answer whose file changed after the SCIP run
+  (`scip_time` in meta = index.scip mtime; stat via the C shim);
+  `index_info` lists stale files.
+- `find_unused_symbols`: AEON 166 candidates outside tests, 20 ms; three
+  spot-checked with rg are referenced nowhere else.
+
 ## Next
 
 1. Bake-off reported 2026-10-25 (README "Against the code-map bake-off"):

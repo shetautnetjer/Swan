@@ -59,7 +59,8 @@ proc.stdin.write(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initial
 const tools = (await rpc("tools/list")).result.tools.map((t: any) => t.name);
 check(`tools/list: ${tools.join(", ")}`, tools.includes("find_symbol") && tools.includes("find_referencing_symbols") &&
   tools.includes("get_callers") && tools.includes("get_callees") &&
-  tools.includes("find_implementations") && tools.includes("get_type_hierarchy"));
+  tools.includes("find_implementations") && tools.includes("get_type_hierarchy") &&
+  tools.includes("find_unused_symbols"));
 
 const add = await tool("find_symbol", { name_path_pattern: "Store/add", include_body: true });
 check("find_symbol Store/add: one method at src/store.ts:11", add.length === 1 && add[0].kind === "method" &&
@@ -110,6 +111,25 @@ check("find_implementations of an interface method finds both implementations",
 const th = await tool("get_type_hierarchy", { name_path: "CappedStore/total" });
 check("get_type_hierarchy: CappedStore/total overrides Store/total",
   th.supertypes.length === 1 && th.supertypes[0].name_path === "Store/total" && th.subtypes.length === 0);
+
+const unused = await tool("find_unused_symbols", {});
+check("find_unused_symbols: Box, Crate and CappedStore (nothing uses them), not testSummary (test file)",
+  unused.unused.map((s: any) => s.name_path).sort().join(",") === "Box,CappedStore,Crate");
+
+// Freshness: push report.ts's mtime into the future, as an edit after the
+// SCIP run would, then put it back.
+const { statSync, utimesSync } = await import("node:fs");
+const reportTs = "fixtures/tiny-ts/src/report.ts";
+const before = statSync(reportTs);
+const fresh = await tool("index_info", {});
+utimesSync(reportTs, before.atime, new Date(Date.now() + 60_000));
+const stale = await tool("find_referencing_symbols", { name_path: "Store/total" });
+const staleInfo = await tool("index_info", {});
+utimesSync(reportTs, before.atime, before.mtime);
+check("an edited file's answers say stale, others don't",
+  fresh.stale_file_count === 0 &&
+  stale[0].references.every((r: any) => !!r.stale === (r.relative_path === "src/report.ts")) &&
+  staleInfo.stale_files.join(",") === "src/report.ts");
 
 const info = await tool("index_info", {});
 check("index_info reports counts", Number(info.symbols) > 0 && Number(info.occurrences) > 0);

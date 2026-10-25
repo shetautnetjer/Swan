@@ -20,6 +20,7 @@ package's name and version. The roadmap, most valuable first:
 2. Per-file refresh, so the map stays current while the agent edits: done
    (`swan refresh`, `scripts/refresh-repo.sh`).
 3. Tests for a symbol (partly there: `get_callers` flags test files).
+   Freshness flags and unused-code finding: done (`stale`, `find_unused_symbols`).
 4. Implementations and type hierarchy, from SCIP relationships: done
    (`find_implementations`, `get_type_hierarchy`).
 5. Dependency insight: which packages and versions the code leans on.
@@ -78,7 +79,11 @@ only that whole path. Lines and columns in answers are 1-based.
 | `get_callees` | `name_path`, `relative_path?`, `max_results?` | what the symbol's body uses, with counts; dependency symbols show their package and version |
 | `find_implementations` | `name_path`, `relative_path?`, `max_results?` | what implements, extends or overrides it (classes behind an interface, overrides of a method), with distance |
 | `get_type_hierarchy` | `name_path`, `relative_path?`, `depth?`, `max_results?` | supertypes and subtypes, from SCIP relationships |
-| `index_info` | none | repo root, build time, counts: for judging staleness |
+| `find_unused_symbols` | `relative_path?`, `include_tests?`, `max_results?` | functions, classes, methods, types and variables nothing references or implements: removal candidates, not proof |
+| `index_info` | none | repo root, build time, counts, and the files changed since the SCIP run |
+
+Every answer about a file that changed after the SCIP run carries
+`"stale": true`, so an agent knows to reread it or refresh the map.
 
 ## Use
 
@@ -115,6 +120,8 @@ bake-off's `index.scip`:
 | `get_callers`, depth 3 | 20 to 26 ms, fresh process | `getBackend`: 768 symbols in 355 files, 180 of them test files |
 | `get_callees` | 0.9 ms, fresh process | 82 symbols used by `createRuntime` |
 | `find_implementations` | 5 ms, fresh process | `Backend` interface: 9 implementing classes, several of them test fakes |
+| `find_unused_symbols` | 20 ms, fresh process | 166 candidates outside tests; the three spot-checked with ripgrep appear only at their definitions |
+| `index_info` with freshness | 2.6 ms | stats all 2,309 files |
 
 These are a first slice's numbers, not a qualified benchmark. Correctness
 against Serena is the bake-off's job and is not claimed here.

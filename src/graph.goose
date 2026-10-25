@@ -268,3 +268,44 @@ fn get_type_hierarchy(db: i64, pattern: const u8[:], rel: const u8[:], depth: i6
     if ids.len > 0 { hierarchy(db, ids, true, depth, limit, out); } else { out.append("[]"); }
     out.push('}');
 }
+
+// Symbols defined in the repo that nothing references: no use anywhere,
+// nothing implementing or overriding them, and, for a method, not itself an
+// implementation or override (it is reached through its base). Candidates, not verdicts:
+// entry points, framework hooks, and code reached by name at run time
+// (dynamic imports, string lookups) show up here too. Properties, parameters
+// and modules are left out, and test files unless asked.
+fn find_unused_symbols(db: i64, rel: const u8[:], include_tests: bool, limit: i64, out: u8[>..]&) {
+    let st = prepare_or_die(db, """
+        SELECT s.id, s.name_path, s.kind, s.signature, s.def_file, s.def_line, s.def_col,
+               s.body_start, s.body_end
+        FROM symbols s
+        WHERE s.in_repo = 1
+          AND s.kind NOT IN ('parameter', 'type_parameter', 'module', 'property', 'namespace')
+          AND (?1 = '' OR s.def_file = ?1 OR s.def_file LIKE ?1 || '/%')
+          AND NOT EXISTS (SELECT 1 FROM occurrences o WHERE o.symbol_id = s.id AND o.is_def = 0)
+          AND NOT EXISTS (SELECT 1 FROM relationships r WHERE r.related_id = s.id)
+          AND NOT (s.kind IN ('method', 'getter', 'setter')
+                   AND EXISTS (SELECT 1 FROM relationships r WHERE r.symbol_id = s.id))
+        ORDER BY s.def_file, s.def_line
+        """);
+    swan_bind_text(st, 1, rel);
+    var err: u8[>..] = [];
+    var n = 0;
+    var total = 0;
+    out.append("{\"unused\":[");
+    while swan_step(st, err) == 1 {
+        var file: u8[>..] = [];
+        swan_col_text(st, 4, file);
+        if !include_tests && is_test_path(file) { continue; }
+        total++;
+        if n >= limit { continue; }
+        if n > 0 { out.push(','); }
+        n++;
+        symbol_json(st, out);
+    }
+    swan_finalize(st);
+    out.append("],\"total\":");
+    json::format_int(out, total);
+    out.push('}');
+}

@@ -71,7 +71,9 @@ fn symbol_json(st: i64, out: u8[>..]&) {
     swan_col_text(st, 3, s); json::format_string(out, s); s.clear();
     out.push(',');
     json::format_key(out, "relative_path");
-    swan_col_text(st, 4, s); json::format_string(out, s); s.clear();
+    swan_col_text(st, 4, s); json::format_string(out, s);
+    if is_stale(s) { out.append(",\"stale\":true"); }
+    s.clear();
     out.push(',');
     json::format_key(out, "line");
     json::format_int(out, swan_col_int(st, 5) + 1);
@@ -152,6 +154,7 @@ fn find_referencing_symbols(db: i64, pattern: const u8[:], rel: const u8[:], lim
     var text: u8[>..] = [];
     var starts: i64[>..] = [];
     var loaded: u8[>..] = [];
+    var loaded_stale = false;
     var n = 0;
     out.push('[');
     while swan_step(st, err) == 1 {
@@ -174,6 +177,7 @@ fn find_referencing_symbols(db: i64, pattern: const u8[:], rel: const u8[:], lim
             if file != loaded {
                 loaded.clear();
                 loaded.append(file);
+                loaded_stale = is_stale(file);
                 text.clear();
                 if read_file(source_path(db, file), text) { line_bounds(text, starts); } else { starts.clear(); }
             }
@@ -181,6 +185,7 @@ fn find_referencing_symbols(db: i64, pattern: const u8[:], rel: const u8[:], lim
             out.push('{');
             json::format_key(out, "relative_path");
             json::format_string(out, file);
+            if loaded_stale { out.append(",\"stale\":true"); }
             out.push(',');
             json::format_key(out, "line");
             json::format_int(out, line + 1);
@@ -252,6 +257,26 @@ fn index_info(db: i64, out: u8[>..]&) {
         json::format_key(out, k);
         json::format_string(out, v);
     }
-    out.push('}');
     swan_finalize(st);
+    // Files changed since the SCIP run: the map's answers about them may be old.
+    let fs = prepare_or_die(db, "SELECT file FROM files ORDER BY file");
+    var stale = 0;
+    var listed: u8[>..] = [];
+    while swan_step(fs, err) == 1 {
+        var f: u8[>..] = [];
+        swan_col_text(fs, 0, f);
+        if is_stale(f) {
+            if stale < 50 {
+                if stale > 0 { listed.push(','); }
+                json::format_string(listed, f);
+            }
+            stale++;
+        }
+    }
+    swan_finalize(fs);
+    out.append(",\"stale_file_count\":");
+    json::format_int(out, stale);
+    out.append(",\"stale_files\":[");
+    out.append(listed);
+    out.append("]}");
 }

@@ -16,7 +16,8 @@ let TOOLS = """
      {"name":"get_callees","description":"What a function, method or class body uses: the symbols it calls or references, with use counts. Symbols from dependencies show their package and version instead of a file.","inputSchema":{"type":"object","properties":{"name_path":{"type":"string"},"relative_path":{"type":"string"},"max_results":{"type":"integer"}},"required":["name_path"]}},
      {"name":"find_implementations","description":"What implements, extends or overrides a symbol, from the compiler's own view (SCIP): the classes behind an interface, the subclasses of a class, the overrides of a method. Each result has its distance (1 = direct).","inputSchema":{"type":"object","properties":{"name_path":{"type":"string"},"relative_path":{"type":"string"},"max_results":{"type":"integer"}},"required":["name_path"]}},
      {"name":"get_type_hierarchy","description":"A symbol's supertypes (what it implements, extends or overrides) and subtypes (what implements, extends or overrides it), up to depth steps each way (default 3).","inputSchema":{"type":"object","properties":{"name_path":{"type":"string"},"relative_path":{"type":"string"},"depth":{"type":"integer"},"max_results":{"type":"integer"}},"required":["name_path"]}},
-     {"name":"index_info","description":"When and from what the code map was built: repo root, build time, symbol and occurrence counts. Use it to judge whether the map is stale.","inputSchema":{"type":"object","properties":{}}}]
+     {"name":"find_unused_symbols","description":"Functions, classes, methods, types and variables defined in the repo that nothing references or implements. Candidates for removal, not proof: entry points and code reached by name at run time also appear. Test files are skipped unless include_tests.","inputSchema":{"type":"object","properties":{"relative_path":{"type":"string","description":"Only this file or directory."},"include_tests":{"type":"boolean"},"max_results":{"type":"integer","description":"Listed (default 200); total counts all."}}}},
+     {"name":"index_info","description":"When and from what the code map was built: repo root, build time, counts, and the files changed since the SCIP run (stale_files). Answers about a stale file carry \"stale\": true; refresh the map or reread the file.","inputSchema":{"type":"object","properties":{}}}]
     """;
 
 fn arg_text(args: json::Node?, key: const u8[:]) -> const u8[:] {
@@ -86,6 +87,11 @@ fn call_tool(db: i64, name: const u8[:], args: json::Node?, out: u8[>..]&) -> bo
         let limit = arg_int(args, "max_results", 200);
         if name == "find_implementations" { find_implementations(db, pattern, rel, limit, out); }
         else { get_type_hierarchy(db, pattern, rel, min(arg_int(args, "depth", 3), 10), limit, out); }
+        return true;
+    }
+    if name == "find_unused_symbols" {
+        find_unused_symbols(db, arg_text(args, "relative_path"), arg_bool(args, "include_tests"),
+                            arg_int(args, "max_results", 200), out);
         return true;
     }
     if name == "index_info" { index_info(db, out); return true; }

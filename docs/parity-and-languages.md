@@ -80,18 +80,19 @@ but TypeScript has been run through Swan.
 |---|---|---|---|
 | Find implementations, type hierarchy | high: "who implements this interface" before changing it | SCIP relationships | done 2026-10-25 |
 | Symbol-level edits (`replace_symbol_body`, `insert_after_symbol`) | high: edits by symbol, not by line number | Swan's body ranges; refresh afterwards | small to medium |
-| Dead-code finding | medium: exported symbols with zero references | SCIP, one SQL query | small |
+| Dead-code finding | medium: exported symbols with zero references | SCIP, one SQL query | done 2026-10-25 |
 | Hover docs | medium | SCIP `documentation` (first line kept now; keep all of it) | small |
 | Rename safety check | high | SCIP occurrences: list every site, flag re-export aliases and string mentions; leave the edit to AYA | medium |
 | Live diagnostics | high after edits | `tsc --noEmit` / pyright / `cargo check` per language, cached by file | medium |
-| Freshness on every answer | high: says when the map is older than the file | file mtime vs `index_info` | small |
+| Freshness on every answer | high: says when the map is older than the file | file mtime vs the SCIP run | done 2026-10-25 |
 | Git churn and blame | medium | git | small |
 | Real rename, move, safe delete | high but risky | needs a language server or JetBrains; SCIP alone is not enough to rewrite safely | large |
 
 ## 4. Recommended next steps
 
 1. ~~Implementations and type hierarchy~~: done.
-2. **Freshness and dead code:** stamp each answer with whether its file
+2. ~~Freshness and dead code~~: done.
+   **Freshness and dead code:** stamp each answer with whether its file
    changed since indexing, and add `find_unused_symbols`. Both are small, and
    freshness is what makes the map safe to trust.
 3. **Python:** run scip-python on a real AYA Python project end to end,

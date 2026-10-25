@@ -6,6 +6,7 @@
 #include "goose.h"
 #include "sqlite3.h"
 #include <string.h>
+#include <sys/stat.h>
 
 typedef struct { const uint8_t *data; int64_t len; } swan_slice;
 
@@ -99,3 +100,15 @@ void swan_reset(int64_t s) {
 void swan_finalize(int64_t s) { sqlite3_finalize((sqlite3_stmt *)(intptr_t)s); }
 
 int64_t swan_last_rowid(int64_t h) { return sqlite3_last_insert_rowid((sqlite3 *)(intptr_t)h); }
+
+/* A file's modification time in nanoseconds since the epoch, or -1 if it
+   cannot be read. Goose's os module has no stat, and freshness needs one. */
+int64_t swan_mtime_ns(swan_slice path) {
+    char buf[4096];
+    if (path.len <= 0 || path.len >= (int64_t)sizeof buf) return -1;
+    memcpy(buf, path.data, (size_t)path.len);
+    buf[path.len] = 0;
+    struct stat st;
+    if (stat(buf, &st) != 0) return -1;
+    return (int64_t)st.st_mtim.tv_sec * 1000000000LL + st.st_mtim.tv_nsec;
+}

@@ -12,6 +12,7 @@ extern fn swan_col_int(st: i64, i: i32) -> i64;
 extern fn swan_col_text(st: i64, i: i32, out: u8[>..]&);
 extern fn swan_reset(st: i64);
 extern fn swan_finalize(st: i64);
+extern fn swan_mtime_ns(path: const u8[:]) -> i64;     // -1 if the file cannot be read
 
 fn exec_or_die(db: i64, sql: const u8[:]) {
     var err: u8[>..] = [];

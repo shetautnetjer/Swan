@@ -387,6 +387,7 @@ fn index_main(dir: const u8[:], db_path: const u8[:], root: const u8[:], refresh
     meta("schema_version", str(SCHEMA_VERSION));
     if !refresh || root.len > 0 { meta("root", root); }
     meta("source", dir);
+    meta("scip_time", str(scip_time_of(dir)));
     if refresh { meta("refreshed_at", str(time())); } else { meta("built_at", str(time())); }
     meta("symbols", str(n_syms));
     meta("occurrences", str(n_occ));
