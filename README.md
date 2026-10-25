@@ -198,3 +198,6 @@ MIT (`LICENSE`). The vendored SQLite is public domain; see `NOTICE`.
   Sourcegraph, Apache 2.0; Swan uses scip-typescript as a tool and reads the
   SCIP format.
 - [Goose](https://github.com/aardappel/goose) by Wouter van Oortmerssen.
+
+See `docs/parity-and-languages.md` for a tool-by-tool comparison with Serena
+and what other languages would take.
