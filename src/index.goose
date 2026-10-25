@@ -18,11 +18,16 @@ import std;
 import os;
 import dictionary;
 
-let SCHEMA_VERSION = 5;
+let SCHEMA_VERSION = 6;
 
 let SCHEMA = """
     CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
-    CREATE TABLE files (file TEXT PRIMARY KEY, hash TEXT NOT NULL, rows INTEGER NOT NULL);
+    CREATE TABLE files (
+        file TEXT PRIMARY KEY,
+        hash TEXT NOT NULL,
+        rows INTEGER NOT NULL,
+        edited_mtime INTEGER       -- set when Swan edited the file and shifted its rows itself
+    );
     CREATE TABLE symbols (
         id INTEGER PRIMARY KEY,
         scip TEXT NOT NULL,
@@ -35,6 +40,8 @@ let SCHEMA = """
         def_col INTEGER,
         body_start INTEGER,
         body_end INTEGER,
+        body_start_col INTEGER,
+        body_end_col INTEGER,
         in_repo INTEGER NOT NULL,
         language TEXT NOT NULL
     );
@@ -81,6 +88,7 @@ struct Sym {
     def_file: const u8[:],
     line: i64, col: i64,             // the definition's name
     body_start: i64, body_end: i64,  // its whole span, -1 if SCIP gave none
+    body_start_col: i64, body_end_col: i64,
     has_def: bool,
     touched: bool,                   // its row needs writing
 }
@@ -155,12 +163,12 @@ fn index_main(dir: const u8[:], db_path: const u8[:], root: const u8[:], refresh
     // one (all of them in a new database), and those no longer in the rows.
     var changed = dictionary<const u8[:], bool> {};
     let get_hash = prepare_or_die(db, "SELECT hash FROM files WHERE file = ?1");
-    let put_file = prepare_or_die(db, "INSERT OR REPLACE INTO files VALUES (?1, ?2, ?3)");
+    let put_file = prepare_or_die(db, "INSERT OR REPLACE INTO files (file, hash, rows) VALUES (?1, ?2, ?3)");
     let drop_occ = prepare_or_die(db, "DELETE FROM occurrences WHERE file = ?1");
     let drop_rel = prepare_or_die(db, "DELETE FROM relationships WHERE file = ?1");
     let reset_defs = prepare_or_die(db, """
         UPDATE symbols SET def_file = NULL, def_line = NULL, def_col = NULL,
-                           body_start = NULL, body_end = NULL, in_repo = 0
+                           body_start = NULL, body_end = NULL, body_start_col = NULL, body_end_col = NULL, in_repo = 0
         WHERE def_file = ?1
         """);
     exec_or_die(db, "CREATE TEMP TABLE seen (file TEXT PRIMARY KEY);");
@@ -199,7 +207,7 @@ fn index_main(dir: const u8[:], db_path: const u8[:], root: const u8[:], refresh
             DELETE FROM occurrences WHERE file NOT IN (SELECT file FROM temp.seen);
             DELETE FROM relationships WHERE file NOT IN (SELECT file FROM temp.seen);
             UPDATE symbols SET def_file = NULL, def_line = NULL, def_col = NULL,
-                               body_start = NULL, body_end = NULL, in_repo = 0
+                               body_start = NULL, body_end = NULL, body_start_col = NULL, body_end_col = NULL, in_repo = 0
             WHERE def_file NOT IN (SELECT file FROM temp.seen);
             DELETE FROM files WHERE file NOT IN (SELECT file FROM temp.seen);
             """);
@@ -246,7 +254,8 @@ fn index_main(dir: const u8[:], db_path: const u8[:], root: const u8[:], refresh
         }
         let k = syms.len;
         syms.push(Sym { db_id: db_id, def_file: scip[0..0], line: -1, col: -1,
-                        body_start: -1, body_end: -1, has_def: false, touched: false });
+                        body_start: -1, body_end: -1, body_start_col: -1, body_end_col: -1,
+                        has_def: false, touched: false });
         ids.insert(scip, k);
         return k;
     }
@@ -264,6 +273,8 @@ fn index_main(dir: const u8[:], db_path: const u8[:], root: const u8[:], refresh
                       el: field_int(f[4]), ec: field_int(f[5]) };
         syms[k].body_start = e.sl;
         syms[k].body_end = e.el;
+        syms[k].body_start_col = e.sc;
+        syms[k].body_end_col = e.ec;
         syms[k].touched = true;
         runs.update(f[1], Span { lo: exts.len, hi: exts.len }) { it.hi = exts.len + 1; };
         exts.push(e);
@@ -348,7 +359,8 @@ fn index_main(dir: const u8[:], db_path: const u8[:], root: const u8[:], refresh
     // The definitions found in rewritten files, and their current signatures.
     let upd_sym = prepare_or_die(db, """
         UPDATE symbols SET kind = ?2, signature = ?3, def_file = ?4, def_line = ?5, def_col = ?6,
-                           body_start = ?7, body_end = ?8, in_repo = ?9
+                           body_start = ?7, body_end = ?8, in_repo = ?9,
+                           body_start_col = ?10, body_end_col = ?11
         WHERE id = ?1
         """);
     ids.each() { scip, k =>
@@ -370,6 +382,8 @@ fn index_main(dir: const u8[:], db_path: const u8[:], root: const u8[:], refresh
         if s.body_start >= 0 {
             swan_bind_int(upd_sym, 7, s.body_start);
             swan_bind_int(upd_sym, 8, s.body_end);
+            swan_bind_int(upd_sym, 10, s.body_start_col);
+            swan_bind_int(upd_sym, 11, s.body_end_col);
         }
         swan_bind_int(upd_sym, 9, if s.has_def { 1 } else { 0 });
         step_done(upd_sym);

@@ -2,12 +2,16 @@
 // from. Answers about such a file may be out of date, and each one says so
 // with "stale": true, so an agent knows to reread the file or refresh the
 // map. The check is one stat per file: modified after the SCIP run, or gone.
+// A file Swan edited itself is not stale: Swan shifted its rows to match
+// (src/edit.goose) and recorded the mtime it left, so only a later outside
+// change makes it stale again.
 
 import std;
 import os;
 
 var fresh_root: u8[..4096];
 var fresh_scip_time: i64 = 0;    // ns since the epoch; 0 when unknown
+var fresh_edited: i64 = 0;       // statement: a file's edited_mtime
 
 fn load_freshness(db: i64) {
     var v: u8[>..] = [];
@@ -20,6 +24,22 @@ fn load_freshness(db: i64) {
     meta_value(db, "scip_time", t);
     let n, ok = parse_int(t);
     if ok { fresh_scip_time = n; }
+    fresh_edited = prepare_or_die(db, "SELECT edited_mtime FROM files WHERE file = ?1");
+}
+
+// The mtime Swan left on a file it edited, or -1.
+fn edited_mtime(file: const u8[:]) -> i64 {
+    guard fresh_edited != 0 else { return -1; }
+    var err: u8[>..] = [];
+    var t = -1;
+    swan_bind_text(fresh_edited, 1, file);
+    if swan_step(fresh_edited, err) == 1 {
+        var v: u8[>..] = [];
+        swan_col_text(fresh_edited, 0, v);
+        if v.len > 0 { t = swan_col_int(fresh_edited, 0); }
+    }
+    swan_reset(fresh_edited);
+    return t;
 }
 
 fn is_stale(file: const u8[:]) -> bool {
@@ -28,7 +48,8 @@ fn is_stale(file: const u8[:]) -> bool {
     p.append(fresh_root);
     p.append(file);
     let m = swan_mtime_ns(p);
-    return m < 0 || m > fresh_scip_time;
+    if m < 0 { return true; }
+    return m > fresh_scip_time && m != edited_mtime(file);
 }
 
 // When the SCIP run started: the marker scripts/scip-run.sh leaves, or else

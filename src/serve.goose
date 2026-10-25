@@ -17,6 +17,10 @@ let TOOLS = """
      {"name":"find_implementations","description":"What implements, extends or overrides a symbol, from the compiler's own view (SCIP): the classes behind an interface, the subclasses of a class, the overrides of a method. Each result has its distance (1 = direct).","inputSchema":{"type":"object","properties":{"name_path":{"type":"string"},"relative_path":{"type":"string"},"max_results":{"type":"integer"}},"required":["name_path"]}},
      {"name":"get_type_hierarchy","description":"A symbol's supertypes (what it implements, extends or overrides) and subtypes (what implements, extends or overrides it), up to depth steps each way (default 3).","inputSchema":{"type":"object","properties":{"name_path":{"type":"string"},"relative_path":{"type":"string"},"depth":{"type":"integer"},"max_results":{"type":"integer"}},"required":["name_path"]}},
      {"name":"find_unused_symbols","description":"Functions, classes, methods, types and variables defined in the repo that nothing references or implements. Candidates for removal, not proof: entry points and code reached by name at run time also appear. Test files are skipped unless include_tests.","inputSchema":{"type":"object","properties":{"relative_path":{"type":"string","description":"Only this file or directory."},"include_tests":{"type":"boolean"},"max_results":{"type":"integer","description":"Listed (default 200); total counts all."}}}},
+     {"name":"replace_symbol_body","description":"Replace a symbol's whole definition (signature included, as find_symbol with include_body shows it) with new code. Read the body first. Refused if the file changed since the map was built. Returns the new line range and how many places use the symbol, so you know what to check.","inputSchema":{"type":"object","properties":{"name_path":{"type":"string"},"relative_path":{"type":"string","description":"The file that defines the symbol (required)."},"body":{"type":"string"}},"required":["name_path","relative_path","body"]}},
+     {"name":"insert_after_symbol","description":"Insert code after a function, method or class definition, one blank line apart. Include the indentation you want.","inputSchema":{"type":"object","properties":{"name_path":{"type":"string"},"relative_path":{"type":"string"},"body":{"type":"string"}},"required":["name_path","relative_path","body"]}},
+     {"name":"insert_before_symbol","description":"Insert code before a symbol's definition, one blank line apart: a new function, class or import before an existing one.","inputSchema":{"type":"object","properties":{"name_path":{"type":"string"},"relative_path":{"type":"string"},"body":{"type":"string"}},"required":["name_path","relative_path","body"]}},
+     {"name":"rename_symbol","description":"Rename a symbol at every use the compiler resolved, across files. By default only plans: every site, sites skipped because their text differs (aliases, re-exports), conflicts with an existing symbol of the new name, and stale files. Set apply to true to write it; a conflict or a stale file refuses. Strings, comments and uses by name at run time are not covered.","inputSchema":{"type":"object","properties":{"name_path":{"type":"string"},"relative_path":{"type":"string","description":"The file that defines the symbol (required)."},"new_name":{"type":"string"},"apply":{"type":"boolean"}},"required":["name_path","relative_path","new_name"]}},
      {"name":"index_info","description":"When and from what the code map was built: repo root, build time, counts, and the files changed since the SCIP run (stale_files). Answers about a stale file carry \"stale\": true; refresh the map or reread the file.","inputSchema":{"type":"object","properties":{}}}]
     """;
 
@@ -93,6 +97,16 @@ fn call_tool(db: i64, name: const u8[:], args: json::Node?, out: u8[>..]&) -> bo
         find_unused_symbols(db, arg_text(args, "relative_path"), arg_bool(args, "include_tests"),
                             arg_int(args, "max_results", 200), out);
         return true;
+    }
+    if name == "replace_symbol_body" || name == "insert_after_symbol" || name == "insert_before_symbol" {
+        let mode = if name == "replace_symbol_body" { EDIT_REPLACE }
+                   else if name == "insert_after_symbol" { EDIT_AFTER } else { EDIT_BEFORE };
+        return edit_symbol(db, mode, arg_text(args, "name_path"), arg_text(args, "relative_path"),
+                           arg_text(args, "body"), out);
+    }
+    if name == "rename_symbol" {
+        return rename_symbol(db, arg_text(args, "name_path"), arg_text(args, "relative_path"),
+                             arg_text(args, "new_name"), arg_bool(args, "apply"), out);
     }
     if name == "index_info" { index_info(db, out); return true; }
     out.append(str("unknown tool: ", name));

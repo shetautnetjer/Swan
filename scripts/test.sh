@@ -7,3 +7,4 @@ scripts/build.sh >/dev/null
 scripts/index-repo.sh fixtures/tiny-ts data/tiny-ts >/dev/null
 bun tests/mcp_smoke.ts bin/swan data/tiny-ts/swan.db
 tests/refresh_check.sh
+bun tests/edit_check.ts

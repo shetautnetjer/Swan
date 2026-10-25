@@ -12,6 +12,7 @@ import .query;
 import .serve;
 import .graph;
 import .fresh;
+import .edit;
 
 fn usage() {
     write_stderr("""
