@@ -67,12 +67,57 @@ start with scheme and package manager, so languages cannot collide.
 | Ruby | scip-ruby (Sourcegraph, built on Sorbet) | active but small (22 stars) | defs, refs | quality depends on Sorbet types; untyped Ruby resolves less |
 | PHP and others | no maintained Sourcegraph indexer found | n/a | n/a | fall back to tree-sitter (names only) |
 
+### Tried on 2026-10-25
+
+Both runs used private repos, read-only. Only the findings are recorded here.
+
+**Python: scip-python 0.6.8 on a 2,853-file research repo (22 MB of .py).**
+- SCIP run: 132 s and 10 GB of memory. The default Node heap ran out at
+  4.4 GB, so `scripts/scip-run.sh` raises it (`SWAN_NODE_HEAP_MB`, default
+  16000).
+- Swan's own work: flatten 1.5 s, `swan index` 2.6 s. The map has 1,162,302
+  occurrences, 3,186 inheritance links and 150,745 symbols.
+- Queries took about 1 ms per call.
+- Ten functions, picked at random, checked against ripgrep. Every line Swan
+  reported was a real use, and Swan found 110 of rg's 122 lines. The other 12
+  were the name inside docstrings and strings (expected), plus two real
+  dynamic uses SCIP cannot see: `patch('module.func')` and
+  `hasattr(obj, 'name')`.
+- Gaps:
+  - scip-python sets no SCIP kind, so Swan reads `def`/`class` from the
+    signature.
+  - It needs `pip` to list installed packages. Without pip, Swan passes an
+    empty environment, and third-party packages resolve as names only.
+  - String-based dynamic access is invisible.
+- Inheritance works: `find_implementations` on `TestCase` lists its 1,727
+  subclasses.
+
+**Rust: rust-analyzer 2026-10-19 (`rust-analyzer scip`) on a 4-crate
+workspace (21 .rs files), mapped together with its one Python file.**
+- rust-analyzer: 5 to 7 s. Swan: 17 ms. One map holds both languages;
+  `language` tells them apart.
+- Eight types and functions checked against ripgrep. Swan only listed real
+  uses. It correctly left out `std::process::Command`, which ripgrep can't
+  tell apart from the crate's own `Command` enum.
+- Gaps:
+  - Uses through a path (`ProviderError::Timeout`, `Message::new`) count as
+    uses of the variant or function, not of the type. So references to a
+    type undercount; ask about the member as well.
+  - No relationships: trait impls (`impl Provider for X`, 4 in this
+    workspace) are not emitted, so `find_implementations` finds nothing for
+    Rust traits.
+  - rust-analyzer logs "definition should have been in an SCIP document"
+    for a few symbols (6 here).
+  - It runs `cargo` and writes build output. `scripts/scip-run.sh` points
+    `CARGO_TARGET_DIR` into the output folder so the repo stays untouched.
+
 What Swan must change for many languages: run the right indexer per
 language (detect by files present), store a `language` column, and fix two
 TypeScript-specific spots. `kind_word` reads scip-typescript's signature
-wording, and test-file detection uses JS naming. SCIP's own `kind` field is
-already flattened and is the portable replacement. Not tried yet: nothing
-but TypeScript has been run through Swan.
+wording, and test-file detection uses JS naming. Done 2026-10-25: a
+`language` column, kinds from the signature, then SCIP's kind, then the
+descriptor (so Python's `def` is a function or method), Python test-file
+names, and `scripts/scip-run.sh` running every indexer a repo needs.
 
 ## 3. IDE features beyond the finished roadmap steps
 
@@ -95,9 +140,7 @@ but TypeScript has been run through Swan.
    **Freshness and dead code:** stamp each answer with whether its file
    changed since indexing, and add `find_unused_symbols`. Both are small, and
    freshness is what makes the map safe to trust.
-3. **Python:** run scip-python on a real AYA Python project end to end,
-   adding the `language` column and portable kinds. That makes Swan
-   multi-language for real.
+3. ~~Python~~: done, plus Rust (see "Tried on 2026-10-25").
 4. **Symbol edits:** `replace_symbol_body` and `insert_after_symbol`, each
    followed by a refresh.
 5. **Diagnostics:** wrap `tsc --noEmit` per changed file.

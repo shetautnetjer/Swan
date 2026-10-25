@@ -2,7 +2,10 @@
 // parses protobuf. No dependencies: a minimal wire-format reader for the few
 // fields Swan needs (field numbers from github.com/sourcegraph/scip scip.proto).
 //
-//   bun tools/scip-flatten.ts <index.scip> <out-dir>
+//   bun tools/scip-flatten.ts <index.scip> <out-dir> [more.scip ...]
+//
+// Several SCIP files (one per language, say) flatten into one set of rows;
+// their symbols cannot collide, since each starts with its indexer's scheme.
 //
 // Writes <out-dir>/occurrences.tsv with the columns shared with the
 // code-map bake-off (symbol, file, start_line, start_col, end_line, end_col,
@@ -63,9 +66,9 @@ const dec = new TextDecoder();
 const clean = (s: string) => s.replace(/[\t\n\r]/g, " ");
 const ROLE_DEFINITION = 1;
 
-const [indexPath, outDir] = process.argv.slice(2);
+const [indexPath, outDir, ...moreIndexes] = process.argv.slice(2);
 if (!indexPath || !outDir) {
-  console.error("usage: bun tools/scip-flatten.ts <index.scip> <out-dir>");
+  console.error("usage: bun tools/scip-flatten.ts <index.scip> <out-dir> [more.scip ...]");
   process.exit(2);
 }
 
@@ -106,8 +109,10 @@ function span(r: number[]): number[] {
 }
 
 const t0 = performance.now();
-const root = new Reader(new Uint8Array(readFileSync(indexPath)));
 let docs = 0;
+for (const path of [indexPath, ...moreIndexes]) flattenIndex(new Reader(new Uint8Array(readFileSync(path))));
+
+function flattenIndex(root: Reader) {
 root.fields((f, _wt, r) => {
   if (f === 3) return symbolInfo(r, "");
   if (f !== 2) return;
@@ -137,6 +142,7 @@ root.fields((f, _wt, r) => {
     if (enclosing.length >= 3) ext.push([symbol, path, ...span(enclosing)].join("\t"));
   }
 });
+}
 
 mkdirSync(outDir, { recursive: true });
 writeFileSync(join(outDir, "occurrences.tsv"), occ.join("\n") + "\n");

@@ -17,9 +17,7 @@ rm "$work/repo/src/format.ts"
 sed -i 's/^export class Crate implements Weighed {$/export class Crate {/' "$work/repo/src/kinds.ts"
 sed -i 's|^export { format as formatItem } from "./format";$|export const formatItem = (x: unknown) => String(x);|' "$work/repo/src/index.ts"
 sed -i 's|^import { total } from "./format";$|const total = (xs: Item[]) => xs.length;|' "$work/repo/src/main.ts"
-mkdir -p "$work/after"
-(cd "$work/repo" && ../../../tools/node_modules/.bin/scip-typescript index --output ../after/index.scip >/dev/null)
-bun tools/scip-flatten.ts "$work/after/index.scip" "$work/after" 2>/dev/null
+scripts/scip-run.sh "$work/repo" "$work/after" >/dev/null 2>&1
 bin/swan refresh "$work/after" "$work/refreshed.db"
 bin/swan index "$work/after" "$work/fresh.db" "$PWD/$work/repo" >/dev/null
 python3 tests/dump.py "$work/refreshed.db" | grep -v '^F' > "$work/refreshed.txt"

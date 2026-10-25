@@ -18,7 +18,7 @@ import std;
 import os;
 import dictionary;
 
-let SCHEMA_VERSION = 4;
+let SCHEMA_VERSION = 5;
 
 let SCHEMA = """
     CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
@@ -35,7 +35,8 @@ let SCHEMA = """
         def_col INTEGER,
         body_start INTEGER,
         body_end INTEGER,
-        in_repo INTEGER NOT NULL
+        in_repo INTEGER NOT NULL,
+        language TEXT NOT NULL
     );
     CREATE UNIQUE INDEX symbols_scip ON symbols (scip);
     CREATE TABLE relationships (
@@ -73,6 +74,8 @@ let INDEXES = """
     CREATE INDEX relationships_file ON relationships (file);
     """;
 
+struct SymMeta { sig: const u8[:], kind: i64 }   // from symbols.tsv
+
 struct Sym {
     db_id: i64,
     def_file: const u8[:],
@@ -107,11 +110,13 @@ fn index_main(dir: const u8[:], db_path: const u8[:], root: const u8[:], refresh
     let d = text.len;
 
     // symbols.tsv: symbol, display_name, kind, enclosing_symbol, signature/doc line
-    var sigs = dictionary<const u8[:], const u8[:]> {};
+    var sigs = dictionary<const u8[:], SymMeta> {};
     each_split(text[a..b], '\n') {
         guard it.len > 0;
         let f = split(it, '\t');
-        sigs.insert(f[0], if f.len > 4 { f[4] } else { f[0][0..0] });
+        var kind = 0;
+        if f.len > 2 { let k, ok = parse_int(f[2]); if ok { kind = k; } }
+        sigs.insert(f[0], SymMeta { sig: if f.len > 4 { f[4] } else { f[0][0..0] }, kind: kind });
     };
 
     // Each file's fingerprint: its extent and occurrence rows, in order.
@@ -212,8 +217,8 @@ fn index_main(dir: const u8[:], db_path: const u8[:], root: const u8[:], refresh
     var syms: Sym[>..] = [];
     let find_sym = prepare_or_die(db, "SELECT id FROM symbols WHERE scip = ?1");
     let add_sym = prepare_or_die(db, """
-        INSERT INTO symbols (scip, name, name_path, kind, signature, in_repo)
-        VALUES (?1, ?2, ?3, ?4, ?5, 0) RETURNING id
+        INSERT INTO symbols (scip, name, name_path, kind, signature, in_repo, language)
+        VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6) RETURNING id
         """);
 
     fn intern(scip: const u8[:]) -> i64 {
@@ -225,14 +230,16 @@ fn index_main(dir: const u8[:], db_path: const u8[:], root: const u8[:], refresh
         swan_reset(find_sym);
         if db_id < 0 {
             var path: u8[>..] = [];
-            let name, suffix = describe(scip, path);
-            let sig = sigs.get(scip);
-            let s = if sig { sig } else { scip[0..0] };
+            let name, suffix, parent = describe(scip, path);
+            let m = sigs.get(scip);
+            let s = if m { m.sig } else { scip[0..0] };
+            let sk = if m { m.kind } else { 0 };
             swan_bind_text(add_sym, 1, scip);
             swan_bind_text(add_sym, 2, name);
             swan_bind_text(add_sym, 3, path);
-            swan_bind_text(add_sym, 4, kind_word(s, suffix));
+            swan_bind_text(add_sym, 4, kind_word(s, suffix, parent, sk));
             swan_bind_text(add_sym, 5, s);
+            swan_bind_text(add_sym, 6, language_of(scip));
             if swan_step(add_sym, err) != 1 { abort(str("sqlite: ", err)); }
             db_id = swan_col_int(add_sym, 0);
             swan_reset(add_sym);
@@ -348,11 +355,12 @@ fn index_main(dir: const u8[:], db_path: const u8[:], root: const u8[:], refresh
         let s = syms[k];
         guard s.touched;
         var path: u8[>..] = [];
-        let name, suffix = describe(scip, path);
-        let sig = sigs.get(scip);
-        let sg = if sig { sig } else { scip[0..0] };
+        let name, suffix, parent = describe(scip, path);
+        let m = sigs.get(scip);
+        let sg = if m { m.sig } else { scip[0..0] };
+        let sk = if m { m.kind } else { 0 };
         swan_bind_int(upd_sym, 1, s.db_id);
-        swan_bind_text(upd_sym, 2, kind_word(sg, suffix));
+        swan_bind_text(upd_sym, 2, kind_word(sg, suffix, parent, sk));
         swan_bind_text(upd_sym, 3, sg);
         if s.has_def {
             swan_bind_text(upd_sym, 4, s.def_file);

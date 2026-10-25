@@ -44,6 +44,17 @@ as_of: 2026-10-25
 - `find_unused_symbols`: AEON 166 candidates outside tests, 20 ms; three
   spot-checked with rg are referenced nowhere else.
 
+## 2026-10-25 (late): Python and Rust
+
+- scip-python 0.6.8 and rust-analyzer 2026-10-19 wired in through
+  `scripts/scip-run.sh` (language detection, empty pip env, Node heap,
+  CARGO_TARGET_DIR kept out of the repo). Schema 5 adds `symbols.language`;
+  kinds are portable across languages.
+- Tested on two private repos: a Python research repo, and a copy of a
+  Rust workspace (Rust + Python). Their maps live under data/private/
+  (gitignored, never pushed). Findings, without private
+  content, are in docs/parity-and-languages.md.
+
 ## Next
 
 1. Bake-off reported 2026-10-25 (README "Against the code-map bake-off"):

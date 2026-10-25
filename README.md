@@ -27,6 +27,7 @@ package's name and version. The roadmap, most valuable first:
 6. Live errors, from `tsc` or a language server (not SCIP).
 7. Hot and fragile code, from git history.
 8. More languages: one SCIP indexer per language, into the same database.
+   Python and Rust: done.
 
 ## What "a Goose Serena" means here
 
@@ -88,7 +89,7 @@ Every answer about a file that changed after the SCIP run carries
 ## Use
 
 ```bash
-scripts/fetch-tools.sh                          # Goose v2026.3 (sha256-pinned) into .tools/, scip-typescript into tools/
+scripts/fetch-tools.sh                          # Goose and rust-analyzer (sha256-pinned) into .tools/, scip-typescript and scip-python into tools/
 scripts/build.sh                                # bin/swan
 scripts/index-repo.sh <ts-repo> data/<name>     # index.scip, TSV rows, swan.db
 scripts/refresh-repo.sh <ts-repo> data/<name>   # after edits: rerun SCIP, rewrite only changed files
@@ -166,8 +167,9 @@ The bake-off made two recommendations:
   a type use or an import. A class's callees are what its own body uses
   outside its methods; ask about a method for what that method uses.
 
-- TypeScript only, through scip-typescript. Other SCIP indexers (Python,
-  Rust, Go, Java) should work unchanged but have not been tried.
+- Tried with TypeScript, Python and Rust (`scripts/scip-run.sh` picks the
+  indexers). Go, Java, C/C++, C# and Ruby are untried. What each tried
+  indexer misses is in `docs/parity-and-languages.md`.
 - scip-typescript has no per-file mode, so every refresh reruns it over the
   whole repo (~17 s on the repo above). Swan's own part is 0.23 s.
 - Read-only: no Serena-style edits (`replace_symbol_body`, `insert_after_symbol`).

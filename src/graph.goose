@@ -8,7 +8,12 @@
 import std;
 import json;
 
+// JS/TS (.test., .spec., __tests__), Python (test_*.py, *_test.py, conftest),
+// and test directories anywhere (Rust's tests/ included).
 fn is_test_path(p: const u8[:]) -> bool {
+    let slash = rfind(p, "/");
+    let base = if slash >= 0 { p[slash + 1..] } else { p };
+    starts_with(base, "test_") || ends_with(base, "_test.py") || base == "conftest.py" ||
     find(p, ".test.") >= 0 || find(p, ".spec.") >= 0 || find(p, "__tests__/") >= 0 ||
         starts_with(p, "test/") || starts_with(p, "tests/") ||
         find(p, "/test/") >= 0 || find(p, "/tests/") >= 0

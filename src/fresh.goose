@@ -31,8 +31,11 @@ fn is_stale(file: const u8[:]) -> bool {
     return m < 0 || m > fresh_scip_time;
 }
 
-// The time the SCIP data was made: index.scip beside the rows, or the rows.
+// When the SCIP run started: the marker scripts/scip-run.sh leaves, or else
+// index.scip beside the rows, or the rows themselves.
 fn scip_time_of(dir: const u8[:]) -> i64 {
+    let started = swan_mtime_ns(str(dir, "/scip-started"));
+    if started > 0 { return started; }
     let t = swan_mtime_ns(str(dir, "/index.scip"));
     return if t > 0 { t } else { swan_mtime_ns(str(dir, "/occurrences.tsv")) };
 }
