@@ -9,7 +9,7 @@ import std;
 import os;
 import dictionary;
 
-let SCHEMA_VERSION = 1;
+let SCHEMA_VERSION = 2;
 
 struct Sym {
     scip: const u8[:],
@@ -211,6 +211,7 @@ fn index_main(dir: const u8[:], db_path: const u8[:], root: const u8[:]) {
         CREATE INDEX symbols_def_file ON symbols (def_file);
         CREATE INDEX occurrences_symbol ON occurrences (symbol_id, is_def);
         CREATE INDEX occurrences_file ON occurrences (file, start_line);
+        CREATE INDEX occurrences_enclosing ON occurrences (enclosing_id);
         """);
     swan_db_close(db);
     guard rename_file(tmp, db_path) else { abort(str("swan index: cannot rename ", tmp, " to ", db_path)); }

@@ -121,3 +121,21 @@ fn kind_word(sig: const u8[:], suffix: u8) -> const u8[:] {
         _ => "unknown",
     };
 }
+
+// The package a symbol belongs to, "<name> <version>" from the header
+// ("scip-typescript npm bun-types 1.3.7 ..." gives "bun-types 1.3.7").
+fn package_of(sym: const u8[:]) -> const u8[:] {
+    var i = 0;
+    var field = 0;
+    var start = 0;
+    while i < sym.len {
+        if sym[i] == ' ' {
+            if i + 1 < sym.len && sym[i + 1] == ' ' { i += 2; continue; }
+            field++;
+            if field == 2 { start = i + 1; }
+            if field == 4 { return sym[start..i]; }
+        }
+        i++;
+    }
+    return sym[0..0];
+}

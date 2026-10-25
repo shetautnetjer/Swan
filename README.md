@@ -6,6 +6,25 @@ does this file define?") as MCP tools for AYA. It is a Goose take on
 [Serena](https://github.com/oraios/serena): it keeps Serena's agent-facing
 tool design and replaces the engine underneath.
 
+## Where it's headed: a local JetBrains for agents
+
+An IDE knows a codebase as a graph, not as text: where every symbol is
+defined, who uses it, what it calls, what a change would break, and which
+tests cover it. Swan aims to give an agent that understanding headlessly,
+before it edits anything, from data a compiler produced rather than from
+guesses. Languages change slowly; dependencies change constantly. SCIP
+indexers cover both: they record references into dependencies with each
+package's name and version. The roadmap, most valuable first:
+
+1. Call graph and impact radius: done (`get_callers`, `get_callees`).
+2. Per-file refresh, so the map stays current while the agent edits.
+3. Tests for a symbol (partly there: `get_callers` flags test files).
+4. Types and implementations, from SCIP relationships.
+5. Dependency insight: which packages and versions the code leans on.
+6. Live errors, from `tsc` or a language server (not SCIP).
+7. Hot and fragile code, from git history.
+8. More languages: one SCIP indexer per language, into the same database.
+
 ## What "a Goose Serena" means here
 
 [Goose](https://aardappel.github.io/goose/) is Wouter van Oortmerssen's
@@ -53,6 +72,8 @@ only that whole path. Lines and columns in answers are 1-based.
 | `find_symbol` | `name_path_pattern`, `relative_path?`, `substring_matching?`, `include_body?`, `max_results?` | kind, signature, file, line, body line range, optionally the body |
 | `find_referencing_symbols` | `name_path`, `relative_path?`, `max_results?` | per matched symbol, every reference: file, line, column, the symbol it sits inside, and its line of source |
 | `get_symbols_overview` | `relative_path` (file or directory) | every symbol defined there, in order |
+| `get_callers` | `name_path`, `relative_path?`, `depth?` (1 to 5), `max_results?` | who uses the symbol, and who uses those: the impact radius, with each caller's distance and whether it is test code, and a summary of affected symbols, files and test files |
+| `get_callees` | `name_path`, `relative_path?`, `max_results?` | what the symbol's body uses, with counts; dependency symbols show their package and version |
 | `index_info` | none | repo root, build time, counts: for judging staleness |
 
 ## Use
@@ -85,6 +106,8 @@ bake-off's `index.scip`:
 | MCP cold start | 4.9 ms | spawn + initialize + first `find_referencing_symbols` |
 | `find_symbol` | 0.03 to 0.05 ms median | |
 | `find_referencing_symbols` | 1.0 to 2.1 ms median, p95 under 3.6 ms | 260 to 510 references, each with its source line |
+| `get_callers`, depth 3 | 20 to 26 ms, fresh process | `getBackend`: 768 symbols in 355 files, 180 of them test files |
+| `get_callees` | 0.9 ms, fresh process | 82 symbols used by `createRuntime` |
 
 These are a first slice's numbers, not a qualified benchmark. Correctness
 against Serena is the bake-off's job and is not claimed here.
@@ -122,6 +145,10 @@ The bake-off made two recommendations:
   repo only) stays the real bottleneck.
 
 ## Limits of this slice
+
+- The graph counts every reference as a use: SCIP does not tell a call from
+  a type use or an import. A class's callees are what its own body uses
+  outside its methods; ask about a method for what that method uses.
 
 - TypeScript only, through scip-typescript. Other SCIP indexers (Python,
   Rust, Go, Java) should work unchanged but have not been tried.

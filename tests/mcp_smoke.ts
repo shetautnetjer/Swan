@@ -57,7 +57,8 @@ check("initialize names the server", init.result.serverInfo.name === "swan");
 proc.stdin.write(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) + "\n");
 
 const tools = (await rpc("tools/list")).result.tools.map((t: any) => t.name);
-check(`tools/list: ${tools.join(", ")}`, tools.includes("find_symbol") && tools.includes("find_referencing_symbols"));
+check(`tools/list: ${tools.join(", ")}`, tools.includes("find_symbol") && tools.includes("find_referencing_symbols") &&
+  tools.includes("get_callers") && tools.includes("get_callees"));
 
 const add = await tool("find_symbol", { name_path_pattern: "Store/add", include_body: true });
 check("find_symbol Store/add: one method at src/store.ts:11", add.length === 1 && add[0].kind === "method" &&
@@ -79,6 +80,23 @@ check("a reference inside a method names that method (DEFAULT_WEIGHT in Store/ad
 const ov = await tool("get_symbols_overview", { relative_path: "src/store.ts" });
 check("overview of src/store.ts lists Store and makeStore",
   ov.some((s: any) => s.name_path === "Store") && ov.some((s: any) => s.name_path === "makeStore"));
+
+const impact = await tool("get_callers", { name_path: "Store/total", depth: 3 });
+const dist = Object.fromEntries(impact.callers.map((c: any) => [c.name_path, c.distance]));
+check("get_callers walks the chain: report at 1, summary at 2, testSummary at 3",
+  dist["report"] === 1 && dist["summary"] === 2 && dist["testSummary"] === 3);
+check("get_callers lists the test file to run",
+  impact.summary.test_files.includes("src/store.test.ts") &&
+  impact.callers.find((c: any) => c.name_path === "testSummary").is_test === true);
+
+const near = await tool("get_callers", { name_path: "Store/total" });
+check("get_callers defaults to direct callers only", near.callers.every((c: any) => c.distance === 1));
+
+const callees = await tool("get_callees", { name_path: "Store/add" });
+const names = callees.callees.map((c: any) => c.name_path);
+check("get_callees of Store/add: DEFAULT_WEIGHT, and Map/set from the typescript package",
+  names.includes("DEFAULT_WEIGHT") &&
+  callees.callees.some((c: any) => c.name_path === "Map/set" && c.package.startsWith("typescript ")));
 
 const info = await tool("index_info", {});
 check("index_info reports counts", Number(info.symbols) > 0 && Number(info.occurrences) > 0);
