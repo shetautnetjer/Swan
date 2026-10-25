@@ -18,7 +18,7 @@ import std;
 import os;
 import dictionary;
 
-let SCHEMA_VERSION = 6;
+let SCHEMA_VERSION = 7;
 
 let SCHEMA = """
     CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
@@ -63,7 +63,8 @@ let SCHEMA = """
         end_line INTEGER NOT NULL,
         end_col INTEGER NOT NULL,
         is_def INTEGER NOT NULL,
-        enclosing_id INTEGER
+        enclosing_id INTEGER,
+        by_name INTEGER NOT NULL DEFAULT 0   -- matched by name in a macro call, not resolved
     );
     """;
 
@@ -299,7 +300,7 @@ fn index_main(dir: const u8[:], db_path: const u8[:], root: const u8[:], refresh
     }
 
     // occurrences.tsv: symbol, file, start_line, start_col, end_line, end_col, def|ref
-    let ins_occ = prepare_or_die(db, "INSERT INTO occurrences VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)");
+    let ins_occ = prepare_or_die(db, "INSERT INTO occurrences VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)");
     var occ_count = 0;
     each_split(text[r..d], '\n') {
         guard it.len > 0;
@@ -323,6 +324,7 @@ fn index_main(dir: const u8[:], db_path: const u8[:], root: const u8[:], refresh
         swan_bind_int(ins_occ, 5, field_int(f[4]));
         swan_bind_int(ins_occ, 6, field_int(f[5]));
         swan_bind_int(ins_occ, 7, if is_def { 1 } else { 0 });
+        swan_bind_int(ins_occ, 9, if f[6] == "name" { 1 } else { 0 });
         if !is_def {
             let enc = enclosing(f[1], sl, sc);
             if enc >= 0 { swan_bind_int(ins_occ, 8, enc); }

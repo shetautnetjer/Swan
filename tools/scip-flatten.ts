@@ -2,7 +2,12 @@
 // parses protobuf. No dependencies: a minimal wire-format reader for the few
 // fields Swan needs (field numbers from github.com/sourcegraph/scip scip.proto).
 //
-//   bun tools/scip-flatten.ts <index.scip> <out-dir> [more.scip ...]
+//   bun tools/scip-flatten.ts [--root <repo>] <index.scip> <out-dir> [more.scip ...]
+//
+// With --root, Rust sources are read for one more pass: uses inside macro
+// calls (vec![...], matches!(...), assert!(...)) that rust-analyzer left out
+// are matched by name and written with role "name" instead of "ref". See
+// rustMacroUses below.
 //
 // Several SCIP files (one per language, say) flatten into one set of rows;
 // their symbols cannot collide, since each starts with its indexer's scheme.
@@ -66,13 +71,18 @@ const dec = new TextDecoder();
 const clean = (s: string) => s.replace(/[\t\n\r]/g, " ");
 const ROLE_DEFINITION = 1;
 
-const [indexPath, outDir, ...moreIndexes] = process.argv.slice(2);
+const argv = process.argv.slice(2);
+let repoRoot = "";
+if (argv[0] === "--root") { repoRoot = argv[1]; argv.splice(0, 2); }
+const [indexPath, outDir, ...moreIndexes] = argv;
 if (!indexPath || !outDir) {
-  console.error("usage: bun tools/scip-flatten.ts <index.scip> <out-dir> [more.scip ...]");
+  console.error("usage: bun tools/scip-flatten.ts [--root <repo>] <index.scip> <out-dir> [more.scip ...]");
   process.exit(2);
 }
 
-const occ: string[] = [];
+// Rows per document, in document order, so each file's rows stay together.
+const occByDoc = new Map<string, string[]>();
+const rustDocs: { path: string; taken: Set<string> }[] = [];
 const ext: string[] = [];
 const rel: string[] = [];
 const syms = new Map<string, string>();
@@ -100,6 +110,140 @@ function symbolInfo(r: Reader, path: string) {
     syms.set(symbol, [symbol, display, kind, enclosing, clean(doc).slice(0, 200)].join("\t"));
     // Rows need the defining file, so the refresh can replace them per file.
     if (path) for (const [other, flags] of related) rel.push([symbol, path, other, flags].join("\t"));
+  }
+}
+
+// rust-analyzer leaves trait impls out of SCIP's relationships, but names
+// what it can in the symbol itself: a method in `impl Provider for
+// HttpProvider` is `.../impl#[HttpProvider][Provider]name().` From that, and
+// the references on the impl header, this recovers two impl links: the type
+// implements the trait, and the method implements the trait's method.
+const RUST_TRAIT_IMPL = /^(.*\/)impl#\[(`[^`]*`|[^\]]*)\]\[(`[^`]*`|[^\]]*)\](.*)$/;
+const bareName = (n: string) => n.replace(/^`|`$/g, "").replace(/<.*$/s, "").trim();
+
+function rustImplLinks(path: string, pending: { range: number[]; symbol: string; roles: number }[]) {
+  const refs = pending.filter((p) => !(p.roles & ROLE_DEFINITION) && p.symbol.endsWith("#"));
+  const seen = new Set<string>();
+  for (const p of pending) {
+    if (!(p.roles & ROLE_DEFINITION) || !p.symbol.startsWith("rust-analyzer ")) continue;
+    const m = RUST_TRAIT_IMPL.exec(p.symbol);
+    if (!m) continue;
+    const [, , selfRaw, traitRaw, member] = m;
+    const self = bareName(selfRaw), trait = bareName(traitRaw), line = p.range[0];
+    // The nearest reference above the member whose symbol is the named type.
+    const nearest = (name: string) => {
+      let best: { range: number[]; symbol: string } | undefined;
+      for (const r of refs) {
+        if (r.range[0] > line) continue;
+        const tail = r.symbol.slice(r.symbol.lastIndexOf("/") + 1);
+        if (bareName(tail.slice(0, -1)) !== name) continue;
+        if (!best || r.range[0] >= best.range[0]) best = r;
+      }
+      return best?.symbol;
+    };
+    const traitSym = nearest(trait);
+    if (!traitSym) continue;
+    if (member) rel.push([p.symbol, path, traitSym + member, "ref,impl"].join("\t"));
+    const selfSym = nearest(self);
+    const key = `${selfSym}\t${traitSym}`;
+    if (selfSym && !seen.has(key)) {
+      seen.add(key);
+      rel.push([selfSym, path, traitSym, "impl"].join("\t"));
+    }
+  }
+}
+
+const defined = new Set<string>();
+
+// rust-analyzer resolves little inside macro calls, and nothing inside a
+// macro nested in another (`assert!(matches!(e, ProviderError::Timeout))`,
+// `vec![Message::new(..)]`). This pass reads each Rust file, finds macro
+// call arguments by their brackets, and matches the names in them against
+// this repo's own definitions: `Type::member` goes to the member when it
+// exists, else to the type; a lone capitalised name or a `name(` call goes
+// to the one definition with that name. Ambiguous names are skipped. The
+// rows carry role "name": found by name, not resolved by the compiler.
+function rustMacroUses() {
+  const lastName = (sym: string) => {
+    const m = /([A-Za-z_][A-Za-z0-9_]*|`[^`]*`)(?:\(\)\.|[#.])$/.exec(sym);
+    return m ? bareName(m[1]) : "";
+  };
+  const byName = new Map<string, string[]>();
+  for (const sym of defined) {
+    if (!sym.startsWith("rust-analyzer ") || sym.endsWith(")") || sym.endsWith("]")) continue;
+    const n = lastName(sym);
+    if (!n) continue;
+    if (!byName.has(n)) byName.set(n, []);
+    byName.get(n)!.push(sym);
+  }
+  const unique = (n: string) => { const c = byName.get(n); return c && c.length === 1 ? c[0] : undefined; };
+  const memberOf = (typeSym: string, member: string) => {
+    const module = typeSym.slice(0, typeSym.lastIndexOf("/") + 1);
+    const typeName = bareName(typeSym.slice(module.length, -1));
+    for (const cand of byName.get(member) ?? []) {
+      if (cand.startsWith(typeSym)) return cand;
+      if (cand.startsWith(`${module}impl#[${typeName}]`) || cand.startsWith(`${module}impl#[\`${typeName}<`)) return cand;
+    }
+    return undefined;
+  };
+  for (const { path, taken } of rustDocs) {
+    let text: string;
+    try { text = readFileSync(join(repoRoot, path), "utf8"); } catch { continue; }
+    const rows = occByDoc.get(path)!;
+    const lines = text.split("\n");
+    for (let ln = 0; ln < lines.length; ln++) {
+      const re = /\b[a-z_][a-z0-9_]*!\s*[(\[{]/g;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(lines[ln]))) {
+        // The arguments: up to the matching bracket, across lines, skipping strings.
+        let l = ln, c = m.index + m[0].length, depth = 1, inStr = false;
+        const tokens: { l: number; c: number; text: string }[] = [];
+        while (l < lines.length && depth > 0) {
+          const line = lines[l];
+          while (c < line.length && depth > 0) {
+            const ch = line[c];
+            if (inStr) { if (ch === "\\") c++; else if (ch === '"') inStr = false; c++; continue; }
+            if (ch === '"') { inStr = true; c++; continue; }
+            if ("([{".includes(ch)) depth++;
+            else if (")]}".includes(ch)) depth--;
+            const id = /^[A-Za-z_][A-Za-z0-9_]*/.exec(line.slice(c));
+            if (id && (c === 0 || !/[A-Za-z0-9_]/.test(line[c - 1]))) {
+              tokens.push({ l, c, text: id[0] });
+              c += id[0].length;
+              continue;
+            }
+            c++;
+          }
+          if (depth > 0) { l++; c = 0; }
+        }
+        for (let i = 0; i < tokens.length; i++) {
+          const t = tokens[i];
+          if (taken.has(`${t.l}:${t.c}`)) continue;
+          const line = lines[t.l];
+          const before = line.slice(0, t.c).trimEnd();
+          if (before.endsWith(".") || before.endsWith("::")) continue;   // a field, method or path tail
+          const after = line.slice(t.c + t.text.length);
+          let sym: string | undefined;
+          let at = t, len = t.text.length;
+          const path2 = /^::([A-Za-z_][A-Za-z0-9_]*)/.exec(after);
+          if (/^[A-Z]/.test(t.text)) {
+            const typeSym = unique(t.text);
+            if (typeSym && path2) {
+              const member = memberOf(typeSym, path2[1]);
+              if (member) { sym = member; at = { l: t.l, c: t.c + t.text.length + 2, text: path2[1] }; len = path2[1].length; }
+              else sym = typeSym;
+            } else sym = typeSym;
+          } else if (/^\s*\(/.test(after)) {
+            const f = unique(t.text);
+            if (f && f.endsWith("().")) sym = f;
+          }
+          if (!sym || taken.has(`${at.l}:${at.c}`)) continue;
+          taken.add(`${at.l}:${at.c}`);
+          rows.push([sym, path, at.l, at.c, at.l, at.c + len, "name"].join("\t"));
+        }
+        re.lastIndex = l === ln ? c : lines[ln].length;   // nested macros were inside these args
+      }
+    }
   }
 }
 
@@ -136,13 +280,24 @@ root.fields((f, _wt, r) => {
       pending.push({ range, enclosing, symbol, roles });
     }
   });
+  rustImplLinks(path, pending);
+  const rows = occByDoc.get(path) ?? [];
+  occByDoc.set(path, rows);
+  if (pending.some((p) => p.symbol.startsWith("rust-analyzer "))) {
+    // Every position rust-analyzer already resolved, locals included.
+    rustDocs.push({ path, taken: new Set(pending.map((p) => `${p.range[0]}:${p.range[1]}`)) });
+  }
   for (const { range, enclosing, symbol, roles } of pending) {
     if (!symbol || symbol.startsWith("local ")) continue;
-    occ.push([symbol, path, ...span(range), roles & ROLE_DEFINITION ? "def" : "ref"].join("\t"));
+    if (roles & ROLE_DEFINITION) defined.add(symbol);
+    rows.push([symbol, path, ...span(range), roles & ROLE_DEFINITION ? "def" : "ref"].join("\t"));
     if (enclosing.length >= 3) ext.push([symbol, path, ...span(enclosing)].join("\t"));
   }
 });
 }
+
+if (repoRoot) rustMacroUses();
+const occ = [...occByDoc.values()].flat();
 
 mkdirSync(outDir, { recursive: true });
 writeFileSync(join(outDir, "occurrences.tsv"), occ.join("\n") + "\n");

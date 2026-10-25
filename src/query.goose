@@ -137,16 +137,36 @@ fn find_symbol(db: i64, pattern: const u8[:], rel: const u8[:], substring: bool,
 
 // The references to every symbol the name path matches, each with the
 // symbol it sits inside and its line of source.
-fn find_referencing_symbols(db: i64, pattern: const u8[:], rel: const u8[:], limit: i64, out: u8[>..]&) {
+// With `members`, uses of what the symbol holds count too, each marked with
+// the member it went through ("via"): an enum's variants, a class's methods
+// and fields, and in Rust the functions of its impl blocks. That is how
+// `ProviderError::Timeout` or `Message::new` counts as a use of the type,
+// which rust-analyzer records only against the variant or function.
+fn find_referencing_symbols(db: i64, pattern: const u8[:], rel: const u8[:], limit: i64, members: bool,
+                            out: u8[>..]&) {
     let sql, bind = match_sql(pattern, false);
     let st = prepare_or_die(db, sql);
     swan_bind_text(st, 1, bind);
     swan_bind_text(st, 2, rel);
     swan_bind_int(st, 3, 20);
     let refs = prepare_or_die(db, """
-        SELECT o.file, o.start_line, o.start_col, e.name_path, e.kind
-        FROM occurrences o LEFT JOIN symbols e ON e.id = o.enclosing_id
-        WHERE o.symbol_id = ?1 AND o.is_def = 0
+        WITH t AS (SELECT id, scip, name,
+                          substr(scip, 1, length(rtrim(scip, replace(scip, '/', '')))) AS module
+                   FROM symbols WHERE id = ?1),
+        targets AS (
+            SELECT id FROM t
+            UNION
+            SELECT s.id FROM symbols s, t
+            WHERE ?3 = 1 AND s.id != t.id AND (
+                substr(s.scip, 1, length(t.scip)) = t.scip
+                OR substr(s.scip, 1, length(t.module) + length(t.name) + 7) = t.module || 'impl#[' || t.name || ']'
+                OR substr(s.scip, 1, length(t.module) + length(t.name) + 8) = t.module || 'impl#[`' || t.name || '<'))
+        SELECT o.file, o.start_line, o.start_col, e.name_path, e.kind,
+               CASE WHEN o.symbol_id = ?1 THEN '' ELSE v.name_path END, o.by_name
+        FROM occurrences o
+        JOIN symbols v ON v.id = o.symbol_id
+        LEFT JOIN symbols e ON e.id = o.enclosing_id
+        WHERE o.symbol_id IN (SELECT id FROM targets) AND o.is_def = 0
         ORDER BY o.file, o.start_line, o.start_col
         LIMIT ?2
         """);
@@ -168,6 +188,7 @@ fn find_referencing_symbols(db: i64, pattern: const u8[:], rel: const u8[:], lim
         out.push('[');
         swan_bind_int(refs, 1, swan_col_int(st, 0));
         swan_bind_int(refs, 2, limit);
+        swan_bind_int(refs, 3, if members { 1 } else { 0 });
         var k = 0;
         while swan_step(refs, err) == 1 {
             if k > 0 { out.push(','); }
@@ -203,6 +224,14 @@ fn find_referencing_symbols(db: i64, pattern: const u8[:], rel: const u8[:], lim
                 out.push(',');
                 json::format_key(out, "in_kind");
                 json::format_string(out, enc);
+            }
+            if swan_col_int(refs, 6) == 1 { out.append(",\"by_name\":true"); }
+            var via: u8[>..] = [];
+            swan_col_text(refs, 5, via);
+            if via.len > 0 {
+                out.push(',');
+                json::format_key(out, "via");
+                json::format_string(out, via);
             }
             if starts.len > 0 {
                 out.push(',');

@@ -85,13 +85,30 @@ fn describe(sym: const u8[:], path: u8[>..]&) -> const u8[:], u8, u8 {
     var last = d[0..0];
     var suffix: u8 = '?';
     var parent: u8 = '?';
+    // rust-analyzer writes an impl block as `impl#[SelfType][Trait]`; the
+    // name path uses the self type, as Rust code reads (HttpProvider/new).
+    var in_impl = 0;      // 1 after impl#, 2 after its self type
     each_descriptor(d) { name, s =>
-        last = name;
-        parent = suffix;
-        suffix = s;
-        if s != '/' {
-            if path.len > 0 { path.push('/'); }
-            path.append(name);
+        if s == '#' && name == "impl" {
+            in_impl = 1;
+        } else if in_impl > 0 && s == 'g' {
+            if in_impl == 1 {
+                let lt = find(name, "<");
+                if path.len > 0 { path.push('/'); }
+                path.append(if lt > 0 { name[..lt] } else { name });
+                parent = '#';
+                suffix = '#';
+                in_impl = 2;
+            }
+        } else {
+            in_impl = 0;
+            last = name;
+            parent = suffix;
+            suffix = s;
+            if s != '/' {
+                if path.len > 0 { path.push('/'); }
+                path.append(name);
+            }
         }
     };
     if path.len == 0 { path.append(last); }

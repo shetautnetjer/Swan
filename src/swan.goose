@@ -1,7 +1,7 @@
 // Swan: a code map for agents. SCIP data in, SQLite map, MCP tools out.
 //   swan index <flattened-dir> <db> [repo-root]     a new map
 //   swan refresh <flattened-dir> <db> [repo-root]   rewrite only the files whose rows changed
-//   swan query <db> symbol|refs|overview|callers|callees|impls|hierarchy|unused|info <arg> [relative_path]
+//   swan query <db> symbol|refs|uses|overview|callers|callees|impls|hierarchy|unused|info <arg> [relative_path]
 //   swan serve <db>            MCP over stdio
 import std;
 import os;
@@ -18,7 +18,7 @@ fn usage() {
     write_stderr("""
         usage: swan index <flattened-dir> <db> [repo-root]
                swan refresh <flattened-dir> <db> [repo-root]
-               swan query <db> symbol|refs|overview|callers|callees|impls|hierarchy|unused|info <arg> [relative_path]
+               swan query <db> symbol|refs|uses|overview|callers|callees|impls|hierarchy|unused|info <arg> [relative_path]
                swan serve <db>
 
         """);
@@ -46,7 +46,8 @@ fn main() {
         let rel = if a.len > 5 { a[5] } else { "" };
         var out: u8[>..] = [];
         if a[3] == "symbol" { find_symbol(db, a[4], rel, false, true, 50, out); }
-        else if a[3] == "refs" { find_referencing_symbols(db, a[4], rel, 500, out); }
+        else if a[3] == "refs" { find_referencing_symbols(db, a[4], rel, 500, false, out); }
+        else if a[3] == "uses" { find_referencing_symbols(db, a[4], rel, 2000, true, out); }
         else if a[3] == "overview" { get_symbols_overview(db, a[4], out); }
         else if a[3] == "callers" { get_callers(db, a[4], rel, 3, 200, out); }
         else if a[3] == "callees" { get_callees(db, a[4], rel, 200, out); }

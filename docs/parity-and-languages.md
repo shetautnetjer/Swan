@@ -99,17 +99,32 @@ workspace (21 .rs files), mapped together with its one Python file.**
 - Eight types and functions checked against ripgrep. Swan only listed real
   uses. It correctly left out `std::process::Command`, which ripgrep can't
   tell apart from the crate's own `Command` enum.
-- Gaps:
+- Gaps found, and what Swan does about them now:
   - Uses through a path (`ProviderError::Timeout`, `Message::new`) count as
-    uses of the variant or function, not of the type. So references to a
-    type undercount; ask about the member as well.
-  - No relationships: trait impls (`impl Provider for X`, 4 in this
-    workspace) are not emitted, so `find_implementations` finds nothing for
-    Rust traits.
+    uses of the variant or function, not of the type. Fixed with
+    `find_referencing_symbols` and `include_members`: uses through variants,
+    fields and impl functions count, each marked `via`.
+  - No relationships: trait impls (`impl Provider for X`) are not emitted.
+    Fixed in the flattener. rust-analyzer's symbol for a trait-impl method
+    (`impl#[HttpProvider][Provider]complete().`) names both types, and the
+    impl header's references resolve them. All 4 impls in the workspace are
+    found, with their methods.
+  - Uses inside macro calls, above all nested ones (`assert!(matches!(..))`,
+    `vec![Message::new(..)]`), are mostly missing. This was the real cause of
+    the misses. Now handled by name: the flattener reads each Rust file,
+    finds macro arguments by their brackets, and matches names against the
+    repo's own definitions. Ambiguous names are skipped, and these rows say
+    `by_name`. With both fixes, five types checked against ripgrep were
+    found on every line where they really occur (79/79, 24/24, 39/39,
+    32/32). `Command` correctly stays at 8, because the other 9 lines are
+    `std::process::Command`.
+  - Impl members are named by their type (`HttpProvider/complete`), not
+    `impl/HttpProvider/Provider/complete`.
   - rust-analyzer logs "definition should have been in an SCIP document"
     for a few symbols (6 here).
   - It runs `cargo` and writes build output. `scripts/scip-run.sh` points
-    `CARGO_TARGET_DIR` into the output folder so the repo stays untouched.
+    `CARGO_TARGET_DIR` into the output folder. Cargo still writes a
+    `Cargo.lock` into a repo that has none, so map a copy of such a repo.
 
 What Swan must change for many languages: run the right indexer per
 language (detect by files present), store a `language` column, and fix two

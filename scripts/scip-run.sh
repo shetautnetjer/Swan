@@ -43,4 +43,4 @@ fi
 shopt -s nullglob
 scips=("$out"/index-*.scip)
 [ ${#scips[@]} -gt 0 ] || { echo "no language found to index in $repo" >&2; exit 1; }
-bun "$here/tools/scip-flatten.ts" "${scips[0]}" "$out" "${scips[@]:1}"
+bun "$here/tools/scip-flatten.ts" --root "$repo" "${scips[0]}" "$out" "${scips[@]:1}"

@@ -63,6 +63,15 @@ as_of: 2026-10-25
 - `tests/edit_check.ts` edits a fixture copy, runs tsc, and checks every
   position Swan shifted matches a fresh SCIP run.
 
+## 2026-10-25 (late night): better Rust
+
+- Trait impls recovered from rust-analyzer symbol names in the flattener;
+  impl members named by type; `include_members` on find_referencing_symbols
+  (CLI `uses`); macro-argument uses matched by name (`by_name`, schema 7).
+- `fixtures/tiny-rs` + `tests/rust_check.ts`. On the private Rust workspace
+  types are now found on every line ripgrep finds them (excluding lines that
+  are really other crates' same-named types).
+
 ## Next
 
 1. Bake-off reported 2026-10-25 (README "Against the code-map bake-off"):
