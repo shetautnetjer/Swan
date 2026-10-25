@@ -80,6 +80,9 @@ only that whole path. Lines and columns in answers are 1-based.
 | `get_callees` | `name_path`, `relative_path?`, `max_results?` | what the symbol's body uses, with counts; dependency symbols show their package and version |
 | `find_implementations` | `name_path`, `relative_path?`, `max_results?` | what implements, extends or overrides it (classes behind an interface, overrides of a method), with distance |
 | `get_type_hierarchy` | `name_path`, `relative_path?`, `depth?`, `max_results?` | supertypes and subtypes, from SCIP relationships |
+| `replace_symbol_body` | `name_path`, `relative_path`, `body` | replaces the whole definition; refused if the file changed since the map was built; reports how many places use the symbol |
+| `insert_after_symbol`, `insert_before_symbol` | `name_path`, `relative_path`, `body` | adds code next to a definition |
+| `rename_symbol` | `name_path`, `relative_path`, `new_name`, `apply?` | plans by default: every site, skipped aliases, conflicts, stale files; `apply` writes it |
 | `find_unused_symbols` | `relative_path?`, `include_tests?`, `max_results?` | functions, classes, methods, types and variables nothing references or implements: removal candidates, not proof |
 | `index_info` | none | repo root, build time, counts, and the files changed since the SCIP run |
 
@@ -172,7 +175,10 @@ The bake-off made two recommendations:
   indexer misses is in `docs/parity-and-languages.md`.
 - scip-typescript has no per-file mode, so every refresh reruns it over the
   whole repo (~17 s on the repo above). Swan's own part is 0.23 s.
-- Read-only: no Serena-style edits (`replace_symbol_body`, `insert_after_symbol`).
+- Edits shift the map's positions for the edited file at once (checked against a
+  fresh SCIP run in `tests/edit_check.ts`), but uses inside new code only
+  appear after a refresh. Renames cover what the compiler resolved, not
+  strings or comments.
 - File paths are stored as text on every row; a files table would shrink the
   database severalfold.
 - Document-local symbols (`local N`) are dropped, as in the bake-off.

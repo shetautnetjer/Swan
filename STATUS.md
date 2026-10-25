@@ -55,6 +55,14 @@ as_of: 2026-10-25
   (gitignored, never pushed). Findings, without private
   content, are in docs/parity-and-languages.md.
 
+## 2026-10-25 (late night): editing by symbol
+
+- `replace_symbol_body`, `insert_after_symbol`, `insert_before_symbol`,
+  `rename_symbol` (plan, then apply). Schema 6: body columns, and
+  `files.edited_mtime` so Swan's own edits are not "stale".
+- `tests/edit_check.ts` edits a fixture copy, runs tsc, and checks every
+  position Swan shifted matches a fresh SCIP run.
+
 ## Next
 
 1. Bake-off reported 2026-10-25 (README "Against the code-map bake-off"):

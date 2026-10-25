@@ -28,9 +28,9 @@ The JetBrains back end adds refactoring tools that LSP lacks.
 
 | Serena tool | Swan today | Status |
 |---|---|---|
-| `replace_symbol_body` | missing; Swan already knows each symbol's body lines | missing, easy |
-| `insert_before_symbol` / `insert_after_symbol` | missing; same data | missing, easy |
-| `rename_symbol` (LSP), JetBrains `rename` | missing; every occurrence is known, but a safe rename must also handle strings, re-export aliases and shadowing | missing, hard |
+| `replace_symbol_body` | `replace_symbol_body` (exact SCIP span; refuses stale files; shifts the map) | done |
+| `insert_before_symbol` / `insert_after_symbol` | same names | done |
+| `rename_symbol` (LSP), JetBrains `rename` | `rename_symbol`: plan first, checks each site's text, skips aliases, refuses conflicts and stale files; strings and comments not covered | done, compiler-resolved uses only |
 | JetBrains `move`, `safe_delete` | missing; `safe_delete` = "zero references" check plus a delete | missing |
 | `replace_content`, `replace_lines`, `delete_lines`, `insert_at_line`, `replace_in_files`, `create_text_file` | not Swan's job: AYA's harness already edits files | out of scope |
 
