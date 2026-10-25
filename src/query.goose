@@ -140,7 +140,7 @@ fn find_symbol(db: i64, pattern: const u8[:], rel: const u8[:], substring: bool,
 // With `members`, uses of what the symbol holds count too, each marked with
 // the member it went through ("via"): an enum's variants, a class's methods
 // and fields, and in Rust the functions of its impl blocks. That is how
-// `ProviderError::Timeout` or `Message::new` counts as a use of the type,
+// `Shape::Square` or `Tile::new` counts as a use of the type,
 // which rust-analyzer records only against the variant or function.
 fn find_referencing_symbols(db: i64, pattern: const u8[:], rel: const u8[:], limit: i64, members: bool,
                             out: u8[>..]&) {

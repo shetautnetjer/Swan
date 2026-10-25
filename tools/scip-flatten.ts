@@ -114,8 +114,8 @@ function symbolInfo(r: Reader, path: string) {
 }
 
 // rust-analyzer leaves trait impls out of SCIP's relationships, but names
-// what it can in the symbol itself: a method in `impl Provider for
-// HttpProvider` is `.../impl#[HttpProvider][Provider]name().` From that, and
+// what it can in the symbol itself: a method in `impl Area for
+// Tile` is `.../impl#[Tile][Area]area().` From that, and
 // the references on the impl header, this recovers two impl links: the type
 // implements the trait, and the method implements the trait's method.
 const RUST_TRAIT_IMPL = /^(.*\/)impl#\[(`[^`]*`|[^\]]*)\]\[(`[^`]*`|[^\]]*)\](.*)$/;
@@ -156,8 +156,8 @@ function rustImplLinks(path: string, pending: { range: number[]; symbol: string;
 const defined = new Set<string>();
 
 // rust-analyzer resolves little inside macro calls, and nothing inside a
-// macro nested in another (`assert!(matches!(e, ProviderError::Timeout))`,
-// `vec![Message::new(..)]`). This pass reads each Rust file, finds macro
+// macro nested in another (`assert!(matches!(s, Shape::Circle(_)))`,
+// `vec![Tile::new(2)]`). This pass reads each Rust file, finds macro
 // call arguments by their brackets, and matches the names in them against
 // this repo's own definitions: `Type::member` goes to the member when it
 // exists, else to the type; a lone capitalised name or a `name(` call goes

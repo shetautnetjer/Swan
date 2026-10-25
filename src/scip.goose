@@ -86,7 +86,7 @@ fn describe(sym: const u8[:], path: u8[>..]&) -> const u8[:], u8, u8 {
     var suffix: u8 = '?';
     var parent: u8 = '?';
     // rust-analyzer writes an impl block as `impl#[SelfType][Trait]`; the
-    // name path uses the self type, as Rust code reads (HttpProvider/new).
+    // name path uses the self type, as Rust code reads (Tile/new).
     var in_impl = 0;      // 1 after impl#, 2 after its self type
     each_descriptor(d) { name, s =>
         if s == '#' && name == "impl" {

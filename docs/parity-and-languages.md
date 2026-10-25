@@ -100,26 +100,27 @@ workspace (21 .rs files), mapped together with its one Python file.**
   uses. It correctly left out `std::process::Command`, which ripgrep can't
   tell apart from the crate's own `Command` enum.
 - Gaps found, and what Swan does about them now:
-  - Uses through a path (`ProviderError::Timeout`, `Message::new`) count as
+  - Uses through a path (`Shape::Square`, `Tile::new`) count as
     uses of the variant or function, not of the type. Fixed with
     `find_referencing_symbols` and `include_members`: uses through variants,
     fields and impl functions count, each marked `via`.
-  - No relationships: trait impls (`impl Provider for X`) are not emitted.
+  - No relationships: trait impls (`impl Area for Tile`) are not emitted.
     Fixed in the flattener. rust-analyzer's symbol for a trait-impl method
-    (`impl#[HttpProvider][Provider]complete().`) names both types, and the
+    (`impl#[Tile][Area]area().`) names both types, and the
     impl header's references resolve them. All 4 impls in the workspace are
     found, with their methods.
   - Uses inside macro calls, above all nested ones (`assert!(matches!(..))`,
-    `vec![Message::new(..)]`), are mostly missing. This was the real cause of
+    `vec![Tile::new(..)]`), are mostly missing. This was the real cause of
     the misses. Now handled by name: the flattener reads each Rust file,
     finds macro arguments by their brackets, and matches names against the
     repo's own definitions. Ambiguous names are skipped, and these rows say
-    `by_name`. With both fixes, five types checked against ripgrep were
+    `by_name`. With both fixes, five of the workspace's types checked against ripgrep were
     found on every line where they really occur (79/79, 24/24, 39/39,
-    32/32). `Command` correctly stays at 8, because the other 9 lines are
-    `std::process::Command`.
-  - Impl members are named by their type (`HttpProvider/complete`), not
-    `impl/HttpProvider/Provider/complete`.
+    32/32). A type sharing its name with a
+    standard-library type correctly stays at 8 of ripgrep's 17 lines, because
+    the other 9 are the standard one.
+  - Impl members are named by their type (`Tile/area`), not
+    `impl/Tile/Area/area`.
   - rust-analyzer logs "definition should have been in an SCIP document"
     for a few symbols (6 here).
   - It runs `cargo` and writes build output. `scripts/scip-run.sh` points
