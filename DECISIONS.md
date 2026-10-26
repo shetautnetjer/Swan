@@ -96,6 +96,12 @@ the Goose runtime included, takes 8.2 s from an empty cache on 32 cores and
 few seconds, once per machine, for a CMake dependency, release assets per
 target and a runtime-version check. Not worth it now. The names stay for
 later: an egg is a package, the nest its registry, egg.toml its manifest.
+Mani's naming for per-language eggs, if tree-sitter or the language servers
+are ever split by language: `python-lsp.egg`, `java.egg` and so on, one per
+language. Measured for that split (2026-10-26): goose-treesitter with only
+the Rust grammar builds in 2.9 s against 7.7 s for all ten, and makes a
+1.4 MB program against 20.2 MB; Swan needs all ten, so it waits for a
+one-language user.
 Worth revisiting if Goose adds prebuilt packages itself or a target turns
 out slow to compile on (a phone, a small CI runner).
 ## 2026-10-26 — Bounded contribution preparation

@@ -1,10 +1,48 @@
 # Swan
 
-A code map for agents. Swan answers the questions an agent asks about a
-codebase ("where is `Store.add` defined?", "who calls `getBackend`?", "what
-does this file define?") as MCP tools for AYA. It is a Goose take on
-[Serena](https://github.com/oraios/serena): it keeps Serena's agent-facing
-tool design and replaces the engine underneath.
+**In plain words:** Swan gives an AI coding agent the understanding of a
+codebase that an IDE like JetBrains has: where everything is defined, who
+uses it, what a change would break, which tests to run, and what errors a
+file has right now. The agent asks Swan instead of guessing from text, and
+gets answers in milliseconds. Swan runs on your own machine, reads your code
+without changing it (unless you ask it to edit), and talks to agents over
+MCP, the standard way agents use tools. It is built in
+[Goose](https://aardappel.github.io/goose/) and is a take on
+[Serena](https://github.com/oraios/serena): Serena's tool design, a different
+engine underneath.
+
+**What it can do today (2026-10-26):**
+
+| You want to know | Swan tool | How fast |
+| --- | --- | --- |
+| Where is this defined, and who uses it? | `find_symbol`, `find_referencing_symbols` | a few ms |
+| What breaks if I change this, and which tests cover it? | `get_callers`, `run_tests` | about 10 ms |
+| What implements this interface or trait? | `find_implementations`, `get_type_hierarchy` | a few ms |
+| What errors does this file have right now, after my edit? | `get_diagnostics` with `live` | 0.4 to 0.9 s |
+| Every place that looks like `$X.unwrap()`, and rewrite them all | `search_pattern`, `rewrite_pattern` | 0.14 s over 2,361 files |
+| Edit or rename a function by name, safely | `replace_symbol_body`, `rename_symbol` | refused if the file changed under it |
+
+Languages: TypeScript and JavaScript, Python, Rust, Java, Kotlin (including
+Android projects), C, C++ and CUDA. How deep each one goes depends on the
+tools installed for it; see [parity and languages](docs/parity-and-languages.md).
+
+**Keeping up with edits:** after a one-line edit, re-mapping a 2,361-file
+TypeScript project takes about 2 s (it used to take 8 to 10 s), and nothing
+changed takes 0.07 s. A language server can be started ahead of time
+(`SWAN_WARM=auto`) so the first live error check takes 0.7 s instead of 3.6 s.
+
+**Built from reusable pieces:** three Goose libraries came out of Swan and can
+be used by any Goose program:
+[goose-sqlite](https://github.com/shetautnetjer/goose-sqlite),
+[goose-treesitter](https://github.com/shetautnetjer/goose-treesitter) and
+[goose-lsp](https://github.com/shetautnetjer/goose-lsp). Each has its own
+standalone tests.
+
+**Try it without installing anything else:** after building,
+`python3 scripts/demo-offline.py` runs a small known-answer demo on synthetic
+data ([demo and test scope](docs/demo.md)).
+
+The rest of this page is the technical detail.
 
 ## Where it's headed: a local JetBrains for agents
 
@@ -162,7 +200,18 @@ pieces that index side by side, and reuses what has not changed: a
 2,853-file Python repo went from 159 s to 63 s for a first map, 8.8 s after
 a one-file edit, and under a second when nothing changed. TypeScript is
 split into chunks when it is the long pole (AEON: 18.6 s to 10.1 s).
-Details in `docs/speed.md`.
+
+After an edit, only the changed files and the files that use them are
+indexed again, as a small extra run layered over the kept chunks: on AEON a
+one-line edit re-maps in 2.0 s (8.4 s before), an edit to a file 266 others
+use in 7.8 s, and an unchanged repo in 0.07 s. The result matches a fresh map
+on all but 35 of 713,268 rows, those being scip-typescript's own numbering of
+anonymous types, which also differs between two fresh maps.
+
+`SWAN_WARM=<language>` or `SWAN_WARM=auto` starts a language server when
+`swan serve` starts and opens one file, so the server loads the project
+while the agent does other things. Off by default, since a resident server
+holds 0.5 to 1.4 GB. Details in `docs/speed.md`.
 
 ## Per-language tools
 
@@ -186,6 +235,32 @@ including files whose resolution changed because of an edit elsewhere.
 Producing the SCIP input remains a separate cost. The compiler/cache
 measurements in [packages.md](docs/packages.md) compare only this Goose
 toolchain's own build states, not other languages or package ecosystems.
+
+## Historical: the code-map bake-off (2026-10-25)
+
+Kept as a dated record; these numbers were measured once and not rerun.
+A separate bake-off compared a Goose in-memory snapshot with Rust + SQLite
+on the same SCIP data for AEON. Both matched the TypeScript language server
+on all 20 symbols it checked. Rust + SQLite won fresh-process lookups
+(0.69 ms against 12.7 ms) because Goose's `from_bytes` verifies and copies
+the whole 30 MB image on every start. Swan does not use that snapshot: its
+map lives in SQLite on disk, and a query reads only the pages it touches.
+On the same machine, `find_symbol getBackend` took 0.62 ms median (0.87 ms
+p95) in a fresh process, against the bake-off's 0.69 / 0.83 ms for its own
+query mix. The bake-off's two recommendations, lookup by short name and
+per-file reindex, are both in Swan.
+
+## Eggs: prebuilt packages, measured and parked
+
+An idea from 2026-10-26: ship Goose packages prebuilt ("eggs", one per
+language, such as `python-lsp.egg` or `java.egg`, listed in a registry
+called the "nest", each described by an `egg.toml`). Measured: a cold build
+of a program using goose-treesitter takes about 8 s and 0.2 s once Goose has
+cached it, so prebuilding would save a few seconds once per machine. Parked
+until a machine slow to compile or Goose's own prebuilt-package support makes
+it worthwhile. A tree-sitter build with one grammar instead of ten took 2.9 s
+instead of 7.7 s and made a 1.4 MB program instead of 20 MB; that split waits
+for a user who needs only one language. See DECISIONS.md.
 
 ## Limits of this slice
 

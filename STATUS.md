@@ -228,6 +228,19 @@ publication is part of this work. See docs/contribution-proposal.md.
 The local validation record is docs/validation.md; it distinguishes passed
 checks from the complete integration suite that was not rerun.
 
+## 2026-10-26 (evening): speed, warm servers, validation merged
+
+- TypeScript edits reindex only the changed files and their users (AEON
+  one-line edit: 2.0 s, was 8.4 s); `SWAN_WARM` starts a language server
+  early (first live answer 0.7 s, was 3.6 s); search_pattern 0.14 s.
+- Mufasa's standalone validation merged: library tests (SQLite 43,
+  tree-sitter 52, goose-lsp 11 against a mock server), an offline Swan demo
+  and a build benchmark script. Rechecked on merged copies, plus the full
+  suite with the real servers, Kotlin and the ast-grep ledger.
+- Libraries released: goose-sqlite v0.1.1, goose-treesitter v0.1.2,
+  goose-lsp v0.1.2 (output read on a thread, an `open` question).
+- Eggs measured and parked (DECISIONS.md).
+
 ## Remaining work
 
 1. Qualify real server adapters and indexers separately from the mock LSP
