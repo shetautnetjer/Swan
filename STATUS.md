@@ -105,6 +105,24 @@ as_of: 2026-10-25
   modules (tools/modules.json): ruff/biome/clippy lint, format_file,
   run_tests. Compared with WebStorm's MCP on live AEON (read-only).
 
+## 2026-10-26: live answers from rust-analyzer, as a separate Goose library
+
+- `lsp/swanlsp.goose` is a language-server client compiled on its own
+  (`goose --standalone`) to `build/swanlsp.c` and linked into swan through
+  `native/lsp_glue.c`; scripts/build.sh regenerates it only when lsp/ changes.
+  Two Goose runtimes share the binary; nothing crosses but slices.
+- `get_diagnostics` and `find_implementations` take `live: true`: swan serve
+  keeps rust-analyzer running (tools/modules.json "lsp") and answers from it.
+- Measured: core build after a core edit 4.34 s (4.16 s before: flat); after
+  a library edit 17.4 s (gcc on 650 KB of C, rare). tiny-rs: a new E0061
+  seen 0.40 s after asking; a new impl seen live while the map has the old
+  two. A private Rust workspace (copy): RA ready 9.5 s, E0308 seen 0.52 s after an
+  edit, live impls = SCIP impls (same 4; live points at the impl blocks,
+  SCIP at the types), RA ~1.1 GB resident, stopped when serve exits.
+- Parallel indexing now also caps jobs by free memory (about 3 GB a job).
+- Limits: one live server per process; files edited elsewhere are seen by
+  rust-analyzer's own watcher, the asked file is always resynced.
+
 ## Next
 
 1. Bake-off reported 2026-10-25 (README "Against the code-map bake-off"):

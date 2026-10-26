@@ -238,7 +238,20 @@ fn jobs_limit() -> i64 {
         let n, ok = parse_int(v);
         if ok && n > 0 { return n; }
     }
-    return max(1, min(8, (swan_cpu_count() / 2) as i64));
+    // Half the cores, at most 8, and no more than the free memory holds at
+    // about 3 GB a job (scip-python reached 10 GB on a big repo), so a big
+    // map pushes the desktop into swap less.
+    var by_mem: i64 = 8;
+    var info: u8[>..] = [];
+    if read_file("/proc/meminfo", info) {
+        each_split(info, '\n') { l =>
+            if starts_with(l, "MemAvailable:") {
+                let kb, ok = parse_int(trim(trim(l[13..])[..find(trim(l[13..]), " ")]));
+                if ok { by_mem = kb / (3 * 1024 * 1024); }
+            }
+        };
+    }
+    return max(1, min(min(8, (swan_cpu_count() / 2) as i64), by_mem));
 }
 
 // Splits a repo's Python into about k pieces of similar size for parallel

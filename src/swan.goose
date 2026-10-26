@@ -17,6 +17,7 @@ import .diag;
 import .run;
 import .pipeline;
 import .modules;
+import .live;
 
 fn usage() {
     write_stderr("""

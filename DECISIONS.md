@@ -42,3 +42,15 @@ Enclosing symbols are file-local, so unchanged files need no rework, and
 symbol ids stay stable (looked up by SCIP symbol, unique index). A full build
 uses the same code with every file marked changed. Cost: reading every row
 (0.22 s on AEON) even when nothing changed; fine next to the 16.5 s SCIP run.
+
+## 2026-10-26 — Language-server clients as separately compiled Goose libraries
+
+Goose compiles whole programs, so every module added to swan adds to its
+build. The live client is instead its own Goose program compiled with
+`--standalone` to C and linked like SQLite: swan's build caches the compiled
+C, so a core edit stays at about 4.3 s. The library's runtime is separate;
+the glue starts it once (goose_init) and only slices cross. Native helpers
+it calls (native/proc.c) touch no Goose runtime state, because builders from
+one runtime must not be grown by the other. The server dying is reported,
+never fatal, since the library runs inside swan serve. Pyright and the
+TypeScript server go in the same library next (one goose_init per binary).
