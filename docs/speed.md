@@ -113,3 +113,15 @@ After that series, the map matches a fresh one on 713,233 of 713,268
 occurrence rows. The 35 that differ are scip-typescript's order-dependent
 counters for repeated anonymous names (`text0` against `text2`), which also
 differ between two fresh chunked maps.
+
+### Warm language servers
+
+`SWAN_WARM=<language>` or `SWAN_WARM=auto` (the language with the most files)
+starts that language's server as soon as `swan serve` has answered
+`initialize`, and opens its largest file so the server starts loading the
+project. goose-lsp v0.1.1 reads the server's output on a thread, so a server
+busy indexing never stalls on a full pipe while nobody asks it anything. Off
+by default: a resident server costs memory.
+
+AEON copy, the first live `get_diagnostics` on src/agent-presets.ts, asked
+10 s after `initialize`: 3.56 s without warming, 0.66 s with SWAN_WARM=auto.

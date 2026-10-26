@@ -171,6 +171,7 @@ fn call_tool(db: i64, name: const u8[:], args: json::Node?, out: u8[>..]&) -> bo
 
 fn serve_main(db_path: const u8[:]) {
     let db = open_db(db_path);
+    var warmed = false;
     loop {
         var line: u8[>..] = [];
         guard read_line(line) else { break; }
@@ -188,6 +189,7 @@ fn serve_main(db_path: const u8[:]) {
             continue;
         }
         let method = arg_text(root, "method");
+        let is_init = method == "initialize";
         let id = json::member(root, "id");
         guard id else { continue; }     // a notification: nothing to answer
         let params = json::member(root, "params");
@@ -224,6 +226,7 @@ fn serve_main(db_path: const u8[:]) {
         out.push('\n');
         write_stdout(out);
         flush_stdout();
+        if is_init && !warmed { warmed = true; live_warm(db); }
     }
     live_stop();
     sqlite::close(db);

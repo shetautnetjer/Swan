@@ -156,3 +156,53 @@ fn live_implementations(db: i64, pattern: const u8[:], rel: const u8[:], out: u8
     out.append("]}");
     return true;
 }
+
+// SWAN_WARM=<language> (rust, python, typescript, kotlin) or =auto starts
+// that language's server as soon as swan serve has answered initialize, so
+// its indexing (or Gradle import) runs while the agent does other things
+// and the first live question does not wait for it. auto picks the language
+// with the most files in the map. Off by default: a resident server costs
+// memory (rust-analyzer and pyright 0.5 to 1 GB, the Kotlin server 1.4 GB).
+fn live_warm(db: i64) {
+    var want: u8[>..] = [];
+    guard env("SWAN_WARM", want) && want.len > 0;
+    if want == "auto" {
+        want.clear();
+        var best = 0;
+        // Files per language, by ending: (language, LIKE pattern) pairs.
+        let st = prepare_or_die(db, """
+            SELECT lang, count(*) AS n FROM (
+              SELECT CASE WHEN file LIKE '%.py' THEN 'python' WHEN file LIKE '%.rs' THEN 'rust'
+                          WHEN file LIKE '%.kt' THEN 'kotlin'
+                          WHEN file LIKE '%.ts' OR file LIKE '%.tsx' OR file LIKE '%.js' THEN 'typescript' END AS lang
+              FROM files) WHERE lang IS NOT NULL GROUP BY lang ORDER BY n DESC LIMIT 1
+            """);
+        var err: u8[>..] = [];
+        if sqlite::step(st, err) == 1 { sqlite::col_text(st, 0, want); best = sqlite::col_int(st, 1); }
+        sqlite::finalize(st);
+        guard want.len > 0;
+    }
+    var why: u8[>..] = [];
+    let t0 = clock();
+    if live_start(db, want, why) {
+        // Open one of its files, so it starts loading the project now.
+        let pat = match want[0] { 'p' => "%.py", 'r' => "%.rs", 'k' => "%.kt", _ => "%.ts" };
+        let st = prepare_or_die(db, "SELECT file FROM files WHERE file LIKE ?1 ORDER BY rows DESC LIMIT 1");
+        sqlite::bind_text(st, 1, pat);
+        var err: u8[>..] = [];
+        var file: u8[>..] = [];
+        if sqlite::step(st, err) == 1 { sqlite::col_text(st, 0, file); }
+        sqlite::finalize(st);
+        if file.len > 0 {
+            var q: u8[>..] = [];
+            q.append("{\"op\":\"open\",\"file\":");
+            json::format_string(q, file);
+            q.push('}');
+            var a: u8[>..] = [];
+            golsp_ask(q, a);
+        }
+        write_stderr(str("swan serve: ", want, " server started (warm) in ", ((clock() - t0) * 1000.0) as i64, " ms\n"));
+    } else {
+        write_stderr(str("swan serve: could not warm ", want, ": ", why, "\n"));
+    }
+}
