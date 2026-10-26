@@ -1,8 +1,0 @@
-// Swan's native part: file and process helpers (SQLite is the goose-sqlite
-// package), and the live language-server client.
-// build/golsp.c is the goose-lsp library (the lsp/ submodule), Goose
-// compiled to C on its own by scripts/build.sh; lsp/native/glue.c is the door
-// to it.
-c_sources = ["../native/swan_sys.c",
-             "../lsp/native/proc.c", "../lsp/native/glue.c", "../build/golsp.c"];
-output = "swan";
