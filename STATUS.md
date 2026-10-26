@@ -1,6 +1,11 @@
 # Swan status
 
-as_of: 2026-10-25
+as_of: 2026-10-26
+
+This is a chronological development log. Earlier "not done" statements,
+private-repo timings and "all tests pass" entries describe their original
+runs, not the current contribution's validation. The current standalone
+test/demo scope is in docs/demo.md and package boundaries in docs/packages.md.
 
 ## State: experiment, first slice working
 
@@ -107,9 +112,9 @@ as_of: 2026-10-25
 
 ## 2026-10-26: live answers from rust-analyzer, as a separate Goose library
 
-- `lsp/swanlsp.goose` is a language-server client compiled on its own
-  (`goose --standalone`) to `build/swanlsp.c` and linked into swan through
-  `native/lsp_glue.c`; scripts/build.sh regenerates it only when lsp/ changes.
+- The language-server client (now `lsp/golsp.goose`) is compiled on its own
+  (`goose --standalone`) to `build/golsp.c` and linked through
+  `lsp/native/glue.c`; scripts/build.sh regenerates it when lsp/ changes.
   Two Goose runtimes share the binary; nothing crosses but slices.
 - `get_diagnostics` and `find_implementations` take `live: true`: swan serve
   keeps rust-analyzer running (tools/modules.json "lsp") and answers from it.
@@ -213,11 +218,21 @@ as_of: 2026-10-25
 - A fresh build fetching both packages took 69 s; a core edit builds in
   5.0 s, as before. All tests pass.
 
-## Next
+## Contribution preparation (2026-10-26)
 
-1. Bake-off reported 2026-10-25 (README "Against the code-map bake-off"):
-   Swan already has the SQLite fresh-start win; per-file refresh is next.
-2. Register `bin/swan serve <db>` with AYA's MCP config once the owner says so.
-3. Roadmap 3 to 8 in the README (tests for a symbol, SCIP relationships,
-   dependency insight, live errors, git churn, more languages).
-4. Files table to shrink the database; Python via scip-python.
+The bounded contribution adds standalone library checks, an offline Swan
+demo and reproducible compiler/cache measurements, and corrects stale
+architecture descriptions. It preserves existing APIs, language-server
+processes and Goose's repository/ref packaging. No deployment or upstream
+publication is part of this work. See docs/contribution-proposal.md.
+The local validation record is docs/validation.md; it distinguishes passed
+checks from the complete integration suite that was not rerun.
+
+## Remaining work
+
+1. Qualify real server adapters and indexers separately from the mock LSP
+   and synthetic-row tests; existing integrations need their full toolchains.
+2. Dependency listing, git churn, broader language coverage and stronger
+   refactoring semantics remain candidates, not completed features.
+3. Grammar-specific native packages and an importable LSP facade need a
+   design decision supported by build measurements; see docs/packages.md.

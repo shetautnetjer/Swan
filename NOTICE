@@ -22,4 +22,4 @@ C, C++ and CUDA, all MIT; none of their code is in this repository. The live
 language-server client is the goose-lsp package (lsp/, a submodule). Structural search follows ast-grep's
 pattern syntax and matching rules (https://ast-grep.github.io, MIT); no
 ast-grep code is used. The live adapters drive rust-analyzer, pyright and
-typescript-language-server as installed tools.
+typescript-language-server and JetBrains' Kotlin language server as installed tools.

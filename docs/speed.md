@@ -2,6 +2,10 @@
 
 as_of: 2026-10-26, on the development machine (32 cores, 59 GB).
 
+These are historical indexer measurements, not compiler-build benchmarks
+or fresh validation of the standalone libraries. See [packages.md](packages.md)
+for the compiler/cache experiment and [demo.md](demo.md) for a small replay.
+
 ## Where the time went
 
 | Repo | Total | Indexer | Flatten | SQLite load |
@@ -67,7 +71,7 @@ results.
 | Starting the largest pieces first (by bytes) | slower: 71 s against 67 s, because bytes predict scip-python's time badly | no |
 | More parallel jobs (`SWAN_JOBS=16`) | Python repo 70 s to 60 s, but up to 3 GB per process | no, left as the documented `SWAN_JOBS` setting |
 | Per-language databases, a separate lean read path | not built: reads already take 0.03 to 3 ms in a long-lived MCP process | no |
-| Resident pyright and rust-analyzer | not built yet: the next step for live errors and small refreshes, and a bigger job | later |
+| Resident pyright and rust-analyzer | deferred during this pass; live diagnostics were subsequently added through goose-lsp (see STATUS.md) | separate follow-up |
 
 Two fixes found on the way. scip-typescript numbers anonymous type
 literals by walk order, so those numbers are dropped. And when a repo has

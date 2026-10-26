@@ -1,6 +1,6 @@
 # Finding where errors are, and where an edit could cause them
 
-as_of: 2026-10-25
+as_of: 2026-10-26
 
 ## What the others do
 
@@ -18,8 +18,12 @@ as_of: 2026-10-25
 
 ## Swan's approach
 
-Swan has no live compiler: Goose cannot start processes, and a language
-server per repo is what Swan exists to avoid. So:
+Swan has both stored batch diagnostics and an optional live path. Goose
+uses C process helpers to start external checkers; `goose-lsp` runs one
+external language server at a time for `live: true` requests. Neither path
+is a Goose implementation of the external compiler or server.
+
+For batch diagnostics:
 
 1. `swan check <repo> <out-dir>` (or the MCP tool `check_errors`) runs each
    language's own checker: `tsc --noEmit` with the repo's tsconfig, `cargo
@@ -41,9 +45,18 @@ The loop an agent follows: change a symbol (`replace_symbol_body`), run
 `scripts/diagnose-repo.sh`, then call `get_diagnostics` on the changed symbol
 with `depth: 1`. What broke shows up where it broke, in the callers.
 
+For live diagnostics, `get_diagnostics` with `live: true` and a file asks
+the server configured in `tools/modules.json`: pyright for Python,
+typescript-language-server for TS/JS, rust-analyzer for Rust, or JetBrains'
+`intellij-server` for Kotlin. The client syncs the requested file and waits
+for the server's analysis; changing languages swaps servers. Kotlin may
+need a Gradle import first. This is not the full JetBrains inspection or
+refactoring engine. Java and CUDA have batch paths, not configured live
+servers in this version.
+
 ## Limits
 
-- Diagnostics are as fresh as the last check (tsc on the fixture is about a
+- Stored diagnostics are as fresh as the last check (tsc on the fixture is about a
   second; `cargo check` on a 4-crate workspace about 4 s once built).
 - pyright runs in its "standard" mode unless the repo configures it, which
   on untyped code reports a lot (40,000 on the Python repo below, mostly

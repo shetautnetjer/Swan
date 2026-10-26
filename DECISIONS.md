@@ -82,3 +82,16 @@ whole-program build). The language adapters (rust-analyzer, pyright, the TS
 and Kotlin servers) are configuration in tools/modules.json and stay in Swan.
 No third-party binaries are re-hosted: kotlin-lsp, the JDK and the Android
 SDK are fetched from their makers, pinned.
+
+## 2026-10-26 — Bounded contribution preparation
+
+Keep the existing package APIs and repository/ref imports. Add independent
+tests and explicit build evidence before proposing a larger packaging change.
+SQLite and tree-sitter remain C-backed Goose packages; LSP remains a
+separately generated Goose client with POSIX C helpers and external servers.
+The offline Swan demo uses synthetic flattened rows and does not qualify
+SCIP or live language servers. Historical comparisons are not fresh evidence.
+
+Do not introduce a registry or new package manager. Splitting tree-sitter
+grammars or changing the standalone LSP/runtime boundary would alter build
+and API assumptions and needs a separate design review (docs/packages.md).
