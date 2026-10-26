@@ -1,6 +1,6 @@
 /.tools/
 /bin/
 /data/
-/tools/node_modules/
+/tools/node_modules
 *.db
 *.db.tmp
