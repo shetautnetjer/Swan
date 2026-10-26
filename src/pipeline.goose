@@ -868,7 +868,7 @@ fn parse_tsc(text: const u8[:], rows: u8[>..]&) -> i64 {
 }
 
 // cargo check --message-format=json: one JSON object per line.
-fn parse_cargo(text: const u8[:], repo: const u8[:], rows: u8[>..]&) -> i64 {
+fn parse_cargo(text: const u8[:], repo: const u8[:], rows: u8[>..]&, source: const u8[:] = "cargo") -> i64 {
     var n = 0;
     each_split(text, '\n') { line =>
         guard line.len > 0 && line[0] == '{';
@@ -894,7 +894,7 @@ fn parse_cargo(text: const u8[:], repo: const u8[:], rows: u8[>..]&) -> i64 {
                 let le, a3 = json::as_i64(json::member(sp, "line_end"));
                 let ce, a4 = json::as_i64(json::member(sp, "column_end"));
                 if f_ok && a1 && a2 && a3 && a4 && (!starts_with(file, "/") || starts_with(file, repo)) {
-                    put_row(rows, relative_to(repo, file), ls - 1, cs - 1, le - 1, ce - 1, level, "cargo",
+                    put_row(rows, relative_to(repo, file), ls - 1, cs - 1, le - 1, ce - 1, level, source,
                             if c_ok { code } else { "" }, if t_ok { text_ } else { "" });
                     n++;
                 }
@@ -1098,6 +1098,20 @@ fn check_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> 
         write_stderr(str("clang (via scip-clang): ", ((clock() - t0) * 1000.0) as i64, " ms\n"));
         format(ran, " clang:", parse_clang(e, repo, rows));
     }
+    // Linters, from tools/modules.json.
+    let mc = mod_ctx(repo, out, home, l);
+    each_split(module_langs(l), '\n') { lang =>
+        guard lang.len > 0;
+        var o: u8[>..] = [];
+        var src: u8[>..] = [];
+        var par: u8[>..] = [];
+        let code = run_module(home, lang, "lint", mc, child_env(l, ""), "", o, src, par);
+        if code != -100 {
+            let n = if par == "github" { parse_github(o, repo, src, rows) }
+                    else if par == "cargo" { parse_cargo(o, repo, rows, src) } else { 0 };
+            format(ran, " ", src, ":", n);
+        }
+    };
     guard ran.len > 0 else { format(report, "no checker for the languages in ", repo); return false; }
     write_file(str(out, "/diagnostics.tsv"), rows);
     format(report, "checked", ran, "\n");

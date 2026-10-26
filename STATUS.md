@@ -98,6 +98,13 @@ as_of: 2026-10-25
   re-roots paths from SCIP metadata and drops repeated documents.
   Numbers in docs/speed.md.
 
+## 2026-10-26: JetBrains-style gaps
+
+- Exact targets for impact questions; imports found from source and left
+  out of callers; get_symbol_at with docs (schema 9); per-language tool
+  modules (tools/modules.json): ruff/biome/clippy lint, format_file,
+  run_tests. Compared with WebStorm's MCP on live AEON (read-only).
+
 ## Next
 
 1. Bake-off reported 2026-10-25 (README "Against the code-map bake-off"):

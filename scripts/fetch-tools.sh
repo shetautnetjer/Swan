@@ -97,5 +97,10 @@ if [ ! -d .tools/cuda-sdk/include ]; then
   for f in "$sp"/cuda_runtime/lib/*; do ln -sf "$f" .tools/cuda-sdk/lib64/; done
   echo '{"cuda":{"name":"CUDA SDK","version":"12.9.1"}}' > .tools/cuda-sdk/version.json
 fi
+# ruff (lint, format) and pytest for Python repos without their own.
+if [ ! -x .tools/py-tools/bin/ruff ]; then
+  uv venv -q .tools/py-tools
+  uv pip install -q --python .tools/py-tools/bin/python ruff==0.17.2 pytest==9.1.1
+fi
 (cd tools && npm install --no-fund --no-audit --silent)
 echo "goose: $dir/goose"

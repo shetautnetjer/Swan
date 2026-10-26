@@ -42,7 +42,19 @@ So, three findings:
    anonymous function around it. That is coarser than JetBrains, but often
    what an impact question wants.
 
-## Recommended next, by value when AYA edits code
+## Built since (2026-10-26)
+
+1. Exact targets: impact questions with a shared name come back with the
+   candidates. Import lines are found from the source and left out of
+   callers. Re-checked on live AEON, per exact definition: Swan's caller
+   files include every one WebStorm lists, plus calls WebStorm's hierarchy
+   missed (checked with ripgrep).
+2. `get_symbol_at`, with documentation prose: the definition, signature and
+   docs agree with WebStorm's `get_symbol_info` at the spots compared.
+3. `tools/modules.json`: ruff/biome/clippy into `get_diagnostics`,
+   `format_file`, and `run_tests` for the tests that reach a symbol.
+
+## Recommended next, by value when AYA edits code (as written before building)
 
 1. **Exact targets and calls only.** When a name matches several
    definitions, answer per definition and say so, or ask for

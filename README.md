@@ -76,14 +76,17 @@ only that whole path. Lines and columns in answers are 1-based.
 | `find_symbol` | `name_path_pattern`, `relative_path?`, `substring_matching?`, `include_body?`, `max_results?` | kind, signature, file, line, body line range, optionally the body |
 | `find_referencing_symbols` | `name_path`, `relative_path?`, `max_results?` | per matched symbol, every reference: file, line, column, the symbol it sits inside, and its line of source |
 | `get_symbols_overview` | `relative_path` (file or directory) | every symbol defined there, in order |
-| `get_callers` | `name_path`, `relative_path?`, `depth?` (1 to 5), `max_results?` | who uses the symbol, and who uses those: the impact radius, with each caller's distance and whether it is test code, and a summary of affected symbols, files and test files |
+| `get_symbol_at` | `relative_path`, `line`, `column` | what a position refers to: definition, signature, docs, the symbol around it (JetBrains' quick documentation) |
+| `get_callers` | `name_path`, `relative_path?`, `depth?` (1 to 5), `max_results?` | who calls or uses the symbol (import lines left out), and who uses those: the impact radius, with each caller's distance and whether it is test code, and a summary of affected symbols, files and test files |
 | `get_callees` | `name_path`, `relative_path?`, `max_results?` | what the symbol's body uses, with counts; dependency symbols show their package and version |
 | `find_implementations` | `name_path`, `relative_path?`, `max_results?` | what implements, extends or overrides it (classes behind an interface, overrides of a method), with distance |
 | `get_type_hierarchy` | `name_path`, `relative_path?`, `depth?`, `max_results?` | supertypes and subtypes, from SCIP relationships |
 | `replace_symbol_body` | `name_path`, `relative_path`, `body` | replaces the whole definition; refused if the file changed since the map was built; reports how many places use the symbol |
 | `insert_after_symbol`, `insert_before_symbol` | `name_path`, `relative_path`, `body` | adds code next to a definition |
 | `rename_symbol` | `name_path`, `relative_path`, `new_name`, `apply?` | plans by default: every site, skipped aliases, conflicts, stale files; `apply` writes it |
-| `get_diagnostics` | `name_path?`, `relative_path?`, `depth?`, `errors_only?` | compiler errors (tsc, cargo check) pinned to symbols; for a symbol, also those in its callers, with distance (see `docs/diagnostics.md`) |
+| `run_tests` | `name_path` or `relative_path`, `depth?` | runs the tests that reach a symbol through calls, overrides included, with the language's runner from `tools/modules.json` |
+| `format_file` | `relative_path` | the language's formatter from `tools/modules.json` |
+| `get_diagnostics` | `name_path?`, `relative_path?`, `depth?`, `errors_only?` | compiler errors and lint findings (tsc, pyright, cargo, javac, clang; ruff, biome, clippy) pinned to symbols; for a symbol, also those in its callers, with distance (see `docs/diagnostics.md`) |
 | `find_unused_symbols` | `relative_path?`, `include_tests?`, `max_results?` | functions, classes, methods, types and variables nothing references or implements: removal candidates, not proof |
 | `index_info` | none | repo root, build time, counts, and the files changed since the SCIP run |
 
@@ -142,6 +145,19 @@ pieces that index side by side, and reuses what has not changed: a
 a one-file edit, and under a second when nothing changed. TypeScript is
 split into chunks when it is the long pole (AEON: 18.6 s to 10.1 s).
 Details in `docs/speed.md`.
+
+## Per-language tools
+
+Linters, formatters and test runners are not built in. `tools/modules.json`
+lists them per language, with the conditions under which each applies and
+how its output is read. Adding a language or swapping a tool is an edit to
+that table. Today: ruff, ruff format and pytest for Python; biome and
+`bun test` (vitest when configured) for TypeScript/JavaScript; clippy,
+rustfmt and `cargo test` for Rust.
+
+A question about one symbol's impact (`get_callers`, `get_callees`,
+`get_diagnostics`), asked with a name several symbols share, comes back with
+the candidates rather than a merged answer.
 
 ## Against the code-map bake-off
 

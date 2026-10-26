@@ -16,11 +16,14 @@ import .edit;
 import .diag;
 import .run;
 import .pipeline;
+import .modules;
 
 fn usage() {
     write_stderr("""
         usage: swan map <repo> <out-dir>        index every language in the repo (or refresh)
-               swan check <repo> <out-dir>      run tsc / cargo check / pyright into the map
+               swan check <repo> <out-dir>      run compilers and linters into the map
+               swan format <repo> <out-dir> <file>...
+               swan test <repo> <out-dir> <name_path|file> [relative_path]
                swan index <flattened-dir> <db> [repo-root]
                swan refresh <flattened-dir> <db> [repo-root]
                swan diagnostics <dir-with-diagnostics.tsv> <db>
@@ -84,6 +87,18 @@ fn main() {
     } else if a[1] == "check" && a.len == 4 {
         var report: u8[>..] = [];
         let ok = check_main(a[2], a[3], report);
+        print(report);
+        if !ok { exit(1); }
+    } else if a[1] == "format" && a.len >= 5 {
+        var files: u8[>..] = [];
+        for k in 4..a.len { files.append(a[k]); files.push('\n'); }
+        var report: u8[>..] = [];
+        let ok = format_main(a[2], a[3], files, report);
+        print(report);
+        if !ok { exit(1); }
+    } else if a[1] == "test" && a.len >= 5 {
+        var report: u8[>..] = [];
+        let ok = test_main(a[2], a[3], a[4], if a.len > 5 { a[5] } else { "" }, 3, report);
         print(report);
         if !ok { exit(1); }
     } else if a[1] == "diagnostics" && a.len == 4 {

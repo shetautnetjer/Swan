@@ -134,5 +134,33 @@ if (run("cuda")) {
     diag.some((d: any) => d.severity === "error" && d.in_symbol === "scaled_kernel" && d.distance === 1), diag);
 }
 
+if (run("modules")) {
+  // The per-language tools from tools/modules.json: linters into the map,
+  // formatters, and the tests that reach a symbol.
+  const w = "data/modules-check";
+  sh(["rm", "-rf", w]);
+  sh(["mkdir", "-p", w]);
+  sh(["cp", "-r", "fixtures/tiny-py", `${w}/py`]);
+  await Bun.write(`${w}/py/messy.py`, "import os\nx=1\ndef f( a,b ):\n  return a+b\n");
+  sh(["bin/swan", "map", `${w}/py`, `${w}/pymap`]);
+  sh(["bin/swan", "check", `${w}/py`, `${w}/pymap`]);
+  const qp = (...a: string[]) => JSON.parse(sh(["bin/swan", "query", `${w}/pymap/swan.db`, ...a]));
+  const lint = qp("diagfile", "messy.py").diagnostics;
+  check("modules: ruff's finding (unused import) lands in the map", lint.some((d: any) => d.source === "ruff" && d.message.includes("F401")), lint);
+  check("modules: the linter left nothing in the repo (no .ruff_cache)", !(await Bun.file(`${w}/py/.ruff_cache/CACHEDIR.TAG`).exists()));
+  sh(["bin/swan", "format", `${w}/py`, `${w}/pymap`, "messy.py"]);
+  check("modules: format_file through ruff format", (await Bun.file(`${w}/py/messy.py`).text()).includes("def f(a, b):\n    return a + b"));
+  const t = Bun.spawnSync(["bin/swan", "test", `${w}/py`, `${w}/pymap`, "Square/area", "shapes/__init__.py"], { stdout: "pipe" });
+  const tout = t.stdout.toString();
+  check("modules: run_tests finds test_shapes.py through an override (Square.area via Shape.area) and pytest passes",
+    t.exitCode === 0 && tout.includes("test_shapes.py") && tout.includes("1 passed"), tout);
+
+  sh(["cp", "-r", "fixtures/tiny-rs", `${w}/rs`]);
+  sh(["bin/swan", "map", `${w}/rs`, `${w}/rsmap`]);
+  const rt = Bun.spawnSync(["bin/swan", "test", `${w}/rs`, `${w}/rsmap`, "src/lib.rs"], { stdout: "pipe" });
+  const rout = rt.stdout.toString();
+  check("modules: run_tests on a Rust file runs cargo test, which passes", rt.exitCode === 0 && rout.includes("rust tests: passed"), rout);
+}
+
 console.log(failures ? `${failures} check(s) failed` : "all language checks passed");
 process.exit(failures ? 1 : 0);

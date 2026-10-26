@@ -25,6 +25,8 @@ let TOOLS = """
      {"name":"get_diagnostics","description":"Compiler errors and warnings (tsc, cargo check) from the last check, each pinned to the symbol it is in. With name_path: the symbol's own diagnostics plus, up to depth steps out (default 1), those of the symbols that use it: where an edit to it shows up as breakage. With only relative_path: a file or directory. With neither: everything. Entries in files changed since the check say stale.","inputSchema":{"type":"object","properties":{"name_path":{"type":"string"},"relative_path":{"type":"string"},"depth":{"type":"integer"},"errors_only":{"type":"boolean"},"max_results":{"type":"integer"}}}},
      {"name":"update_map","description":"Bring the map up to date after edits: reruns the SCIP indexers over the repo and rewrites only the files whose data changed. Takes as long as the indexers (seconds on small repos, minutes on large ones).","inputSchema":{"type":"object","properties":{}}},
      {"name":"check_errors","description":"Run the repo's own checkers (tsc with the repo's tsconfig, cargo check, pyright) and load what they report, so get_diagnostics answers from fresh results.","inputSchema":{"type":"object","properties":{}}},
+     {"name":"run_tests","description":"Run the tests that reach a symbol through calls (up to depth steps, default 3), or the tests that reach anything a file defines when relative_path names a file and name_path is empty. Uses each language's test runner from tools/modules.json (pytest, bun test / vitest, cargo test). Returns which test files ran, pass or fail, and the runner's output tail.","inputSchema":{"type":"object","properties":{"name_path":{"type":"string"},"relative_path":{"type":"string"},"depth":{"type":"integer"}}}},
+     {"name":"format_file","description":"Run a file through its language's formatter from tools/modules.json (ruff format, biome format, rustfmt). The file's positions in the map are stale afterwards until update_map.","inputSchema":{"type":"object","properties":{"relative_path":{"type":"string"}},"required":["relative_path"]}},
      {"name":"index_info","description":"When and from what the code map was built: repo root, build time, counts, and the files changed since the SCIP run (stale_files). Answers about a stale file carry \"stale\": true; refresh the map or reread the file.","inputSchema":{"type":"object","properties":{}}}]
     """;
 
@@ -122,6 +124,21 @@ fn call_tool(db: i64, name: const u8[:], args: json::Node?, out: u8[>..]&) -> bo
         return get_diagnostics(db, arg_text(args, "name_path"), arg_text(args, "relative_path"),
                                min(arg_int(args, "depth", 1), 5), arg_bool(args, "errors_only"),
                                arg_int(args, "max_results", 200), out);
+    }
+    if name == "run_tests" || name == "format_file" {
+        var root: u8[>..] = [];
+        var dir: u8[>..] = [];
+        meta_value(db, "root", root);
+        meta_value(db, "source", dir);
+        guard root.len > 0 && dir.len > 0 else { out.append("the map does not record its repo; rebuild it with swan map"); return false; }
+        var report: u8[>..] = [];
+        let np = arg_text(args, "name_path");
+        let rel = arg_text(args, "relative_path");
+        let ok = if name == "format_file" { format_main(root, dir, str(rel, "\n"), report) }
+                 else { test_main(root, dir, if np.len > 0 { np } else { rel }, if np.len > 0 { rel } else { "" },
+                                  min(arg_int(args, "depth", 3), 6), report) };
+        json::format_string(out, report);
+        return ok;
     }
     if name == "update_map" || name == "check_errors" {
         var root: u8[>..] = [];
