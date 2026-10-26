@@ -78,10 +78,16 @@ fn get_callers(db: i64, pattern: const u8[:], rel: const u8[:], depth: i64, limi
             GROUP BY s.id)
         """, "#IDS#", ids);
     var err: u8[>..] = [];
+    // The walk runs once, into a temporary table that the list, the summary
+    // and the test files are then read from.
+    exec_or_die(db, "DROP TABLE IF EXISTS temp.callers_found;");
+    let mk = prepare_or_die(db, str("CREATE TEMP TABLE callers_found AS ", walk, "SELECT * FROM found"));
+    swan_bind_int(mk, 1, depth);
+    step_done(mk);
+    swan_finalize(mk);
 
-    let st = prepare_or_die(db, str(walk, "SELECT * FROM found ORDER BY distance, def_file, def_line LIMIT ?2"));
-    swan_bind_int(st, 1, depth);
-    swan_bind_int(st, 2, limit);
+    let st = prepare_or_die(db, "SELECT * FROM temp.callers_found ORDER BY distance, def_file, def_line LIMIT ?1");
+    swan_bind_int(st, 1, limit);
     out.append(",");
     json::format_key(out, "callers");
     out.push('[');
@@ -105,16 +111,12 @@ fn get_callers(db: i64, pattern: const u8[:], rel: const u8[:], depth: i64, limi
     swan_finalize(st);
 
     // The summary covers every caller, not only the ones listed.
-    let sum = prepare_or_die(db, str(walk, """
-        SELECT count(*), count(DISTINCT def_file) FROM found;
-        """));
-    swan_bind_int(sum, 1, depth);
+    let sum = prepare_or_die(db, "SELECT count(*), count(DISTINCT def_file) FROM temp.callers_found");
     var total = 0;
     var files = 0;
     if swan_step(sum, err) == 1 { total = swan_col_int(sum, 0); files = swan_col_int(sum, 1); }
     swan_finalize(sum);
-    let tf = prepare_or_die(db, str(walk, "SELECT DISTINCT def_file FROM found ORDER BY def_file"));
-    swan_bind_int(tf, 1, depth);
+    let tf = prepare_or_die(db, "SELECT DISTINCT def_file FROM temp.callers_found ORDER BY def_file");
     out.append(",");
     json::format_key(out, "summary");
     out.push('{');

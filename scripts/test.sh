@@ -11,3 +11,4 @@ bun tests/edit_check.ts
 bun tests/rust_check.ts
 bun tests/diag_check.ts
 bun tests/lang_check.ts
+bun tests/split_check.ts

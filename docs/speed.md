@@ -51,3 +51,33 @@ every core itself.
 | Python research repo, nothing changed | 159 s | 0.8 s |
 | AEON, first map | 18.6 s | 18.6 s (one TS project; nothing to split) |
 | AEON, nothing changed | 18.6 s | 0.05 s |
+
+## Second pass (2026-10-26): what was tried, and what was kept
+
+Tried in a separate copy (branch `exp/modular`), measured against main on
+the same three repos, and merged only where it was faster with equal
+results.
+
+| Idea | Result | Kept |
+|---|---|---|
+| TypeScript split into chunks: one tsconfig each, extending the project's, with the exact file list from `tsc --listFilesOnly` (so its include and exclude hold) and every `.d.ts` | AEON first map 18.6 s to 10.1 s. 98.5% of files have identical rows. The rest differ only in scip-typescript's order-dependent counters for duplicate names, and broken links fell from 287 to 199 | yes, but only into the slots other languages leave free: on the Python repo the chunks cost more total work and slowed it from 64 s to 71 s |
+| Caller walk run once into a temporary table, instead of once each for the list, the summary and the test files | `get_callers` depth 3 on AEON: 29 to 12 ms and 23 to 9.5 ms, same answers | yes |
+| Covering index for the caller walk | about 15%, smaller than the temp table and overlapping it | no |
+| Finer Python pieces (16 instead of 6) | slower: 88 s against 64 s, since more pieces repeat the shared analysis | no |
+| Starting the largest pieces first (by bytes) | slower: 71 s against 67 s, because bytes predict scip-python's time badly | no |
+| More parallel jobs (`SWAN_JOBS=16`) | Python repo 70 s to 60 s, but up to 3 GB per process | no, left as the documented `SWAN_JOBS` setting |
+| Per-language databases, a separate lean read path | not built: reads already take 0.03 to 3 ms in a long-lived MCP process | no |
+| Resident pyright and rust-analyzer | not built yet: the next step for live errors and small refreshes, and a bigger job | later |
+
+Two fixes found on the way. scip-typescript numbers anonymous type
+literals by walk order, so those numbers are dropped. And when a repo has
+no package.json, a chunk's module names carry the absolute path, which is
+cut. `tests/split_check.ts` maps a generated 24-file project both ways
+and requires identical rows.
+
+| | Main before this pass | After |
+|---|---|---|
+| AEON, first map | 18.6 s | 10.1 s |
+| Python research repo, first map | 63.8 s | 64.2 s (unchanged) |
+| Rust workspace (copy), first map | 5.4 s | 5.5 s (unchanged) |
+| `get_callers` depth 3, AEON | 23 to 29 ms | 9.5 to 12 ms |

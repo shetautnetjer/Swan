@@ -139,8 +139,9 @@ against Serena is the bake-off's job and is not claimed here.
 `swan map` runs every language's indexer at once, splits Python into
 pieces that index side by side, and reuses what has not changed: a
 2,853-file Python repo went from 159 s to 63 s for a first map, 8.8 s after
-a one-file edit, and under a second when nothing changed. Details in
-`docs/speed.md`.
+a one-file edit, and under a second when nothing changed. TypeScript is
+split into chunks when it is the long pole (AEON: 18.6 s to 10.1 s).
+Details in `docs/speed.md`.
 
 ## Against the code-map bake-off
 

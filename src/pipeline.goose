@@ -303,6 +303,53 @@ fn plan_python(repo: const u8[:], k: i64) -> u8[>..] {
     return plan;
 }
 
+// Splits a TypeScript project into k chunks of similar size for parallel
+// scip-typescript runs. The files are the ones tsc itself would compile
+// (`tsc --listFilesOnly`, so the project's include and exclude hold), less
+// node_modules and declaration files, which every chunk gets. Packed
+// largest first, each into the lightest chunk. Returns one line per chunk,
+// files separated by tabs, and the declaration files as `decls`; nothing
+// when one run will do.
+fn plan_ts(repo: const u8[:], listing: const u8[:], k: i64, decls: u8[>..]&) -> u8[>..] {
+    var files: u8[>..] = [];
+    var sizes: i64[>..] = [];
+    each_split(listing, '\n') { raw =>
+        let f = trim(raw);
+        if f.len > repo.len && starts_with(f, repo) && f[repo.len] == '/' && find(f, "/node_modules/") < 0 {
+            if ends_with(f, ".d.ts") { decls.append(f); decls.push('\n'); }
+            else { files.append(f); files.push('\n'); sizes.push(max(swan_file_size(f), 1)); }
+        }
+    };
+    var plan: u8[>..] = [];
+    guard k > 1 && sizes.len >= 4 * k else { return plan; }
+    let paths = split(files[..files.len - 1], '\n');
+    var order: i64[>..] = [];
+    for z, i in sizes { order.push(i); }
+    sort(order) { a, b => sizes[a] > sizes[b] };
+    var load: i64[>..] = [];
+    var owner: i64[>..] = [];
+    for i in k { load.push(0); }
+    for i in paths.len { owner.push(0); }
+    for u in order {
+        var best = 0;
+        for c in k { if load[c] < load[best] { best = c; } }
+        load[best] += sizes[u];
+        owner[u] = best;
+    }
+    for c in k {
+        var first = true;
+        for u in paths.len {
+            if owner[u] == c {
+                if !first { plan.push('\t'); }
+                plan.append(paths[u]);
+                first = false;
+            }
+        }
+        if !first { plan.push('\n'); }
+    }
+    return plan;
+}
+
 // "path\tsize\tmtime" for every .py file, in walk order (list_dir sorts).
 fn py_stamps(repo: const u8[:]) -> u8[>..] {
     var s: u8[>..] = [];
@@ -328,6 +375,12 @@ fn lang_fingerprint(repo: const u8[:], endings: const u8[:][:], roots: const u8[
         if file_exists(p) { h = hash_combine(h, hash(str(p, "\t", swan_file_size(p), "\t", swan_mtime_ns(p)))); }
     }
     return h;
+}
+
+fn count_lines(s: const u8[:]) -> i64 {
+    var n = 0;
+    for c in s { if c == '\n' { n++; } }
+    return n;
 }
 
 fn in_piece(path: const u8[:], piece: const u8[:]) -> bool {
@@ -467,8 +520,58 @@ fn map_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> bo
             arg(a, repo);
             arg(a, dir);
         }
-        add_lang_job("scip-typescript", target, a, child_env(l, ""),
-                     lang_fingerprint(repo, [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"], ["tsconfig.json", "package.json"]));
+        let ts_fp = lang_fingerprint(repo, [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"], ["tsconfig.json", "package.json"]);
+        // What tsc would compile, to split it.
+        let base: u8[>..] = if l.tsconfig { str(repo, "/tsconfig.json") } else { str(out, "/tsproject/tsconfig.json") };
+        var la: u8[>..] = [];
+        arg(la, str(bin, "tsc"));
+        arg(la, "-p");
+        arg(la, base);
+        arg(la, "--listFilesOnly");
+        // Split only into the slots other languages leave free: chunks cost
+        // more work in all (each loads the shared code), so they pay only
+        // when TypeScript is the long pole.
+        let others = (if l.py { count_lines(plan_python(repo, min(jobs_limit(), 6))) } else { 0 }) +
+                     (if l.cargo { 1 } else { 0 }) + (if l.java { 1 } else { 0 }) + (if l.c || l.cuda { 1 } else { 0 });
+        let ts_k = jobs_limit() - others;
+        var listing: u8[>..] = [];
+        let listed = ts_k >= 2 && run_step("tsc --listFilesOnly", la, repo, child_env(l, ""), 600000, listing) == 0;
+        var decls: u8[>..] = [];
+        let chunks: u8[>..] = if listed { plan_ts(repo, listing, ts_k, decls) } else { str("") };
+        if chunks.len == 0 {
+            add_lang_job("scip-typescript", target, a, child_env(l, ""), ts_fp);
+        } else {
+            // Each chunk extends the project's tsconfig (or Swan's own) with its
+            // own include list, plus every .d.ts, since declarations such as
+            // module augmentations shape how the chunk's code resolves.
+            var n = 0;
+            each_split(chunks[..chunks.len - 1], '\n') { chunk =>
+                let dir = str(out, "/tsproject-", n);
+                make_dir(dir);
+                var cfg: u8[>..] = [];
+                cfg.append("{\"extends\":");
+                json::format_string(cfg, base);
+                // "files" overrides the base's include: exactly this chunk, plus
+                // the project's own declaration files.
+                cfg.append(",\"include\":[],\"files\":[");
+                var first = true;
+                each_split(chunk, '\t') { f => if !first { cfg.push(','); } json::format_string(cfg, f); first = false; };
+                each_split(decls, '\n') { f => if f.len > 0 { cfg.push(','); json::format_string(cfg, f); } };
+                cfg.append("]}\n");
+                write_file(str(dir, "/tsconfig.json"), cfg);
+                let t = str(out, "/index-typescript-", n, ".scip");
+                var ca: u8[>..] = [];
+                arg(ca, str(bin, "scip-typescript"));
+                arg(ca, "index");
+                arg(ca, "--output");
+                arg(ca, t);
+                arg(ca, "--cwd");
+                arg(ca, repo);
+                arg(ca, dir);
+                add_lang_job(str("scip-typescript ", n, "/", count_lines(chunks)), t, ca, child_env(l, ""), ts_fp);
+                n++;
+            };
+        }
     }
 
     if l.py {
@@ -498,6 +601,7 @@ fn map_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> bo
         }
         let slash = rfind(repo, "/");
         let pieces = plan_python(repo, min(jobs_limit(), 6));
+        let stamps = py_stamps(repo);
         fn add_python_job(piece: const u8[:], target: const u8[:]) {
             var a: u8[>..] = [];
             arg(a, str(bin, "scip-python"));
@@ -519,7 +623,6 @@ fn map_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> bo
         // Reuse: a piece whose files are unchanged since the last map, and
         // none of whose files use a symbol defined in a changed file, keeps
         // its last index. Each file is stamped by size and mtime.
-        let stamps = py_stamps(repo);
         var prev_stamps: u8[>..] = [];
         read_file(str(out, "/python-files.tsv"), prev_stamps);
         var prev_manifest: u8[>..] = [];
@@ -620,31 +723,28 @@ fn map_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> bo
             if q == pid && codes[k] == -999 { codes[k] = code; took[k] = clock() - began[k]; running--; }
         }
     }
-    var idx = 0;
-    each_split(jobs[..jobs.len - 1], 2) { job =>
-        let f = split(job, 1);
+    let all_jobs = split(jobs[..jobs.len - 1], 2);
+    var order: i64[>..] = [];
+    for i in all_jobs.len { order.push(i); }
+    for i in all_jobs.len { pids.push(0); codes.push(0); began.push(0.0); took.push(0.0); }
+    for idx in order {
+        let f = split(all_jobs[idx], 1);
         if f[2].len == 0 {
             // reused from the last map: nothing to run
-            pids.push(0);
-            codes.push(0);
-            began.push(clock());
-            took.push(0.0);
         } else {
             while running >= limit { wait_one(); }
-            pids.push(swan_spawn(f[2], repo, f[3], str(out, "/log-", idx, ".txt")));
-            codes.push(-999);
-            began.push(clock());
-            took.push(0.0);
-            if pids[pids.len - 1] > 0 { running++; } else { codes[codes.len - 1] = -1; }
+            pids[idx] = swan_spawn(f[2], repo, f[3], str(out, "/log-", idx, ".txt"));
+            codes[idx] = -999;
+            began[idx] = clock();
+            if pids[idx] > 0 { running++; } else { codes[idx] = -1; }
         }
-        idx++;
-    };
+    }
     while running > 0 { wait_one(); }
 
     var scips: u8[>..] = [];      // NUL-separated index files, for the flattener
     var failed: u8[>..] = [];     // their index files, one per line
     var ok = true;
-    idx = 0;
+    var idx = 0;
     each_split(jobs[..jobs.len - 1], 2) { job =>
         let f = split(job, 1);
         let code = codes[idx];

@@ -72,12 +72,27 @@ const dec = new TextDecoder();
 
 // Tabs and newlines would break the rows. They do occur: scip-typescript names
 // a destructured parameter by its source text, newlines and all.
-const clean = (s: string) => s.replace(/[\t\n\r]/g, " ");
+// When scip-typescript runs from a tsconfig outside the repo (swan map's
+// chunks) and the repo has no package.json, it names modules by their path
+// from the filesystem root. That prefix is cut so names match a normal run.
+let absPrefix = "";
+function setRepoRoot(root: string) {
+  const segs = posix.resolve(root).split("/").filter(Boolean);
+  absPrefix = " " + segs.map((g) => (/^[\w$+\-]+$/.test(g) ? g : "`" + g.replace(/`/g, "``") + "`")).join("/") + "/";
+}
+const clean = (s: string) =>
+  (absPrefix && s.includes(absPrefix) ? s.split(absPrefix).join(" ") : s)
+    .replace(/[\t\n\r]/g, " ")
+    // scip-typescript numbers anonymous type literals by a counter that
+    // depends on the order it walks files, so the same literal gets a
+    // different name in each run. Dropping the number keeps names stable
+    // across runs and across the parallel chunks swan map splits TS into.
+    .replace(/typeLiteral\d+/g, "typeLiteral");
 const ROLE_DEFINITION = 1;
 
 const argv = process.argv.slice(2);
 let repoRoot = "";
-if (argv[0] === "--root") { repoRoot = argv[1]; argv.splice(0, 2); }
+if (argv[0] === "--root") { repoRoot = argv[1]; argv.splice(0, 2); setRepoRoot(repoRoot); }
 const [indexPath, outDir, ...moreIndexes] = argv;
 if (!indexPath || !outDir) {
   console.error("usage: bun tools/scip-flatten.ts [--root <repo>] <index.scip> <out-dir> [more.scip ...]");
