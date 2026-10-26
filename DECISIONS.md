@@ -82,3 +82,19 @@ whole-program build). The language adapters (rust-analyzer, pyright, the TS
 and Kotlin servers) are configuration in tools/modules.json and stay in Swan.
 No third-party binaries are re-hosted: kotlin-lsp, the JDK and the Android
 SDK are fetched from their makers, pinned.
+
+## 2026-10-26 — Eggs (prebuilt Goose packages) measured and parked
+
+An "egg" would ship a Goose package's native part prebuilt (archives per OS
+and CPU, an egg.toml with checksums), linked through a CMake IMPORTED
+target, since Goose itself defers prebuilt binaries. The pilot built
+goose-treesitter's archives (scripts/build-egg.sh on its local `egg`
+branch): 11 archives, 20 MB for linux-x64, made in 2.4 s. Then the cost it
+would save was measured: a clean build of a program using goose-treesitter,
+the Goose runtime included, takes 8.2 s from an empty cache on 32 cores and
+8.3 s pinned to 2, and 0.2 s once cached. An egg could save at most those
+few seconds, once per machine, for a CMake dependency, release assets per
+target and a runtime-version check. Not worth it now. The names stay for
+later: an egg is a package, the nest its registry, egg.toml its manifest.
+Worth revisiting if Goose adds prebuilt packages itself or a target turns
+out slow to compile on (a phone, a small CI runner).
