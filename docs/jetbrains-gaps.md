@@ -4,7 +4,12 @@ as_of: 2026-10-26. The tool list was read from WebStorm's own MCP server
 (`tools/list`, 44 tools). The comparison used read-only calls only, against
 AEON as WebStorm had it open, and Swan's map of the same checkout.
 
-## Tool by tool
+This records a historical comparison. The table below is the baseline
+before the changes in "Built since"; it is not a current missing-feature
+list or a claim of JetBrains parity. Swan's reference graph still includes
+non-call uses and is coarser than an IDE's call hierarchy.
+
+## Tool by tool (baseline before the follow-up)
 
 | JetBrains tool | What it does | Swan | Status |
 |---|---|---|---|

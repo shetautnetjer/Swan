@@ -16,7 +16,8 @@ guesses. Languages change slowly; dependencies change constantly. SCIP
 indexers cover both: they record references into dependencies with each
 package's name and version. The roadmap, most valuable first:
 
-1. Call graph and impact radius: done (`get_callers`, `get_callees`).
+1. Reference graph and impact radius: implemented (`get_callers`,
+   `get_callees`). These include non-call uses; see the limits below.
 2. Per-file refresh, so the map stays current while the agent edits: done
    (`swan refresh`, `scripts/refresh-repo.sh`).
 3. Tests for a symbol (partly there: `get_callers` flags test files).
@@ -24,10 +25,12 @@ package's name and version. The roadmap, most valuable first:
 4. Implementations and type hierarchy, from SCIP relationships: done
    (`find_implementations`, `get_type_hierarchy`).
 5. Dependency insight: which packages and versions the code leans on.
-6. Live errors, from `tsc` or a language server (not SCIP).
+6. Batch checks and live diagnostics: implemented through external tools
+   and language servers (not SCIP).
 7. Hot and fragile code, from git history.
 8. More languages: one SCIP indexer per language, into the same database.
-   Python and Rust: done.
+   TypeScript/JavaScript, Python, Rust, Java, Kotlin and host-side CUDA
+   have adapters; support depends on the project's toolchain.
 
 ## What "a Goose Serena" means here
 
@@ -37,19 +40,19 @@ server driving live language servers over LSP. Goose v1 has no subprocesses
 or networking in its standard library, so Swan reaches them through small C
 shims; a literal port of Serena was not the aim. Swan's reading of the idea:
 
-- **Precise data comes from SCIP.** A SCIP indexer (here `scip-typescript`)
-  runs the real compiler once and records every definition and reference,
-  resolved the way the compiler resolves them, re-exports and renamed imports
-  included.
+- **Semantic data comes from SCIP.** External indexers record resolved
+  definitions and references. Coverage depends on the indexer and project;
+  dynamic uses and some macro references need special treatment.
 - **Goose builds the map.** It interns the symbols, parses SCIP symbol
   strings into names, kinds and Serena-style name paths (`Store/add`), and
   works out which symbol each reference sits inside.
-- **SQLite stores and answers.** Goose calls the SQLite C API through
-  `extern fn` and a thin shim (`native/swan_sqlite.c`); SQLite is vendored.
+- **SQLite stores and answers.** Goose imports `goose-sqlite`, whose
+  `extern fn` bindings and C shim call its vendored SQLite amalgamation.
 - **Goose also serves the MCP.** Goose v2026.3 ships `json`, stdin line
   reading and file IO, so the stdio MCP server is the same Goose binary.
   The original plan put a TypeScript/Bun layer here; it turned out not to be
-  needed, which leaves one binary and no runtime dependencies.
+  needed. Querying an existing map uses the native binary; mapping, checking,
+  formatting, testing and live analysis require their external tools.
 
 ```
 TS repo ──scip-typescript──▶ index.scip ──tools/scip-flatten.ts──▶ TSV rows
@@ -59,8 +62,12 @@ TS repo ──scip-typescript──▶ index.scip ──tools/scip-flatten.ts─
                                          swan.db (SQLite) ◀── bin/swan serve (Goose, MCP stdio) ◀── AYA
 ```
 
-The only non-Goose code is the SCIP flattener (Bun, no dependencies: a
-small protobuf reader) and the 100-line C shim. The flattener's
+The SCIP flattener is TypeScript run by Bun. Native C also supplies SQLite,
+tree-sitter and its grammars, process/file helpers and the LSP bridge.
+The matcher and LSP client logic are Goose; the language servers they use
+are separate programs, not Goose ports. See [package boundaries](docs/packages.md)
+for independent use, cached build behavior and the tradeoffs.
+The flattener's
 `occurrences.tsv` columns match those of a separate code-map bake-off
 (described below), so either side can read the other's rows.
 
@@ -79,14 +86,14 @@ only that whole path. Lines and columns in answers are 1-based.
 | `get_symbol_at` | `relative_path`, `line`, `column` | what a position refers to: definition, signature, docs, the symbol around it (JetBrains' quick documentation) |
 | `get_callers` | `name_path`, `relative_path?`, `depth?` (1 to 5), `max_results?` | who calls or uses the symbol (import lines left out), and who uses those: the impact radius, with each caller's distance and whether it is test code, and a summary of affected symbols, files and test files |
 | `get_callees` | `name_path`, `relative_path?`, `max_results?` | what the symbol's body uses, with counts; dependency symbols show their package and version |
-| `find_implementations` | `name_path`, `relative_path?`, `max_results?`, `live?` | what implements, extends or overrides it (classes behind an interface, overrides of a method), with distance; `live` asks rust-analyzer instead, edits since the map included |
+| `find_implementations` | `name_path`, `relative_path?`, `max_results?`, `live?` | what implements, extends or overrides it, with distance; `live` asks the configured language server, subject to that server's capabilities |
 | `get_type_hierarchy` | `name_path`, `relative_path?`, `depth?`, `max_results?` | supertypes and subtypes, from SCIP relationships |
 | `replace_symbol_body` | `name_path`, `relative_path`, `body` | replaces the whole definition; refused if the file changed since the map was built; reports how many places use the symbol |
 | `insert_after_symbol`, `insert_before_symbol` | `name_path`, `relative_path`, `body` | adds code next to a definition |
 | `rename_symbol` | `name_path`, `relative_path`, `new_name`, `apply?` | plans by default: every site, skipped aliases, conflicts, stale files; `apply` writes it |
 | `run_tests` | `name_path` or `relative_path`, `depth?` | runs the tests that reach a symbol through calls, overrides included, with the language's runner from `tools/modules.json` |
 | `format_file` | `relative_path` | the language's formatter from `tools/modules.json` |
-| `get_diagnostics` | `name_path?`, `relative_path?`, `depth?`, `errors_only?`, `live?` | compiler errors and lint findings (tsc, pyright, cargo, javac, clang; ruff, biome, clippy) pinned to symbols; for a symbol, also those in its callers, with distance (see `docs/diagnostics.md`); `live` asks a running language server (rust-analyzer, pyright, typescript-language-server) about one file as it is now |
+| `get_diagnostics` | `name_path?`, `relative_path?`, `depth?`, `errors_only?`, `live?` | compiler errors and lint findings pinned to symbols and their referencing symbols (see `docs/diagnostics.md`); `live` asks a configured server (Rust, Python, TS/JS or Kotlin) about one file |
 | `search_pattern` | `pattern`, `language?`, `relative_path?`, `max_results?` | structural search, ast-grep style (`$X.unwrap()`, `console.log($$$A)`), via tree-sitter for TS/TSX/JS, Python, Rust, Java, Kotlin, C, C++ and CUDA: each match with what its metavariables captured and the symbol it is in |
 | `rewrite_pattern` | `pattern`, `rewrite`, `language?`, `relative_path?`, `apply?` | structural rewrite: plans by default; `apply` writes it, refused for files changed since the map |
 | `find_unused_symbols` | `relative_path?`, `include_tests?`, `max_results?` | functions, classes, methods, types and variables nothing references or implements: removal candidates, not proof |
@@ -99,6 +106,7 @@ Every answer about a file that changed after the SCIP run carries
 
 ```bash
 git clone --recurse-submodules https://github.com/shetautnetjer/Swan   # lsp/ is the goose-lsp submodule
+cd Swan
 scripts/fetch-tools.sh                          # Goose and the indexers and servers (sha256-pinned) into .tools/, the npm tools into tools/
 scripts/build.sh                                # bin/swan; the first build fetches goose-sqlite and goose-treesitter
 bin/swan map <repo> data/<name>                 # every indexer the repo needs -> map (refreshes if it exists)
@@ -110,6 +118,12 @@ bin/swan serve data/<name>/swan.db              # MCP over stdio
 bin/swan query data/<name>/swan.db refs getBackend   # the same answers on the command line
 scripts/test.sh                                 # build, map the fixture, drive the MCP end to end, check refresh
 ```
+
+For a small offline demonstration after building, run
+`python3 scripts/demo-offline.py`. It exercises map loading, queries and
+structural rewriting with synthetic rows, without installing indexers or
+language servers. See [demo and test scope](docs/demo.md). The full integration
+suite above needs the external tools and can build fixture projects.
 
 An MCP client entry looks like:
 
@@ -137,8 +151,9 @@ bake-off's `index.scip`:
 | `find_unused_symbols` | 20 ms, fresh process | 166 candidates outside tests; the three spot-checked with ripgrep appear only at their definitions |
 | `index_info` with freshness | 2.6 ms | stats all 2,309 files |
 
-These are a first slice's numbers, not a qualified benchmark. Correctness
-against Serena is the bake-off's job and is not claimed here.
+These are historical first-slice measurements, not rerun by the standalone
+contribution checks. They do not establish parity with Serena or JetBrains.
+For reproducible compiler/cache measurements, see [package boundaries](docs/packages.md).
 
 ## Build speed
 
@@ -162,49 +177,28 @@ A question about one symbol's impact (`get_callers`, `get_callees`,
 `get_diagnostics`), asked with a name several symbols share, comes back with
 the candidates rather than a merged answer.
 
-## Against the code-map bake-off
+## Storage and refresh
 
-A separate bake-off compared a Goose in-memory snapshot with Rust + SQLite on
-the same SCIP data for that repository. Both matched the TypeScript language
-server on all 20 symbols. Rust + SQLite won fresh-process lookups (0.69 ms vs 12.7 ms) because Goose's
-`from_bytes` verifies and copies the whole 30 MB image on every start.
-
-Swan already has that SQLite fresh-start benefit. Its Goose code builds and
-queries the map, but the map lives in SQLite on disk, and each process reads
-only the index pages a query touches. Nothing loads the whole map. These are
-fresh-process timings on the same machine (`bin/swan query`, 40 runs each,
-process spawn floor 0.16 ms):
-
-| Query | Swan median / p95 | Bake-off Rust + SQLite |
-|---|---|---|
-| `find_symbol getBackend` | 0.62 / 0.87 ms | 0.69 / 0.83 ms (its query mix) |
-| `find_referencing_symbols debugWarn` (260 refs) | 2.33 / 2.75 ms | n/a |
-| `find_referencing_symbols isRecord` (21 definitions) | 1.65 / 1.97 ms | n/a |
-
-The reference queries do more than the bake-off's: each reference comes with
-the symbol it sits inside and its line of source, read from the repo.
-
-The bake-off made two recommendations:
-- **Lookup by short name:** already in Swan. Its `name` and `name_path`
-  columns are indexed, so `find_symbol isRecord` returns the candidates and
-  `relative_path` picks one.
-- **Incremental per-file reindex:** built, following its safe-update advice.
-  `swan refresh` fingerprints each file's rows from the new SCIP run and
-  rewrites only the files whose rows changed, in one transaction. Those
-  include files whose resolution changed because of an edit elsewhere. On the
-  same one-file edit it took 0.23 s against the bake-off's 17 ms, because
-  Swan reads and fingerprints every row instead of being handed the edited
-  file's rows. Either way the SCIP rerun (~16.5 s) is the real cost.
+The map lives in SQLite on disk; queries read the index pages they need.
+Short names and name paths are indexed. `swan refresh` fingerprints each
+file's rows from a new SCIP run and rewrites changed files in a transaction,
+including files whose resolution changed because of an edit elsewhere.
+Producing the SCIP input remains a separate cost. The compiler/cache
+measurements in [packages.md](docs/packages.md) compare only this Goose
+toolchain's own build states, not other languages or package ecosystems.
 
 ## Limits of this slice
 
-- The graph counts every reference as a use: SCIP does not tell a call from
-  a type use or an import. A class's callees are what its own body uses
+- The graph includes non-call uses such as type references. Caller traversal
+  excludes rows identified as imports, but is not a precise call graph.
+  A class's callees are what its own body uses
   outside its methods; ask about a method for what that method uses.
 
 - Tried with TypeScript, JavaScript (.js/.mjs/.cjs), Python, Rust, Java
-  without a build tool, and CUDA/C++ without nvcc (`swan map` picks the
-  indexers). Go, Java, C/C++, C# and Ruby are untried. What each tried
+  without a build tool, Kotlin through Gradle, and a host-side CUDA fixture
+  without nvcc (`swan map` picks the indexers). Go, general C/C++ projects,
+  C# and Ruby are unqualified here. The CUDA fallback does not check device
+  compilation. What each tried
   indexer misses is in `docs/parity-and-languages.md`.
 - scip-typescript has no per-file mode, so every refresh reruns it over the
   whole repo (~17 s on the repo above). Swan's own part is 0.23 s.
@@ -212,8 +206,8 @@ The bake-off made two recommendations:
   fresh SCIP run in `tests/edit_check.ts`), but uses inside new code only
   appear after a refresh. Renames cover what the compiler resolved, not
   strings or comments.
-- File paths are stored as text on every row; a files table would shrink the
-  database severalfold.
+- A files table already tracks freshness; occurrence paths are still stored
+  as text. Interning them is a possible storage change, not a measured saving.
 - Document-local symbols (`local N`) are dropped, as in the bake-off.
 
 ## Layout
@@ -225,11 +219,11 @@ src/graph.goose      callers and callees
 src/scip.goose       SCIP symbol grammar: name, kind, name path
 src/query.goose      the tool queries, as JSON
 src/serve.goose      MCP JSON-RPC over stdio
-src/db.goose         extern fn bindings to the shim
-src/swan.build       Goose sidecar: compiles the shim and SQLite with the program
-native/swan_sqlite.c the shim
-vendor/sqlite/       SQLite 3.54.1 amalgamation (public domain)
-tools/               scip-flatten.ts, scip-typescript
+src/db.goose         map helpers over the imported SQLite package
+src/swan.build       Goose sidecar: native file/process helpers and LSP bridge
+native/swan_sys.c    file/process helpers
+lsp/                goose-lsp submodule; standalone Goose client + C bridge
+tools/              scip-flatten.ts, modules.json, external npm tool manifest
 tests/               MCP smoke test, refresh-vs-fresh check, latency bench
 fixtures/tiny-ts/    a small repo with the tricky cases (re-export, rename, same-name method and function)
 ```

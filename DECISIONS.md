@@ -98,3 +98,15 @@ target and a runtime-version check. Not worth it now. The names stay for
 later: an egg is a package, the nest its registry, egg.toml its manifest.
 Worth revisiting if Goose adds prebuilt packages itself or a target turns
 out slow to compile on (a phone, a small CI runner).
+## 2026-10-26 — Bounded contribution preparation
+
+Keep the existing package APIs and repository/ref imports. Add independent
+tests and explicit build evidence before proposing a larger packaging change.
+SQLite and tree-sitter remain C-backed Goose packages; LSP remains a
+separately generated Goose client with POSIX C helpers and external servers.
+The offline Swan demo uses synthetic flattened rows and does not qualify
+SCIP or live language servers. Historical comparisons are not fresh evidence.
+
+Do not introduce a registry or new package manager. Splitting tree-sitter
+grammars or changing the standalone LSP/runtime boundary would alter build
+and API assumptions and needs a separate design review (docs/packages.md).

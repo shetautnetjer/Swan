@@ -5,7 +5,12 @@ as_of: 2026-10-25. Serena's tool list was read from the installed
 was checked on GitHub the same day. Language maturity notes are working
 judgement, not measured.
 
-## 1. Parity with Serena
+This page combines the original comparison with later implementation notes.
+External-product observations and private-repo timings below are historical;
+they have not been rerun by the standalone contribution checks. Similar tool
+names do not establish equivalent behavior, language coverage or safety.
+
+## 1. Interface coverage
 
 Serena has two back ends: language servers over LSP, and a JetBrains plugin.
 The JetBrains back end adds refactoring tools that LSP lacks.
@@ -17,10 +22,10 @@ The JetBrains back end adds refactoring tools that LSP lacks.
 | `find_symbol` | `find_symbol` (name paths, substring, body) | done |
 | `find_referencing_symbols` | `find_referencing_symbols` (with enclosing symbol and source line) | done |
 | `get_symbols_overview` | `get_symbols_overview` (file or directory) | done |
-| `find_declaration` | covered by `find_symbol`; no "declaration at this file and line" lookup | partial |
+| `find_declaration` | `find_symbol` by name and `get_symbol_at` by file/position | index-dependent; not a complete declaration/definition distinction |
 | `find_implementations` | `find_implementations` (classes, subclasses, method overrides, any depth) | done |
 | JetBrains `type_hierarchy` | `get_type_hierarchy` (supertypes and subtypes) | done |
-| `get_diagnostics_for_file` / `_for_symbol` | `get_diagnostics` (tsc and cargo check, loaded after a check; for a symbol plus its callers) | done for TS and Rust; not live |
+| `get_diagnostics_for_file` / `_for_symbol` | `get_diagnostics` over stored checks/lints, plus optional live language-server requests | configured live adapters for Python, TS/JS, Rust and Kotlin; see diagnostics.md |
 | JetBrains `list_inspections` / `run_inspections` | missing | missing |
 | (no Serena equivalent) | `get_callers` impact radius, `get_callees`, `index_info` | Swan only |
 
@@ -31,7 +36,7 @@ The JetBrains back end adds refactoring tools that LSP lacks.
 | `replace_symbol_body` | `replace_symbol_body` (exact SCIP span; refuses stale files; shifts the map) | done |
 | `insert_before_symbol` / `insert_after_symbol` | same names | done |
 | `rename_symbol` (LSP), JetBrains `rename` | `rename_symbol`: plan first, checks each site's text, skips aliases, refuses conflicts and stale files; strings and comments not covered | done, compiler-resolved uses only |
-| JetBrains `move`, `safe_delete` | missing; `safe_delete` = "zero references" check plus a delete | missing |
+| JetBrains `move`, `safe_delete` | missing; zero indexed references is not proof that deletion is safe | missing |
 | `replace_content`, `replace_lines`, `delete_lines`, `insert_at_line`, `replace_in_files`, `create_text_file` | not Swan's job: AYA's harness already edits files | out of scope |
 
 ### Around the code
@@ -42,11 +47,11 @@ The JetBrains back end adds refactoring tools that LSP lacks.
 | memories (`write/read/list/edit/delete/rename_memory`) | AYA has her own memory owner (MemoryD) | out of scope |
 | projects and config (`activate_project`, `query_project`, `get_current_config`, `onboarding`, dashboard, REPL, `restart_language_server`) | one database per repo; `index_info` | partial |
 
-**Verdict:** for reading code, Swan already matches Serena's core and adds
-an impact-radius tool, at 0.6 to 3 ms per call against Serena's ~96 ms in the
-bake-off. Implementations and type hierarchy are cheap to add next. Missing
-for real: live diagnostics and symbol-level editing. Rename and move are the
-hardest; they are where Serena leans on JetBrains.
+Swan implements the listed map queries and bounded edits, but this table is
+not a parity test. Implementations, hierarchy, symbol edits and live
+diagnostics exist now. Full IDE inspections, move refactoring and safe delete
+remain outside the implemented interface. The reference graph includes
+non-call uses and some Rust macro uses are marked `by_name`.
 
 ## 2. Languages
 
@@ -187,30 +192,26 @@ wording, and test-file detection uses JS naming. Done 2026-10-25: a
 descriptor (so Python's `def` is a function or method), Python test-file
 names, and `swan map` running every indexer a repo needs.
 
-## 3. IDE features beyond the finished roadmap steps
+## 3. Implementation status and remaining work
 
 | Feature | Value to AYA | Data source | Effort |
 |---|---|---|---|
 | Find implementations, type hierarchy | high: "who implements this interface" before changing it | SCIP relationships | done 2026-10-25 |
-| Symbol-level edits (`replace_symbol_body`, `insert_after_symbol`) | high: edits by symbol, not by line number | Swan's body ranges; refresh afterwards | small to medium |
+| Symbol-level edits (`replace_symbol_body`, `insert_after_symbol`) | high: edits by symbol, not by line number | Swan's body ranges; refresh afterwards | implemented |
 | Dead-code finding | medium: exported symbols with zero references | SCIP, one SQL query | done 2026-10-25 |
-| Hover docs | medium | SCIP `documentation` (first line kept now; keep all of it) | small |
-| Rename safety check | high | SCIP occurrences: list every site, flag re-export aliases and string mentions; leave the edit to AYA | medium |
-| Live diagnostics | high after edits | `tsc --noEmit` / pyright / `cargo check` per language, cached by file | medium |
+| Hover docs | medium | `get_symbol_at`, including stored documentation | implemented; index-dependent |
+| Rename plan/apply | high | SCIP occurrences, stale/conflict checks; strings/comments are outside coverage | implemented within those limits |
+| Live diagnostics | high after edits | external servers through goose-lsp | implemented for configured adapters; not full IDE inspection parity |
 | Freshness on every answer | high: says when the map is older than the file | file mtime vs the SCIP run | done 2026-10-25 |
 | Git churn and blame | medium | git | small |
 | Real rename, move, safe delete | high but risky | needs a language server or JetBrains; SCIP alone is not enough to rewrite safely | large |
 
-## 4. Recommended next steps
+## 4. Bounded contribution priorities
 
-1. ~~Implementations and type hierarchy~~: done.
-2. ~~Freshness and dead code~~: done.
-   **Freshness and dead code:** stamp each answer with whether its file
-   changed since indexing, and add `find_unused_symbols`. Both are small, and
-   freshness is what makes the map safe to trust.
-3. ~~Python~~: done, plus Rust (see "Tried on 2026-10-25").
-4. **Symbol edits:** `replace_symbol_body` and `insert_after_symbol`, each
-   followed by a refresh.
-5. **Diagnostics:** wrap `tsc --noEmit` per changed file.
-6. **Rename and move:** later. Start with a rename *plan* (every site
-   listed); don't rewrite code from SCIP alone.
+1. Run independent library tests and the offline demo, with explicit
+   passed/failed/skipped results.
+2. Measure package cold builds and cache reuse separately from indexing.
+3. Qualify each real language-server adapter on its own toolchain before
+   expanding supported-server claims.
+4. Discuss grammar selection and a normal importable LSP package only after
+   measuring their build tradeoffs; see [packages.md](packages.md).

@@ -2,7 +2,8 @@
 // the symbol a reference sits inside (its enclosing function, method or
 // class) to the symbol referenced. SCIP does not tell a call from any other
 // use, so "callers" here means every symbol that references the target:
-// calls, type uses and imports alike. Modules are where a walk stops, since
+// calls and type uses, with import rows excluded from caller traversal.
+// Modules are where a walk stops, since
 // a file is not called; a reference at a file's top level shows its module.
 
 import std;
