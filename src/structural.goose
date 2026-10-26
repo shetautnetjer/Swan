@@ -30,19 +30,6 @@ fn structural_files(root: const u8[:], rel: const u8[:], lang: const u8[:]) -> u
     return files;
 }
 
-// The innermost symbol in the map whose body holds a 0-based line.
-fn symbol_around(db: i64, file: const u8[:], line: i64, out: u8[>..]&) {
-    let st = prepare_or_die(db, """
-        SELECT name_path FROM symbols WHERE def_file = ?1 AND body_start <= ?2 AND body_end >= ?2
-        ORDER BY body_end - body_start, body_start DESC LIMIT 1
-        """);
-    sqlite::bind_text(st, 1, file);
-    sqlite::bind_int(st, 2, line);
-    var err: u8[>..] = [];
-    if sqlite::step(st, err) == 1 { sqlite::col_text(st, 0, out); }
-    sqlite::finalize(st);
-}
-
 fn first_line(s: const u8[:]) -> const u8[:] {
     let nl = find(s, "\n");
     let one = if nl >= 0 { s[..nl] } else { s };
@@ -154,9 +141,27 @@ fn search_pattern(db: i64, pattern: const u8[:], lang: const u8[:], rel: const u
                 let rels = split(mine, '\n');
                 var text: u8[>..] = [];
                 var text_of: i64 = -1;
+                // Per file, once: its text, whether it is stale, and its
+                // symbols' bodies, to name the symbol each match sits in.
+                var stale_file = false;
+                var spans: i64[>..] = [];       // body_start, body_end, offset of its name in names
+                var names: u8[>..] = [];
                 treesitter::search_files(paths) { idx, s0, e0, r, c, cap =>
                     let f = rels[idx];
-                    if text_of != idx { text.clear(); read_file(str(root, "/", f), text); text_of = idx; }
+                    if text_of != idx {
+                        text.clear(); read_file(str(root, "/", f), text); text_of = idx;
+                        stale_file = is_stale(f);
+                        spans.clear(); names.clear();
+                        let st = prepare_or_die(db, "SELECT body_start, body_end, name_path FROM symbols WHERE def_file = ?1 AND body_start IS NOT NULL");
+                        sqlite::bind_text(st, 1, f);
+                        var err: u8[>..] = [];
+                        while sqlite::step(st, err) == 1 {
+                            spans.push(sqlite::col_int(st, 0)); spans.push(sqlite::col_int(st, 1)); spans.push(names.len);
+                            sqlite::col_text(st, 2, names);
+                            names.push('\n');
+                        }
+                        sqlite::finalize(st);
+                    }
                     {
                         n++;
                         if n <= limit && e0 <= text.len {
@@ -180,10 +185,22 @@ fn search_pattern(db: i64, pattern: const u8[:], lang: const u8[:], rel: const u
                                 }
                             };
                             body.push('}');
-                            var sym: u8[>..] = [];
-                            symbol_around(db, f, r, sym);
-                            if sym.len > 0 { body.append(",\"in_symbol\":"); json::format_string(body, sym); }
-                            if is_stale(f) { body.append(",\"stale\":true"); }
+                            // The innermost body holding the line (on a tie, the later start).
+                            var best: i64 = -1;
+                            var k = 0;
+                            while k + 3 <= spans.len {
+                                if spans[k] <= r && spans[k + 1] >= r &&
+                                   (best < 0 || spans[k + 1] - spans[k] < spans[best + 1] - spans[best] ||
+                                    (spans[k + 1] - spans[k] == spans[best + 1] - spans[best] && spans[k] > spans[best])) { best = k; }
+                                k += 3;
+                            }
+                            if best >= 0 {
+                                let at = spans[best + 2];
+                                let nl = at + find(names[at..], "\n");
+                                body.append(",\"in_symbol\":");
+                                json::format_string(body, names[at..nl]);
+                            }
+                            if stale_file { body.append(",\"stale\":true"); }
                             body.push('}');
                         }
                     }

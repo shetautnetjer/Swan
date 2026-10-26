@@ -125,3 +125,16 @@ by default: a resident server costs memory.
 
 AEON copy, the first live `get_diagnostics` on src/agent-presets.ts, asked
 10 s after `initialize`: 3.56 s without warming, 0.66 s with SWAN_WARM=auto.
+
+### search_pattern and the flattener
+
+search_pattern names each match's symbol from one query per file instead of
+one per match: `await $X` over AEON (16,054 matches) went from 0.27 s to
+0.14 s, output byte for byte the same. ast-grep takes 0.1 s.
+
+A Goose flattener was weighed and not built. On AEON the Bun flattener
+reads 128 MB of SCIP and writes 108 MB of rows in 1.2 s, the larger part of
+a 2 s small-edit re-map. Moving it to Goose could save part of that second,
+for a rewrite of its ~480 lines and every language repair in it. Writing
+rows straight into the map, without the TSV step, is the bigger lever if
+small-edit maps need to get faster still.
