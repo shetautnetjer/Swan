@@ -54,3 +54,18 @@ it calls (native/proc.c) touch no Goose runtime state, because builders from
 one runtime must not be grown by the other. The server dying is reported,
 never fatal, since the library runs inside swan serve. Pyright and the
 TypeScript server go in the same library next (one goose_init per binary).
+
+## 2026-10-26 — Tree-sitter as a cached Goose package, matching in Goose
+
+The grammars are 90 MB of generated C. A Goose package's native part is
+built once per C compiler and cached, so they live in pkg/treesitter rather
+than swan's own sidecar, whose C is rebuilt whenever any of it changes. Each
+grammar source is included from a uniquely named file under grammars/,
+because the package's objects are named after their sources (parser.c and
+scanner.c would collide). Trees cross to Goose as flat int arrays from an
+opaque handle; tree-sitter's by-value TSNode never does. Matching follows
+ast-grep's default rules, found by probing ast-grep itself: target
+punctuation the pattern leaves out is skipped, a pattern's last sibling may
+be followed by more (an if with an else), `$X` is one named node, and a
+metavariable that the grammar wraps (an expression statement) or reports as
+an error still counts as one.

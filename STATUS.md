@@ -128,6 +128,24 @@ as_of: 2026-10-25
 - Limits: one live server per process (swapped by language); files edited elsewhere are seen by
   rust-analyzer's own watcher, the asked file is always resynced.
 
+## 2026-10-26: structural search and rewrite (tree-sitter, ast-grep style)
+
+- `search_pattern` and `rewrite_pattern`: patterns with `$X`, `$$$X`, `$_`,
+  matched on tree-sitter trees with ast-grep's default ("smart") rules.
+  pkg/treesitter is a Goose package: the runtime and 9 grammars (npm
+  tarballs, pinned by sha256 in fetch-tools.sh) compile once and are cached;
+  ts_shim.c hands trees to Goose as flat int arrays (no TSNode crosses) and
+  parses batches on up to 16 threads.
+- Checked against ast-grep 0.45.3 (tests/structural_check.ts, a ledger of
+  cases): same matches on the fixtures, on AEON (read-only; e.g. 15465
+  `await $X`, 18614 `return $X`) and on private Python and Rust copies. The
+  only differences are in files .gitignore names, which ast-grep's walk
+  skips and Swan reads. CUDA has no ast-grep grammar; checked by hand.
+- Speed on AEON (2358 files): 0.16 s for a pattern with a rare word
+  (files without the pattern's words are never parsed), 0.7 s when every
+  file must be parsed; ast-grep takes 0.1 s on 32 threads. Core build after
+  a core edit 5.0 s (4.3 s before), the matcher being Goose in the core.
+
 ## Next
 
 1. Bake-off reported 2026-10-25 (README "Against the code-map bake-off"):

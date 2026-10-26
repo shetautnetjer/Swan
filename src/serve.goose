@@ -27,6 +27,8 @@ let TOOLS = """
      {"name":"check_errors","description":"Run the repo's own checkers (tsc with the repo's tsconfig, cargo check, pyright) and load what they report, so get_diagnostics answers from fresh results.","inputSchema":{"type":"object","properties":{}}},
      {"name":"run_tests","description":"Run the tests that reach a symbol through calls (up to depth steps, default 3), or the tests that reach anything a file defines when relative_path names a file and name_path is empty. Uses each language's test runner from tools/modules.json (pytest, bun test / vitest, cargo test). Returns which test files ran, pass or fail, and the runner's output tail.","inputSchema":{"type":"object","properties":{"name_path":{"type":"string"},"relative_path":{"type":"string"},"depth":{"type":"integer"}}}},
      {"name":"format_file","description":"Run a file through its language's formatter from tools/modules.json (ruff format, biome format, rustfmt). The file's positions in the map are stale afterwards until update_map.","inputSchema":{"type":"object","properties":{"relative_path":{"type":"string"}},"required":["relative_path"]}},
+     {"name":"search_pattern","description":"Structural search, ast-grep style: a pattern is code in the target language with metavariables, $X for any one node and $$$X for any run of nodes (none included); $_ matches without capturing, and a name used twice must match the same text. Matches by syntax tree, not text (so spacing and comments do not matter), in TS/TSX/JS, Python, Rust, Java, C, C++ and CUDA via tree-sitter. Each match has its position, what each metavariable captured, and the symbol it sits in.","inputSchema":{"type":"object","properties":{"pattern":{"type":"string"},"language":{"type":"string","description":"typescript, tsx, javascript, python, rust, java, c, cpp or cuda; default every language the pattern parses in."},"relative_path":{"type":"string","description":"A file or directory to search; default the whole repo."},"max_results":{"type":"integer"}},"required":["pattern"]}},
+     {"name":"rewrite_pattern","description":"Structural rewrite: every match of pattern (as in search_pattern) replaced by rewrite, where $X and $$$X stand for what they captured. Without apply it only plans the edits (before and after for each); apply writes them, refused when a file changed since the map was built. Nested matches are left to the outer one. Rewritten files are stale in the map until update_map.","inputSchema":{"type":"object","properties":{"pattern":{"type":"string"},"rewrite":{"type":"string"},"language":{"type":"string"},"relative_path":{"type":"string"},"apply":{"type":"boolean"}},"required":["pattern","rewrite"]}},
      {"name":"index_info","description":"When and from what the code map was built: repo root, build time, counts, and the files changed since the SCIP run (stale_files). Answers about a stale file carry \"stale\": true; refresh the map or reread the file.","inputSchema":{"type":"object","properties":{}}}]
     """;
 
@@ -153,6 +155,14 @@ fn call_tool(db: i64, name: const u8[:], args: json::Node?, out: u8[>..]&) -> bo
         json::format_string(out, report);
         return ok;
     }
+    if name == "search_pattern" {
+        return search_pattern(db, arg_text(args, "pattern"), arg_text(args, "language"), arg_text(args, "relative_path"),
+                              arg_int(args, "max_results", 200), out);
+    }
+    if name == "rewrite_pattern" {
+        return rewrite_pattern(db, arg_text(args, "pattern"), arg_text(args, "rewrite"), arg_text(args, "language"),
+                               arg_text(args, "relative_path"), arg_bool(args, "apply"), out);
+    }
     if name == "index_info" { index_info(db, out); return true; }
     out.append(str("unknown tool: ", name));
     return false;
@@ -197,7 +207,9 @@ fn serve_main(db_path: const u8[:]) {
             out.append("}}");
         } else if method == "tools/call" {
             var payload: u8[>..] = [];
-            let ok = call_tool(db, arg_text(params, "name"), json::member(params, "arguments"), payload);
+            var tool_name: u8[>..] = [];    // owned: a tool may grow buffers the request's text could point into
+            tool_name.append(arg_text(params, "name"));
+            let ok = call_tool(db, tool_name, json::member(params, "arguments"), payload);
             out.append(",\"result\":{\"content\":[{\"type\":\"text\",\"text\":");
             json::format_string(out, payload);
             out.append("}],\"isError\":");

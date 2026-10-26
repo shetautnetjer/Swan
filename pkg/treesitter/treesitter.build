@@ -1,0 +1,27 @@
+// Tree-sitter's runtime and the grammars Swan bundles (fetched into
+// .tools/tree-sitter by scripts/fetch-tools.sh), behind ts_shim.c. Each file
+// under grammars/ includes one of their sources, so every object gets a name
+// of its own. A package's native part is compiled once per C compiler and
+// cached, so the grammars' 90 MB of C never adds to swan's own build.
+c_sources = ["ts_shim.c",
+             "grammars/c_parser.c",
+             "grammars/cpp_parser.c",
+             "grammars/cpp_scanner.c",
+             "grammars/cuda_parser.c",
+             "grammars/cuda_scanner.c",
+             "grammars/java_parser.c",
+             "grammars/javascript_parser.c",
+             "grammars/javascript_scanner.c",
+             "grammars/python_parser.c",
+             "grammars/python_scanner.c",
+             "grammars/runtime.c",
+             "grammars/rust_parser.c",
+             "grammars/rust_scanner.c",
+             "grammars/tsx_parser.c",
+             "grammars/tsx_scanner.c",
+             "grammars/typescript_parser.c",
+             "grammars/typescript_scanner.c"];
+c_include = ["../../.tools/tree-sitter/tree-sitter/vendor/tree-sitter/lib/include",
+             "../../.tools/tree-sitter/tree-sitter/vendor/tree-sitter/lib/src",
+             "../../.tools/tree-sitter/tree-sitter-typescript/typescript/src"];
+c_libs = ["pthread"];

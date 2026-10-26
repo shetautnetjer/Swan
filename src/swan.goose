@@ -1,7 +1,7 @@
 // Swan: a code map for agents. SCIP data in, SQLite map, MCP tools out.
 //   swan index <flattened-dir> <db> [repo-root]     a new map
 //   swan refresh <flattened-dir> <db> [repo-root]   rewrite only the files whose rows changed
-//   swan query <db> symbol|refs|uses|at|overview|callers|callees|impls|hierarchy|unused|info|diag|diagfile <arg> [relative_path]
+//   swan query <db> symbol|refs|uses|at|overview|callers|callees|impls|hierarchy|unused|info|diag|diagfile|pattern <arg> [relative_path]
 //   swan serve <db>            MCP over stdio
 import std;
 import os;
@@ -18,6 +18,8 @@ import .run;
 import .pipeline;
 import .modules;
 import .live;
+import .structural;
+import treesitter from "../pkg/treesitter";   // tree-sitter and its grammars, built once and cached
 
 fn usage() {
     write_stderr("""
@@ -28,7 +30,7 @@ fn usage() {
                swan index <flattened-dir> <db> [repo-root]
                swan refresh <flattened-dir> <db> [repo-root]
                swan diagnostics <dir-with-diagnostics.tsv> <db>
-               swan query <db> symbol|refs|uses|at|overview|callers|callees|impls|hierarchy|unused|info|diag|diagfile <arg> [relative_path]
+               swan query <db> symbol|refs|uses|at|overview|callers|callees|impls|hierarchy|unused|info|diag|diagfile|pattern <arg> [relative_path]
                swan serve <db>
 
         """);
@@ -78,6 +80,7 @@ fn main() {
         else if a[3] == "diagfile" { get_diagnostics(db, "", a[4], 0, false, 200, out); }
         else if a[3] == "impls" { find_implementations(db, a[4], rel, 200, out); }
         else if a[3] == "hierarchy" { get_type_hierarchy(db, a[4], rel, 3, 200, out); }
+        else if a[3] == "pattern" { search_pattern(db, a[4], "", rel, 1000000, out); }
         else { usage(); }
         print(out);
     } else if a[1] == "map" && a.len == 4 {

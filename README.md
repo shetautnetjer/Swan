@@ -34,8 +34,8 @@ package's name and version. The roadmap, most valuable first:
 [Goose](https://aardappel.github.io/goose/) is Wouter van Oortmerssen's
 systems language (not Go, and not Block's goose agent). Serena is a Python MCP
 server driving live language servers over LSP. Goose v1 has no subprocesses
-or networking, so it cannot drive a language server, and a literal port of
-Serena is not possible. Swan's reading of the idea:
+or networking in its standard library, so Swan reaches them through small C
+shims; a literal port of Serena was not the aim. Swan's reading of the idea:
 
 - **Precise data comes from SCIP.** A SCIP indexer (here `scip-typescript`)
   runs the real compiler once and records every definition and reference,
@@ -79,14 +79,16 @@ only that whole path. Lines and columns in answers are 1-based.
 | `get_symbol_at` | `relative_path`, `line`, `column` | what a position refers to: definition, signature, docs, the symbol around it (JetBrains' quick documentation) |
 | `get_callers` | `name_path`, `relative_path?`, `depth?` (1 to 5), `max_results?` | who calls or uses the symbol (import lines left out), and who uses those: the impact radius, with each caller's distance and whether it is test code, and a summary of affected symbols, files and test files |
 | `get_callees` | `name_path`, `relative_path?`, `max_results?` | what the symbol's body uses, with counts; dependency symbols show their package and version |
-| `find_implementations` | `name_path`, `relative_path?`, `max_results?` | what implements, extends or overrides it (classes behind an interface, overrides of a method), with distance |
+| `find_implementations` | `name_path`, `relative_path?`, `max_results?`, `live?` | what implements, extends or overrides it (classes behind an interface, overrides of a method), with distance; `live` asks rust-analyzer instead, edits since the map included |
 | `get_type_hierarchy` | `name_path`, `relative_path?`, `depth?`, `max_results?` | supertypes and subtypes, from SCIP relationships |
 | `replace_symbol_body` | `name_path`, `relative_path`, `body` | replaces the whole definition; refused if the file changed since the map was built; reports how many places use the symbol |
 | `insert_after_symbol`, `insert_before_symbol` | `name_path`, `relative_path`, `body` | adds code next to a definition |
 | `rename_symbol` | `name_path`, `relative_path`, `new_name`, `apply?` | plans by default: every site, skipped aliases, conflicts, stale files; `apply` writes it |
 | `run_tests` | `name_path` or `relative_path`, `depth?` | runs the tests that reach a symbol through calls, overrides included, with the language's runner from `tools/modules.json` |
 | `format_file` | `relative_path` | the language's formatter from `tools/modules.json` |
-| `get_diagnostics` | `name_path?`, `relative_path?`, `depth?`, `errors_only?` | compiler errors and lint findings (tsc, pyright, cargo, javac, clang; ruff, biome, clippy) pinned to symbols; for a symbol, also those in its callers, with distance (see `docs/diagnostics.md`) |
+| `get_diagnostics` | `name_path?`, `relative_path?`, `depth?`, `errors_only?`, `live?` | compiler errors and lint findings (tsc, pyright, cargo, javac, clang; ruff, biome, clippy) pinned to symbols; for a symbol, also those in its callers, with distance (see `docs/diagnostics.md`); `live` asks a running language server (rust-analyzer, pyright, typescript-language-server) about one file as it is now |
+| `search_pattern` | `pattern`, `language?`, `relative_path?`, `max_results?` | structural search, ast-grep style (`$X.unwrap()`, `console.log($$$A)`), via tree-sitter for TS/TSX/JS, Python, Rust, Java, C, C++ and CUDA: each match with what its metavariables captured and the symbol it is in |
+| `rewrite_pattern` | `pattern`, `rewrite`, `language?`, `relative_path?`, `apply?` | structural rewrite: plans by default; `apply` writes it, refused for files changed since the map |
 | `find_unused_symbols` | `relative_path?`, `include_tests?`, `max_results?` | functions, classes, methods, types and variables nothing references or implements: removal candidates, not proof |
 | `index_info` | none | repo root, build time, counts, and the files changed since the SCIP run |
 
