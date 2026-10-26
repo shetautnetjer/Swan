@@ -176,6 +176,7 @@ fn module_langs(l: const Langs&) -> u8[>..] {
 fn lang_of_path(p: const u8[:]) -> const u8[:] {
     if ends_with(p, ".py") || ends_with(p, ".pyi") { return "python"; }
     if ends_with(p, ".rs") { return "rust"; }
+    if ends_with(p, ".kt") || ends_with(p, ".kts") { return "kotlin"; }
     if ends_with(p, ".ts") || ends_with(p, ".tsx") || ends_with(p, ".mts") || ends_with(p, ".cts") ||
        ends_with(p, ".js") || ends_with(p, ".jsx") || ends_with(p, ".mjs") || ends_with(p, ".cjs") { return "typescript"; }
     return "";

@@ -33,6 +33,14 @@
       {"cmd": ["{bin}/typescript-language-server", "--stdio"], "language_id": "typescript", "settle": "publish", "init": "{}"}
     ]
   },
+  "kotlin": {
+    "match": [".kt", ".kts"],
+    "lsp": [
+      {"cmd": ["{tools}/kotlin-lsp/kotlin-server-263.7084.0/bin/intellij-server", "--stdio", "--system-path", "{out}/kotlin-lsp"],
+       "language_id": "kotlin", "settle": "publish", "init": "{}",
+       "env": ["GRADLE_USER_HOME={tools}/gradle-home"]}
+    ]
+  },
   "rust": {
     "match": [".rs"],
     "lint": [

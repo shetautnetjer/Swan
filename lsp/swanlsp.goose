@@ -40,7 +40,9 @@ var init_options: u8[>..];
 var indexing_done = false;
 var checking = 0;               // flycheck runs begun and not yet ended
 var language_id: u8[>..];       // what didOpen says the files are: rust, python, typescript
-var checks_ended = 0;           // flycheck runs finished, ever: a question waits for the next one
+var checks_ended = 0;
+var importing = false;          // the Kotlin server is importing the build (Gradle) and has not finished
+var import_failed: u8[>..];     // why the last import failed, if it did           // flycheck runs finished, ever: a question waits for the next one
 var gone = false;               // the server has died; this runs inside swan, so never exit
 var trace = false;              // SWAN_LSP_TRACE=1: every message from the server goes to the log
 // The latest diagnostics the server published for each file, as Swan's JSON:
@@ -218,6 +220,23 @@ fn pump<F>(timeout_ms: i64) -> bool {
             let q, q_ok = json::as_bool(json::member(json::member(root, "params"), "quiescent"));
             if q_ok && q { indexing_done = true; }
         }
+        // JetBrains' Kotlin server imports the Gradle build before it can
+        // analyse anything, and says when it starts and ends.
+        if has_method && method == "intellij/importLog" {
+            let p = json::member(root, "params");
+            let st, st_ok = json::as_bool(json::member(p, "started"));
+            let ok, ok_ok = json::as_bool(json::member(p, "succeeded"));
+            let bad, bad_ok = json::as_bool(json::member(p, "failed"));
+            if st_ok && st { importing = true; import_failed.clear(); }
+            if (ok_ok && ok) || (bad_ok && bad) { importing = false; }
+            if bad_ok && bad {
+                let m, m_ok = json::as_string(json::member(p, "message"));
+                var why: u8[>..] = [];
+                why.append(if m_ok { m } else { "the build import failed" });
+                import_failed.clear();
+                import_failed.append(why);
+            }
+        }
         if has_method && method == "textDocument/publishDiagnostics" { keep_diagnostics(json::member(root, "params")); }
         if F(root, if has_method { method } else { "" }, idt[..]) { return true; }
     }
@@ -359,13 +378,17 @@ fn diagnostics(file: const u8[:], after_check: bool, out: u8[>..]&) {
     format(key, uri);
     guard sync_file(file) else { out.append("{\"ok\":false,\"error\":\"cannot read the file\"}"); return; }
     if after_check { wait_indexed(); }     // servers that publish wait for nothing else
-    let deadline = clock() + 120.0;
+    // A first build import (Gradle fetching itself and the dependencies) can
+    // take minutes; anything else gets two.
+    var deadline = clock() + 120.0;
+    var long_wait = false;
     var settled = false;
     loop {
+        if importing && !long_wait { deadline = clock() + 900.0; long_wait = true; }
         let left = ((deadline - clock()) * 1000.0) as i64;
         if left <= 0 { break; }
         let seq = diag_seq.get(key);
-        let done = if after_check { checks_ended > before && checking == 0 } else { seq && seq > before_pub };
+        let done = !importing && (if after_check { checks_ended > before && checking == 0 } else { seq && seq > before_pub });
         // Once the check is over, 300 ms with no message means the last set is in.
         let more = pump(if done { 300 } else { min(left, 1000) }) { m, method, id => true };
         if done && !more { settled = true; break; }
@@ -373,6 +396,7 @@ fn diagnostics(file: const u8[:], after_check: bool, out: u8[>..]&) {
     let at = diag_at.get(key);
     out.append("{\"ok\":true,");
     if !settled { out.append("\"settled\":false,"); }
+    if import_failed.len > 0 { out.append("\"import_failed\":"); json::format_string(out, import_failed); out.push(','); }
     out.append("\"diagnostics\":");
     let len = diag_len.get(key);
     if at && len { out.append(diag_text[at..at + len]); } else { out.append("[]"); }
@@ -429,7 +453,7 @@ export "swanlsp_start" fn start(repo: const u8[:], log: const u8[:], init_json: 
     // A fresh session, also after a server died.
     repo_dir.clear(); root_uri.clear(); log_path.clear(); init_options.clear(); inbox.clear(); opened.clear();
     language_id.clear(); language_id.append(lang_id);
-    gone = false; indexing_done = false; checking = 0; checks_ended = 0;
+    gone = false; indexing_done = false; checking = 0; checks_ended = 0; importing = false; import_failed.clear();
     diag_text.clear(); diag_at.clear(); diag_len.clear(); diag_seq.clear(); publishes = 0;
     var tv: u8[>..] = [];
     trace = env("SWAN_LSP_TRACE", tv) && tv == "1";

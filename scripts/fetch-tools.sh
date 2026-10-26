@@ -133,5 +133,22 @@ for entry in "${TS_PKGS[@]}"; do
     tar -xzf ".tools/tree-sitter/pkg/$pkg.tgz" -C ".tools/tree-sitter/$name" --strip-components=1
   fi
 done
+# JetBrains' Kotlin language server (standalone, with its own JBR), for live
+# Kotlin answers. About 1.5 GB unpacked; it keeps its caches in the map's
+# folder (--system-path).
+KLS=263.7084.0
+KLS_SHA256=ae0c4b01e17ab73a4a5227a78ea99e6dcbe3e499600315b22759a4e4cddd11df
+if [ ! -x ".tools/kotlin-lsp/kotlin-server-$KLS/bin/intellij-server" ]; then
+  mkdir -p .tools/kotlin-lsp
+  tgz=.tools/kotlin-lsp/kotlin-server-$KLS.tar.gz
+  curl -fsSL -o "$tgz" "https://download.jetbrains.com/language-server/kotlin-server/$KLS/kotlin-server-$KLS.tar.gz"
+  echo "$KLS_SHA256  $tgz" | sha256sum -c -
+  tar -xzf "$tgz" -C .tools/kotlin-lsp
+  rm "$tgz"
+fi
+# Gradle, as the Kotlin server and Kotlin maps run it, keeps its home here;
+# its daemons quit after 10 idle minutes and keep to 2 GB.
+mkdir -p .tools/gradle-home
+[ -f .tools/gradle-home/gradle.properties ] || printf 'org.gradle.daemon.idletimeout=600000\norg.gradle.jvmargs=-Xmx2g\n' > .tools/gradle-home/gradle.properties
 (cd tools && npm install --no-fund --no-audit --silent)
 echo "goose: $dir/goose"

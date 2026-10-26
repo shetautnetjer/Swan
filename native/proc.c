@@ -52,6 +52,9 @@ int64_t proc_open(proc_slice argv_nul, proc_slice cwd, proc_slice env_nul, proc_
     for (char **e = envp; *e; e++) if (strncmp(*e, "PATH=", 5) == 0) { path_env = *e + 5; break; }
     pid_t pid = fork();
     if (pid == 0) {
+        /* A group of its own, so closing it also ends what it started: the
+           Kotlin server's launcher runs the JVM as a child. */
+        setpgid(0, 0);
         dup2(to_child[0], 0); dup2(from_child[1], 1);
         int log = logbuf[0] ? open(logbuf, O_WRONLY | O_CREAT | O_APPEND, 0644) : -1;
         if (log >= 0) { dup2(log, 2); close(log); }
@@ -107,16 +110,18 @@ int64_t proc_read(int64_t h, int64_t timeout_ms, proc_slice buf) {
     return n <= 0 ? -1 : n;
 }
 
-/* Closes stdin, gives it grace_ms to exit, then kills it. */
+/* Closes stdin, gives it grace_ms to exit, then kills it and anything left
+   in its process group. */
 void proc_close(int64_t h, int64_t grace_ms) {
     proc_t *p = (proc_t *)(intptr_t)h;
     close(p->in_fd);
     int status;
     for (int64_t waited = 0; waited < grace_ms; waited += 20) {
-        if (waitpid(p->pid, &status, WNOHANG) == p->pid) { close(p->out_fd); free(p); return; }
+        if (waitpid(p->pid, &status, WNOHANG) == p->pid) { kill(-p->pid, SIGKILL); close(p->out_fd); free(p); return; }
         struct timespec ts = {0, 20 * 1000000};
         nanosleep(&ts, NULL);
     }
+    kill(-p->pid, SIGKILL);
     kill(p->pid, SIGKILL);
     waitpid(p->pid, &status, 0);
     close(p->out_fd);

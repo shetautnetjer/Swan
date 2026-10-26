@@ -164,6 +164,25 @@ as_of: 2026-10-25
   finds 75, the 5 more being composables whose parameter lists end with a
   trailing comma, which ast-grep's `$$$P` does not take.
 
+## 2026-10-26: Kotlin, step 2 (live answers from kotlin-lsp)
+
+- JetBrains' standalone Kotlin language server 263.7084.0 (its own JBR,
+  1.5 GB in .tools/kotlin-lsp, sha256-pinned in fetch-tools.sh) is the
+  Kotlin "lsp" entry in tools/modules.json, run with --stdio and its caches
+  under the map folder (--system-path). Gradle's home is .tools/gradle-home,
+  whose daemons quit after 10 idle minutes and keep to 2 GB.
+- It imports the Gradle build before it analyses anything; the swan-lsp
+  library now waits for that (intellij/importLog), up to 15 minutes, and
+  reports import_failed.
+- tiny-kt: the first call took 169 s (Gradle fetching itself and the
+  Kotlin plugin, 324 MB, once), later sessions start in about 5 s. An
+  INITIALIZER_TYPE_MISMATCH error came back 5.6 s after the edit on the
+  first analysis and 0.9 s on the next. The server takes about 1.4 GB.
+- proc.c starts servers in their own process group and kills the group on
+  close: the Kotlin launcher runs its JVM as a child, which otherwise
+  outlived swan serve. The Gradle daemon is in a session of its own and is
+  left to its idle timeout.
+
 ## Next
 
 1. Bake-off reported 2026-10-25 (README "Against the code-map bake-off"):
