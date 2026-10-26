@@ -663,6 +663,13 @@ fn map_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> bo
             each_split(chunks, '\n') { chunk => each_split(chunk, '\t') { f =>
                 if f.len > repo.len { format(stamps, f[repo.len + 1..], "\t", swan_file_size(f), "\t", swan_mtime_ns(f), "\n"); }
             }; };
+            // Layers index changed files against the last map's view of
+            // everything else, so they are only used while the shared inputs
+            // (config, package.json, declarations) are what they were.
+            var prev_shared: u8[>..] = [];
+            read_file(str(out, "/typescript-shared.txt"), prev_shared);
+            let same_shared = prev_shared == str(shared);
+            write_file(str(out, "/typescript-shared.txt"), str(shared));
             var prev_stamps: u8[>..] = [];
             read_file(str(out, "/typescript-files.tsv"), prev_stamps);
             let dirty = dependents_of_changes(out, stamps, prev_stamps);
@@ -703,7 +710,7 @@ fn map_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> bo
                 let tab = find(line, "\t");
                 if tab > 0 && !file_exists(str(out, "/index-typescript-layer-", line[..tab], ".scip")) { layers_present = false; }
             };
-            let use_delta = same_plan && chunk_files_present && layers_present && covered.len > 0 &&
+            let use_delta = same_plan && same_shared && chunk_files_present && layers_present && covered.len > 0 &&
                             count_lines(covered) * 4 <= nfiles && nlayers + (if fresh.len > 0 { 1 } else { 0 }) <= 6;
             if use_delta {
                 var layers: u8[>..] = [];
@@ -1014,6 +1021,18 @@ fn map_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> bo
         if f[0].len > 0 { report.push('\n'); }
         idx++;
     };
+    // A Python piece whose run failed is not reusable: its old index file
+    // no longer matches the fingerprint recorded for it before the run.
+    if failed.len > 0 {
+        var pieces_kept: u8[>..] = [];
+        var prev_pieces: u8[>..] = [];
+        read_file(str(out, "/python-pieces.tsv"), prev_pieces);
+        each_split(prev_pieces, '\n') { line =>
+            let f = split(line, '\t');
+            if f.len == 3 && !contains_line(failed, f[2]) { pieces_kept.append(line); pieces_kept.push('\n'); }
+        };
+        if prev_pieces.len > 0 { write_file(str(out, "/python-pieces.tsv"), pieces_kept); }
+    }
     guard scips.len > 0 else { format(report, "every indexer failed"); return false; }
     // Remember what each index was made from, failures excepted, and drop
     // index files no job produced or reused.
@@ -1238,6 +1257,15 @@ fn check_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> 
     let l = detect(repo);
     var rows: u8[>..] = [];
     var ran: u8[>..] = [];
+    // Checkers that never got to check: not started (126, 127), timed out
+    // (-2) or killed. Their silence is not a clean bill, so the diagnostics
+    // already saved are kept rather than replaced by a partial set.
+    var not_run: u8[>..] = [];
+    fn did_run(name: const u8[:], code: i64) -> bool {
+        guard code < 0 || code == 126 || code == 127 || code >= 128 else { return true; }
+        format(not_run, " ", name, if code == -2 { str(" (timed out)") } else { str(" (exit ", code, ")") });
+        return false;
+    }
 
     // Only with the repo's own tsconfig: the one Swan generates to index a
     // repo without one has no say over how strict its code means to be.
@@ -1250,8 +1278,9 @@ fn check_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> 
         arg(a, "-p");
         arg(a, repo);
         var o: u8[>..] = [];
-        run_step("tsc", a, repo, child_env(l, ""), 1800000, o);   // exit 2 when it finds errors
-        format(ran, " tsc:", parse_tsc(o, rows));
+        if did_run("tsc", run_step("tsc", a, repo, child_env(l, ""), 1800000, o)) {   // exit 2 when it finds errors
+            format(ran, " tsc:", parse_tsc(o, rows));
+        }
     }
     if l.cargo {
         var a: u8[>..] = [];
@@ -1263,8 +1292,9 @@ fn check_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> 
         arg(a, "--quiet");
         var o: u8[>..] = [];
         let extra = env_entry("CARGO_TARGET_DIR", str(out, "/cargo-target"));
-        run_step("cargo check", a, repo, child_env(l, extra), 3600000, o);
-        format(ran, " cargo:", parse_cargo(o, repo, rows));
+        if did_run("cargo", run_step("cargo check", a, repo, child_env(l, extra), 3600000, o)) {
+            format(ran, " cargo:", parse_cargo(o, repo, rows));
+        }
     }
     if l.py {
         // pyright run from the repo root reads the repo's own settings
@@ -1286,8 +1316,9 @@ fn check_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> 
         arg(a, "--pythonpath");
         arg(a, py);
         var o: u8[>..] = [];
-        run_step("pyright", a, repo, child_env(l, ""), 3600000, o);   // exit 1 when it finds errors
-        format(ran, " pyright:", parse_pyright(o, repo, rows));
+        if did_run("pyright", run_step("pyright", a, repo, child_env(l, ""), 3600000, o)) {   // exit 1 when it finds errors
+            format(ran, " pyright:", parse_pyright(o, repo, rows));
+        }
     }
     if l.java && !l.maven && !l.gradle {
         // javac over every source, output thrown away in out-dir.
@@ -1309,9 +1340,9 @@ fn check_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> 
         var o: u8[>..] = [];
         var e: u8[>..] = [];
         let t0 = clock();
-        swan_run(a, repo, child_env(l, ""), 1800000, o, e);   // javac reports on stderr
+        let code = swan_run(a, repo, child_env(l, ""), 1800000, o, e);   // javac reports on stderr
         write_stderr(str("javac: ", ((clock() - t0) * 1000.0) as i64, " ms\n"));
-        format(ran, " javac:", parse_javac(e, repo, rows));
+        if did_run("javac", code) { format(ran, " javac:", parse_javac(e, repo, rows)); }
     } else if l.java {
         format(ran, " javac: skipped (Maven/Gradle repo; its build tool is not run yet)");
     }
@@ -1333,9 +1364,9 @@ fn check_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> 
         var o: u8[>..] = [];
         var e: u8[>..] = [];
         let t0 = clock();
-        swan_run(a, repo, child_env(l, ""), 3600000, o, e);
+        let code = swan_run(a, repo, child_env(l, ""), 3600000, o, e);
         write_stderr(str("clang (via scip-clang): ", ((clock() - t0) * 1000.0) as i64, " ms\n"));
-        format(ran, " clang:", parse_clang(e, repo, rows));
+        if did_run("clang", code) { format(ran, " clang:", parse_clang(e, repo, rows)); }
     }
     // Linters, from tools/modules.json.
     let mc = mod_ctx(repo, out, home, l);
@@ -1345,12 +1376,16 @@ fn check_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> 
         var src: u8[>..] = [];
         var par: u8[>..] = [];
         let code = run_module(home, lang, "lint", mc, child_env(l, ""), "", o, src, par);
-        if code != -100 {
+        if code != -100 && did_run(lang, code) {
             let n = if par == "github" { parse_github(o, repo, src, rows) }
                     else if par == "cargo" { parse_cargo(o, repo, rows, src) } else { 0 };
             format(ran, " ", src, ":", n);
         }
     };
+    guard not_run.len == 0 else {
+        format(report, "could not check:", not_run, "; the saved diagnostics are unchanged", if ran.len > 0 { str(" (ran", ran, ")") } else { str("") });
+        return false;
+    }
     guard ran.len > 0 else { format(report, "no checker for the languages in ", repo); return false; }
     write_file(str(out, "/diagnostics.tsv"), rows);
     format(report, "checked", ran, "\n");

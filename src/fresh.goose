@@ -14,7 +14,12 @@ var fresh_root: u8[..4096];
 var fresh_scip_time: i64 = 0;    // ns since the epoch; 0 when unknown
 var fresh_edited: i64 = 0;       // statement: a file's edited_mtime
 
+// Loads the map's root and SCIP time for `db`, the connection the server
+// answers from. Called again after update_map, which moves the SCIP time.
 fn load_freshness(db: i64) {
+    fresh_root.clear();
+    fresh_scip_time = 0;
+    if fresh_edited != 0 { sqlite::finalize(fresh_edited); }
     var v: u8[>..] = [];
     meta_value(db, "root", v);
     if v.len > 0 && v.len < 4000 {

@@ -254,7 +254,23 @@ fn rewrite_pattern(db: i64, pattern: const u8[:], rewrite: const u8[:], lang: co
             }
             updated.append(cur_text[at..]);
             let path = str(root, "/", cur);
-            if write_file_atomic(path, updated) { mark_edited(db, cur, path); files_written++; }
+            if write_file_atomic(path, updated) {
+                // The map follows each cut, the last first, so the cuts
+                // before it keep the positions they were found at.
+                var k = cuts.len;
+                while k > 0 {
+                    k--;
+                    let c = cuts[k];
+                    let a = repl_at[k];
+                    let b = if k + 1 < repl_at.len { repl_at[k + 1] } else { repl.len };
+                    let sl = count_newlines(cur_text[..c.start]);
+                    let sc = col_of(cur_text, c.start);
+                    let nel, nec = end_of(sl, sc, repl[a..b]);
+                    shift_span(db, cur, sl, sc, count_newlines(cur_text[..c.end]), col_of(cur_text, c.end), nel, nec, -1);
+                }
+                mark_edited(db, cur, path);
+                files_written++;
+            }
             else { if write_failed.len > 0 { write_failed.push(','); } json::format_string(write_failed, cur); }
         }
         cuts.clear();

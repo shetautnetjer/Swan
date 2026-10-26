@@ -79,6 +79,17 @@ fn count_newlines(s: const u8[:]) -> i64 {
     return n;
 }
 
+// A name every language Swan edits accepts as an identifier: a letter, `_`
+// or `$`, then those or digits. (SCIP's own descriptor characters also allow
+// `+` and `-`, which no source name may hold.)
+fn is_name(s: const u8[:]) -> bool {
+    guard s.len > 0 && !(s[0] >= '0' && s[0] <= '9') else { return false; }
+    for c in s {
+        if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '$') { return false; }
+    }
+    return true;
+}
+
 // The one symbol `pattern` names in `rel`, or an error message.
 fn resolve_target(db: i64, pattern: const u8[:], rel: const u8[:], err: u8[>..]&) -> Target {
     var t = Target { id: -1, def_line: -1, def_col: -1, sl: -1, sc: -1, el: -1, ec: -1 };
@@ -124,39 +135,60 @@ fn resolve_target(db: i64, pattern: const u8[:], rel: const u8[:], err: u8[>..]&
     return t;
 }
 
-// The map after lines a..b of `file` became `n` new lines (an insertion
-// before line a has b = a - 1): rows below move, spans that hold the change
-// stretch, and uses inside the replaced lines go until the next refresh.
-fn shift_rows(db: i64, file: const u8[:], a: i64, b: i64, n: i64) {
-    let d = n - (b - a + 1);
-    fn run(sql: const u8[:], x: i64) {
+// The map after the text from (sl, sc) to (el, ec) of `file` was replaced by
+// text that ends at (nel, nec); an insertion is the empty span at its point.
+// Positions are (line, column), so code after the change on its last line
+// moves too. Uses inside the replaced text go until the next refresh, and so
+// do the symbols defined there other than `keep` (the methods of a replaced
+// class): their positions name code that is gone.
+fn shift_span(db: i64, file: const u8[:], sl: i64, sc: i64, el: i64, ec: i64, nel: i64, nec: i64, keep: i64) {
+    // A position at or after the span's end moves with it.
+    fn moved(l: const u8[:], c: const u8[:]) -> u8[>..] {
+        return str(l, " = CASE WHEN ", l, " > ?2 OR (", l, " = ?2 AND ", c, " >= ?3) THEN ", l, " + ?4 - ?2 ELSE ", l, " END, ",
+                   c, " = CASE WHEN ", l, " = ?2 AND ", c, " >= ?3 THEN ", c, " - ?3 + ?5 ELSE ", c, " END");
+    }
+    // A position inside the span: at or after its start, before its end.
+    fn inside(l: const u8[:], c: const u8[:]) -> u8[>..] {
+        return str("(", l, " > ?2 OR (", l, " = ?2 AND ", c, " >= ?3)) AND (", l, " < ?4 OR (", l, " = ?4 AND ", c, " < ?5))");
+    }
+    fn run(sql: const u8[:], a: i64, b: i64, c: i64, d: i64) {
         let st = prepare_or_die(db, sql);
         sqlite::bind_text(st, 1, file);
-        sqlite::bind_int(st, 2, x);
-        sqlite::bind_int(st, 3, d);
+        sqlite::bind_int(st, 2, a);
+        sqlite::bind_int(st, 3, b);
+        sqlite::bind_int(st, 4, c);
+        sqlite::bind_int(st, 5, d);
+        sqlite::bind_int(st, 6, keep);
         step_done(st);
         sqlite::finalize(st);
     }
     exec_or_die(db, "BEGIN;");
-    if b >= a {
-        let del = prepare_or_die(db, "DELETE FROM occurrences WHERE file = ?1 AND start_line BETWEEN ?2 AND ?3");
-        sqlite::bind_text(del, 1, file);
-        sqlite::bind_int(del, 2, a);
-        sqlite::bind_int(del, 3, b);
-        step_done(del);
-        sqlite::finalize(del);
+    if el > sl || ec > sc {
+        run(str("DELETE FROM occurrences WHERE file = ?1 AND ", inside("start_line", "start_col")), sl, sc, el, ec);
+        run(str("""
+            UPDATE symbols SET def_file = NULL, def_line = NULL, def_col = NULL, body_start = NULL, body_end = NULL,
+                               body_start_col = NULL, body_end_col = NULL, in_repo = 0
+            WHERE def_file = ?1 AND id != ?6 AND
+            """, inside("def_line", "def_col")), sl, sc, el, ec);
     }
-    if d != 0 {
-        run("UPDATE occurrences SET start_line = start_line + ?3, end_line = end_line + ?3 WHERE file = ?1 AND start_line > ?2", b);
-        run("UPDATE symbols SET def_line = def_line + ?3 WHERE def_file = ?1 AND def_line > ?2", b);
-        run("UPDATE symbols SET body_start = body_start + ?3 WHERE def_file = ?1 AND body_start > ?2", b);
-        run("UPDATE symbols SET body_end = body_end + ?3 WHERE def_file = ?1 AND body_end >= ?2", max(a, b));
-    }
+    run(str("UPDATE occurrences SET ", moved("start_line", "start_col"), ", ", moved("end_line", "end_col"), " WHERE file = ?1"),
+        el, ec, nel, nec);
+    run(str("UPDATE symbols SET ", moved("def_line", "def_col"), ", ", moved("body_start", "body_start_col"), ", ",
+            moved("body_end", "body_end_col"), " WHERE def_file = ?1"), el, ec, nel, nec);
     exec_or_die(db, "COMMIT;");
 }
 
+// Where text inserted at (line, col) ends.
+fn end_of(line: i64, col: i64, inserted: const u8[:]) -> i64, i64 {
+    let nl = count_newlines(inserted);
+    return line + nl, if nl > 0 { col_of(inserted, inserted.len) } else { col + col_of(inserted, inserted.len) };
+}
+
+// Records the mtime Swan left on a file it edited, so the file still reads
+// as fresh, and clears its fingerprint: the rows were changed here, not by
+// a SCIP run, so the next refresh must rebuild them whatever SCIP says.
 fn mark_edited(db: i64, file: const u8[:], path: const u8[:]) {
-    let st = prepare_or_die(db, "UPDATE files SET edited_mtime = ?2 WHERE file = ?1");
+    let st = prepare_or_die(db, "UPDATE files SET edited_mtime = ?2, hash = '' WHERE file = ?1");
     sqlite::bind_text(st, 1, file);
     sqlite::bind_int(st, 2, swan_mtime_ns(path));
     step_done(st);
@@ -244,15 +276,12 @@ fn edit_symbol(db: i64, mode: i64, pattern: const u8[:], rel: const u8[:], body:
         n = count_newlines(code) + 2;
     }
     guard write_file_atomic(path, updated) else { format(out, "cannot write ", path); return false; }
-    shift_rows(db, rel, a, b, n);
     if mode == EDIT_REPLACE {
-        // The symbol's span now ends where the new code does.
-        let st = prepare_or_die(db, "UPDATE symbols SET body_end_col = ?2 WHERE id = ?1");
-        sqlite::bind_int(st, 1, t.id);
-        let so = offset_of(text, starts, t.sl, t.sc);
-        sqlite::bind_int(st, 2, col_of(updated, so + code.len));
-        step_done(st);
-        sqlite::finalize(st);
+        // The symbol's span, which ended at (el, ec), now ends where the new code does.
+        let nel, nec = end_of(t.sl, t.sc, code);
+        shift_span(db, rel, t.sl, t.sc, t.el, t.ec, nel, nec, t.id);
+    } else {
+        shift_span(db, rel, a, 0, a, 0, a + n, 0, t.id);
     }
     mark_edited(db, rel, path);
     out.append("{\"edited\":");
@@ -274,8 +303,7 @@ fn rename_symbol(db: i64, pattern: const u8[:], rel: const u8[:], new_name: cons
     var err: u8[>..] = [];
     let t = resolve_target(db, pattern, rel, err);
     guard t.id >= 0 else { out.append(err); return false; }
-    let valid = all(new_name) { is_ident(it) };
-    guard new_name.len > 0 && valid else {
+    guard is_name(new_name) else {
         format(out, "new_name must be an identifier: '", new_name, "'");
         return false;
     }
@@ -417,10 +445,11 @@ fn rename_symbol(db: i64, pattern: const u8[:], rel: const u8[:], new_name: cons
         var updated: u8[>..] = [];
         // Sites come last-first; the cuts are walked back to front to write forward.
         var cuts: i64[>..] = [];
+        var done: Site[>..] = [];       // the sites written; only their rows move
         for s in sites {
             let so = offset_of(text, starts, s.line, s.col);
             let eo = offset_of(text, starts, s.line, s.end_col);
-            if text[so..eo] == old_name { cuts.push(so); cuts.push(eo); }
+            if text[so..eo] == old_name { cuts.push(so); cuts.push(eo); done.push(s); }
         }
         var k = cuts.len;
         var at = 0;
@@ -442,7 +471,7 @@ fn rename_symbol(db: i64, pattern: const u8[:], rel: const u8[:], new_name: cons
         }
         if write_file_atomic(path, updated) {
             exec_or_die(db, "BEGIN;");
-            for s in sites {
+            for s in done {
                 shift("UPDATE occurrences SET start_col = start_col + ?4, end_col = end_col + ?4 WHERE file = ?1 AND start_line = ?2 AND start_col > ?3", s.line, s.col);
                 shift("UPDATE occurrences SET end_col = end_col + ?4 WHERE file = ?1 AND start_line = ?2 AND start_col = ?3", s.line, s.col);
                 shift("UPDATE symbols SET def_col = def_col + ?4 WHERE def_file = ?1 AND def_line = ?2 AND def_col > ?3", s.line, s.col);

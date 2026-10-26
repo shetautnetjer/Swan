@@ -252,7 +252,7 @@ fn test_main(repo_arg: const u8[:], out_arg: const u8[:], target: const u8[:], r
     let repo = abs_path(repo_arg);
     let out = abs_path(out_arg);
     let home = swan_home();
-    let db = open_db(str(out, "/swan.db"));
+    let db = open_map(str(out, "/swan.db"));
     var ids: u8[>..] = [];
     var tests: u8[>..] = [];
     if file_exists(str(repo, "/", target)) {

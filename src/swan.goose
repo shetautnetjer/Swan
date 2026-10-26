@@ -38,11 +38,18 @@ fn usage() {
     exit(2);
 }
 
-fn open_db(path: const u8[:]) -> i64 {
+// The map at path, for a job of its own (run_tests): the freshness state
+// stays with the connection that answers questions.
+fn open_map(path: const u8[:]) -> i64 {
     guard file_exists(path) else { abort(str("swan: no index at ", path)); }
     var err: u8[>..] = [];
     let db = sqlite::open(path, err);
     if db == 0 { abort(str("swan: cannot open ", path, ": ", err)); }
+    return db;
+}
+
+fn open_db(path: const u8[:]) -> i64 {
+    let db = open_map(path);
     load_freshness(db);
     return db;
 }
