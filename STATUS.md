@@ -90,6 +90,14 @@ as_of: 2026-10-25
 - JS: .js/.mjs/.cjs repos without a tsconfig mapped with a generated one
   outside the repo. fixtures/tiny-js.
 
+## 2026-10-26: speed pass
+
+- Parallel indexers (swan_spawn/swan_wait_any), Python split into
+  --target-only pieces, per-piece and per-language reuse by fingerprint
+  plus dependents from the last map, no-change shortcut. Flattener
+  re-roots paths from SCIP metadata and drops repeated documents.
+  Numbers in docs/speed.md.
+
 ## Next
 
 1. Bake-off reported 2026-10-25 (README "Against the code-map bake-off"):

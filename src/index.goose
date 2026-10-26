@@ -156,7 +156,7 @@ fn index_main(dir: const u8[:], db_path: const u8[:], root: const u8[:], refresh
         }
         exec_or_die(db, "BEGIN;");
     } else {
-        exec_or_die(db, "PRAGMA journal_mode = OFF; PRAGMA synchronous = OFF;");
+        exec_or_die(db, "PRAGMA journal_mode = OFF; PRAGMA synchronous = OFF; PRAGMA cache_size = -262144; PRAGMA temp_store = MEMORY; PRAGMA locking_mode = EXCLUSIVE;");
         exec_or_die(db, SCHEMA);
         exec_or_die(db, "BEGIN;");
     }

@@ -262,3 +262,79 @@ bool swan_realpath(swan_slice path, gs_rref out) {
     append_cstr(out, res);
     return true;
 }
+
+/* ---- Running several programs at once, for map's indexing jobs. ---- */
+
+/* Starts argv like swan_run, with stdout and stderr going to log_path.
+   Returns its pid, or -1. */
+int64_t swan_spawn(swan_slice argv_nul, swan_slice cwd, swan_slice env_nul, swan_slice log_path) {
+    char *abuf = malloc((size_t)argv_nul.len + 1), *ebuf = malloc((size_t)env_nul.len + 1);
+    char cwdbuf[4096], logbuf[4096];
+    if (!abuf || !ebuf || cwd.len >= (int64_t)sizeof cwdbuf || log_path.len >= (int64_t)sizeof logbuf) {
+        free(abuf); free(ebuf); return -1;
+    }
+    memcpy(abuf, argv_nul.data, (size_t)argv_nul.len);
+    memcpy(ebuf, env_nul.data, (size_t)env_nul.len);
+    memcpy(cwdbuf, cwd.data, (size_t)cwd.len); cwdbuf[cwd.len] = 0;
+    memcpy(logbuf, log_path.data, (size_t)log_path.len); logbuf[log_path.len] = 0;
+    char **argv = split_nul(abuf, argv_nul.len, NULL);
+    char **ours = split_nul(ebuf, env_nul.len, NULL);
+    int64_t a = 0, b = 0;
+    while (ours && ours[a]) a++;
+    while (environ[b]) b++;
+    char **envp = calloc((size_t)(a + b + 1), sizeof *envp);
+    for (int64_t i = 0; i < a; i++) envp[i] = ours[i];
+    for (int64_t i = 0; i < b; i++) envp[a + i] = environ[i];
+    const char *path_env = NULL;
+    for (char **e = envp; *e; e++) if (strncmp(*e, "PATH=", 5) == 0) { path_env = *e + 5; break; }
+    pid_t pid = fork();
+    if (pid == 0) {
+        int log = open(logbuf, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if (log >= 0) { dup2(log, 1); dup2(log, 2); close(log); }
+        int nul = open("/dev/null", O_RDONLY);
+        if (nul >= 0) { dup2(nul, 0); close(nul); }
+        if (cwdbuf[0] && chdir(cwdbuf) != 0) _exit(127);
+        if (strchr(argv[0], '/')) execve(argv[0], argv, envp);
+        else if (path_env) {
+            char cand[4096];
+            const char *p = path_env;
+            while (*p) {
+                const char *colon = strchr(p, ':');
+                size_t dl = colon ? (size_t)(colon - p) : strlen(p);
+                if (dl + strlen(argv[0]) + 2 < sizeof cand) {
+                    memcpy(cand, p, dl); cand[dl] = '/';
+                    strcpy(cand + dl + 1, argv[0]);
+                    execve(cand, argv, envp);
+                }
+                if (!colon) break;
+                p = colon + 1;
+            }
+        }
+        fprintf(stderr, "swan_spawn: cannot run %s: %s\n", argv[0], strerror(errno));
+        _exit(127);
+    }
+    free(argv); free(ours); free(envp); free(abuf); free(ebuf);
+    return pid > 0 ? (int64_t)pid : -1;
+}
+
+/* Waits for any child started by swan_spawn; its pid, or -1 when none are
+   left. Its exit code (128 + signal if killed) goes to *code. */
+int64_t swan_wait_any(int32_t *code) {
+    int status = 0;
+    pid_t pid;
+    do { pid = waitpid(-1, &status, 0); } while (pid < 0 && errno == EINTR);
+    if (pid < 0) return -1;
+    *code = WIFEXITED(status) ? WEXITSTATUS(status) : WIFSIGNALED(status) ? 128 + WTERMSIG(status) : -1;
+    return pid;
+}
+
+int64_t swan_file_size(swan_slice path) {
+    char buf[4096];
+    if (path.len <= 0 || path.len >= (int64_t)sizeof buf) return -1;
+    memcpy(buf, path.data, (size_t)path.len);
+    buf[path.len] = 0;
+    struct stat st;
+    return stat(buf, &st) == 0 ? (int64_t)st.st_size : -1;
+}
+
+int32_t swan_cpu_count(void) { long n = sysconf(_SC_NPROCESSORS_ONLN); return n > 0 ? (int32_t)n : 1; }

@@ -25,7 +25,7 @@
 // Document-local symbols ("local N") are dropped: agents query named symbols.
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, posix } from "node:path";
 
 class Reader {
   pos = 0;
@@ -59,6 +59,10 @@ class Reader {
       else if (wt === 5) this.pos += 4;
       else throw new Error(`unsupported wire type ${wt} at ${this.pos}`);
     }
+  }
+  at(pos: number): Reader {
+    this.pos = pos;
+    return this;
   }
   string(): string {
     return dec.decode(this.buf.subarray(this.pos, this.end));
@@ -310,19 +314,42 @@ function span(r: number[]): number[] {
 }
 
 const t0 = performance.now();
-let docs = 0;
-for (const path of [indexPath, ...moreIndexes]) flattenIndex(new Reader(new Uint8Array(readFileSync(path))));
+let docs = 0, dupDocs = 0;
+let docBase = "", docBaseExplicit = false;
+const seenDocs = new Set<string>();
+// "index.scip=dir" says its document paths are relative to dir rather than
+// to the repo: scip-python --target-only writes them that way.
+for (const spec of [indexPath, ...moreIndexes]) {
+  const eq = spec.lastIndexOf("=");
+  const [file, base] = eq > 0 ? [spec.slice(0, eq), spec.slice(eq + 1)] : [spec, ""];
+  docBase = base;
+  docBaseExplicit = base !== "";
+  flattenIndex(new Reader(new Uint8Array(readFileSync(file))));
+}
 
 function flattenIndex(root: Reader) {
 root.fields((f, _wt, r) => {
+  // Metadata.project_root: where document paths start. With --root and no
+  // explicit base, paths are re-rooted to the repo from it.
+  if (f === 1 && !docBaseExplicit && repoRoot) {
+    r.fields((mf, _mwt, m) => {
+      if (mf !== 3) return;
+      const uri = m.string();
+      if (uri.startsWith("file://")) {
+        const rel = posix.relative(posix.resolve(repoRoot), decodeURIComponent(uri.slice(7)));
+        docBase = rel && !rel.startsWith("..") ? rel : "";
+      }
+    });
+    return;
+  }
   if (f === 3) return symbolInfo(r, "");
   if (f !== 2) return;
-  docs++;
   let path = "";
+  const infos: Reader[] = [];
   const pending: { range: number[]; enclosing: number[]; symbol: string; roles: number }[] = [];
   r.fields((df, _dwt, d) => {
-    if (df === 1) path = clean(d.string());
-    else if (df === 3) symbolInfo(d, path);
+    if (df === 1) path = clean(docBase ? posix.normalize(posix.join(docBase, d.string())) : d.string());
+    else if (df === 3) infos.push(new Reader(d.buf, d.end).at(d.pos));
     else if (df === 2) {
       const range: number[] = [], enclosing: number[] = [];
       let symbol = "", roles = 0;
@@ -347,6 +374,14 @@ root.fields((f, _wt, r) => {
       pending.push({ range, enclosing, symbol, roles });
     }
   });
+  // Several runs over one repo (scip-python split into pieces) can each
+  // write a document for the same file; the first one stands.
+  // A document for the run's target itself has an empty path (it is the root).
+  if (!path && docBase) path = posix.normalize(docBase);
+  if (seenDocs.has(path)) { dupDocs++; return; }
+  seenDocs.add(path);
+  docs++;
+  for (const info of infos) symbolInfo(info, path);
   rustImplLinks(path, pending);
   const rows = occByDoc.get(path) ?? [];
   occByDoc.set(path, rows);
@@ -376,5 +411,5 @@ writeFileSync(join(outDir, "symbols.tsv"), [...syms.values()].join("\n") + "\n")
 writeFileSync(join(outDir, "extents.tsv"), ext.join("\n") + "\n");
 writeFileSync(join(outDir, "relationships.tsv"), rel.join("\n") + "\n");
 console.error(
-  `scip-flatten: ${docs} documents, ${occ.length} occurrences, ${syms.size} symbols, ${ext.length} extents, ${rel.length} relationships in ${Math.round(performance.now() - t0)} ms`,
+  `scip-flatten: ${docs} documents${dupDocs ? ` (${dupDocs} repeats dropped)` : ""}, ${occ.length} occurrences, ${syms.size} symbols, ${ext.length} extents, ${rel.length} relationships in ${Math.round(performance.now() - t0)} ms`,
 );

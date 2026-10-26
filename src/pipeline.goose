@@ -225,7 +225,173 @@ fn python_of(l: const Langs&) -> u8[>..] {
 // importlib.metadata, written where --environment can read it.
 let PY_ENV_SNIPPET = "import json, importlib.metadata as m\nseen = set()\nout = []\nfor d in m.distributions():\n    n = d.metadata['Name']\n    if not n or n.lower() in seen: continue\n    seen.add(n.lower())\n    out.append({'name': n, 'version': d.version, 'files': [str(f) for f in (d.files or []) if str(f).endswith(('.py', '.pyi'))]})\nprint(json.dumps(out))\n";
 
+extern fn swan_spawn(argv: const u8[:], cwd: const u8[:], env: const u8[:], log: const u8[:]) -> i64;
+extern fn swan_wait_any(code: i32&) -> i64;
+extern fn swan_file_size(path: const u8[:]) -> i64;
+extern fn swan_cpu_count() -> i32;
+
+// How many indexers run at once: $SWAN_JOBS, else half the cores, at most 8
+// (scip-python can take several GB each).
+fn jobs_limit() -> i64 {
+    var v: u8[>..] = [];
+    if env("SWAN_JOBS", v) {
+        let n, ok = parse_int(v);
+        if ok && n > 0 { return n; }
+    }
+    return max(1, min(8, (swan_cpu_count() / 2) as i64));
+}
+
+// Splits a repo's Python into about k pieces of similar size for parallel
+// scip-python runs (--target-only). A folder bigger than its share is split
+// into its subfolders, and the .py files directly in it become pieces of
+// their own. Returns the pieces, relative to repo, one per line; a single
+// empty line means "the whole repo in one run".
+fn plan_python(repo: const u8[:], k: i64) -> u8[>..] {
+    var files: u8[>..] = [];        // "relative path\n" for every .py
+    var sizes: i64[>..] = [];
+    each_file(repo) { full, name =>
+        if ends_with(name, ".py") {
+            files.append(full[repo.len + 1..]);
+            files.push('\n');
+            sizes.push(max(swan_file_size(full), 1));
+        }
+    };
+    var plan: u8[>..] = [];
+    var total = 0;
+    for z in sizes { total += z; }
+    if k <= 1 || sizes.len < 2 * k { plan.push('\n'); return plan; }
+    let paths = split(files[..files.len - 1], '\n');
+    let limit = total / k;
+    // A directory's size: every .py under it.
+    fn size_under(dir: const u8[:]) -> i64 {
+        var t = 0;
+        for p, i in paths {
+            if dir.len == 0 || (starts_with(p, dir) && p.len > dir.len && p[dir.len] == '/') { t += sizes[i]; }
+        }
+        return t;
+    }
+    // Subdirectories of dir that hold .py files, and .py files directly in it.
+    var queue: u8[>..] = [];
+    queue.push('\n');               // the root, as an empty line
+    var next = 0;
+    while next < queue.len {
+        let e = next + find(queue[next..], "\n");
+        var dir: u8[>..] = [];
+        dir.append(queue[next..e]);
+        next = e + 1;
+        if size_under(dir) <= limit && dir.len > 0 { plan.append(dir); plan.push('\n'); continue; }
+        var subs = dictionary<const u8[:], bool> {};
+        for p in paths {
+            let inside = dir.len == 0 || (starts_with(p, dir) && p.len > dir.len && p[dir.len] == '/');
+            if inside {
+                let rest = if dir.len == 0 { p } else { p[dir.len + 1..] };
+                let slash = find(rest, "/");
+                if slash < 0 {
+                    plan.append(p);
+                    plan.push('\n');
+                } else {
+                    let sub = p[..(if dir.len == 0 { 0 } else { dir.len + 1 }) + slash];
+                    if !subs.contains(sub) {
+                        subs.insert(sub, true);
+                        queue.append(sub);
+                        queue.push('\n');
+                    }
+                }
+            }
+        }
+    }
+    return plan;
+}
+
+// "path\tsize\tmtime" for every .py file, in walk order (list_dir sorts).
+fn py_stamps(repo: const u8[:]) -> u8[>..] {
+    var s: u8[>..] = [];
+    each_file(repo) { full, name =>
+        if ends_with(name, ".py") {
+            format(s, full[repo.len + 1..], "\t", swan_file_size(full), "\t", swan_mtime_ns(full), "\n");
+        }
+    };
+    return s;
+}
+
+// One fingerprint for every file with these endings (and the named build
+// files at the root): a whole-language index is reused while it is unchanged.
+fn lang_fingerprint(repo: const u8[:], endings: const u8[:][:], roots: const u8[:][:]) -> u64 {
+    var h: u64 = 0;
+    each_file(repo) { full, name =>
+        var hit = false;
+        for e in endings { if ends_with(name, e) { hit = true; } }
+        if hit { h = hash_combine(h, hash(str(full, "\t", swan_file_size(full), "\t", swan_mtime_ns(full)))); }
+    };
+    for r in roots {
+        let p = str(repo, "/", r);
+        if file_exists(p) { h = hash_combine(h, hash(str(p, "\t", swan_file_size(p), "\t", swan_mtime_ns(p)))); }
+    }
+    return h;
+}
+
+fn in_piece(path: const u8[:], piece: const u8[:]) -> bool {
+    piece.len == 0 || path == piece || (starts_with(path, piece) && path.len > piece.len && path[piece.len] == '/')
+}
+
+// A piece's fingerprint: the stamps of the files in it.
+fn piece_fingerprint(stamps: const u8[:], piece: const u8[:]) -> u64 {
+    var h: u64 = 0;
+    each_split(stamps, '\n') { line =>
+        let tab = find(line, "\t");
+        if tab > 0 && in_piece(line[..tab], piece) { h = hash_combine(h, hash(line)); }
+    };
+    return h;
+}
+
+fn piece_has(files: const u8[:], piece: const u8[:]) -> bool {
+    var yes = false;
+    each_split(files, '\n') { f => if f.len > 0 && in_piece(f, piece) { yes = true; } };
+    return yes;
+}
+
+// Files to treat as changed: those whose stamp changed, and, from the last
+// map, the files that use a symbol defined in one of those. A piece holding
+// any of them is indexed again. One line per file.
+fn dependents_of_changes(out: const u8[:], stamps: const u8[:], prev: const u8[:]) -> u8[>..] {
+    var dirty: u8[>..] = [];
+    guard prev.len > 0 else { return dirty; }
+    var before = dictionary<const u8[:], const u8[:]> {};
+    each_split(prev, '\n') { line => let tab = find(line, "\t"); if tab > 0 { before.insert(line[..tab], line); } };
+    var changed: u8[>..] = [];
+    var seen = dictionary<const u8[:], bool> {};
+    each_split(stamps, '\n') { line =>
+        let tab = find(line, "\t");
+        if tab > 0 {
+            seen.insert(line[..tab], true);
+            let old = before.get(line[..tab]);
+            if !old || old != line { changed.append(line[..tab]); changed.push('\n'); }
+        }
+    };
+    before.each() { path, line => if !seen.contains(path) { changed.append(path); changed.push('\n'); } };
+    dirty.append(changed);
+    let db_path = str(out, "/swan.db");
+    guard changed.len > 0 && file_exists(db_path) else { return dirty; }
+    var err: u8[>..] = [];
+    let db = swan_db_open(db_path, err);
+    guard db != 0 else { return dirty; }
+    let st = prepare_or_die(db, """
+        SELECT DISTINCT o.file FROM occurrences o JOIN symbols s ON s.id = o.symbol_id
+        WHERE s.def_file = ?1 AND o.file != ?1 AND o.is_def = 0
+        """);
+    each_split(changed, '\n') { f =>
+        guard f.len > 0;
+        swan_bind_text(st, 1, f);
+        while swan_step(st, err) == 1 { swan_col_text(st, 0, dirty); dirty.push('\n'); }
+        swan_reset(st);
+    };
+    swan_finalize(st);
+    swan_db_close(db);
+    return dirty;
+}
+
 fn map_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> bool {
+    let t_start = clock();
     let repo = abs_path(repo_arg);
     var mk: u8[>..] = [];
     arg(mk, "mkdir");
@@ -243,12 +409,43 @@ fn map_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> bo
            if l.venv.len > 0 { str(" (venv ", l.venv, ")") } else { str("") }, "\n");
     // Edits after this moment make answers stale (src/fresh.goose).
     write_file(str(out, "/scip-started"), "");
-    var scips: u8[>..] = [];      // NUL-separated index files, for the flattener
-    var ok = true;
+
+    // The jobs, each "label \x01 index file \x01 argv \x01 env \x01 base",
+    // separated by \x02. base is the folder the job's document paths are
+    // relative to, when that is not the repo (scip-python --target-only).
+    var jobs: u8[>..] = [];
+    var prev_index: u8[>..] = [];
+    read_file(str(out, "/index-manifest.tsv"), prev_index);
+    var index_manifest: u8[>..] = [];
+    var reused_all = true;
+    fn add_job(label: const u8[:], target: const u8[:], a: const u8[:], e: const u8[:], base: const u8[:]) {
+        if label.len > 0 { reused_all = false; }
+        jobs.append(label); jobs.push(1);
+        jobs.append(target); jobs.push(1);
+        jobs.append(a); jobs.push(1);
+        jobs.append(e); jobs.push(1);
+        jobs.append(base); jobs.push(2);
+    }
+    // A whole-language job, unless its files have the fingerprint they had
+    // when its index was made.
+    fn add_lang_job(label: const u8[:], target: const u8[:], a: const u8[:], e: const u8[:], fp: u64) {
+        let fps = str(fp);
+        var hit = false;
+        each_split(prev_index, '\n') { line =>
+            let f = split(line, '\t');
+            if f.len == 3 && f[0] == label && f[1] == fps && f[2] == target && file_exists(target) { hit = true; }
+        };
+        format(index_manifest, label, "\t", fps, "\t", target, "\n");
+        if hit {
+            format(report, label, ": reused (no changes)\n");
+            add_job("", target, "", "", "");
+        } else {
+            add_job(label, target, a, e, "");
+        }
+    }
 
     if l.tsconfig || l.ts || l.js {
         let target = str(out, "/index-typescript.scip");
-        delete_file(target);
         var a: u8[>..] = [];
         arg(a, str(bin, "scip-typescript"));
         arg(a, "index");
@@ -270,27 +467,13 @@ fn map_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> bo
             arg(a, repo);
             arg(a, dir);
         }
-        var o: u8[>..] = [];
-        if run_step("scip-typescript", a, repo, child_env(l, ""), 3600000, o) == 0 { arg(scips, target); }
-        else { ok = false; }
+        add_lang_job("scip-typescript", target, a, child_env(l, ""),
+                     lang_fingerprint(repo, [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"], ["tsconfig.json", "package.json"]));
     }
 
     if l.py {
-        let target = str(out, "/index-python.scip");
-        delete_file(target);
         let python = python_of(l);
-        var a: u8[>..] = [];
-        arg(a, str(bin, "scip-python"));
-        arg(a, "index");
-        arg(a, ".");
-        arg(a, "--quiet");
-        arg(a, "--project-name");
-        let slash = rfind(repo, "/");
-        arg(a, repo[slash + 1..]);
-        arg(a, "--project-version");
-        arg(a, "0");
-        arg(a, "--output");
-        arg(a, target);
+        var env_args: u8[>..] = [];
         var probe: u8[>..] = [];
         arg(probe, python);
         arg(probe, "-m");
@@ -310,32 +493,82 @@ fn map_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> bo
             } else {
                 write_file(env_file, "[]");
             }
-            arg(a, "--environment");
-            arg(a, env_file);
+            arg(env_args, "--environment");
+            arg(env_args, env_file);
         }
-        o.clear();
-        if run_step("scip-python", a, repo, child_env(l, ""), 3600000, o) == 0 { arg(scips, target); }
-        else { ok = false; }
+        let slash = rfind(repo, "/");
+        let pieces = plan_python(repo, min(jobs_limit(), 6));
+        fn add_python_job(piece: const u8[:], target: const u8[:]) {
+            var a: u8[>..] = [];
+            arg(a, str(bin, "scip-python"));
+            arg(a, "index");
+            arg(a, ".");
+            arg(a, "--quiet");
+            arg(a, "--project-name");
+            arg(a, repo[slash + 1..]);
+            arg(a, "--project-version");
+            arg(a, "0");
+            arg(a, "--output");
+            arg(a, target);
+            if piece.len > 0 { arg(a, "--target-only"); arg(a, piece); }
+            a.append(env_args);
+            let label: u8[>..] = if piece.len > 0 { str("scip-python ", piece) } else { str("scip-python") };
+            add_job(label, target, a, child_env(l, ""), piece);
+        }
+
+        // Reuse: a piece whose files are unchanged since the last map, and
+        // none of whose files use a symbol defined in a changed file, keeps
+        // its last index. Each file is stamped by size and mtime.
+        let stamps = py_stamps(repo);
+        var prev_stamps: u8[>..] = [];
+        read_file(str(out, "/python-files.tsv"), prev_stamps);
+        var prev_manifest: u8[>..] = [];
+        read_file(str(out, "/python-pieces.tsv"), prev_manifest);
+        var dirty = dependents_of_changes(out, stamps, prev_stamps);
+        write_file(str(out, "/python-files.tsv"), stamps);
+        var manifest: u8[>..] = [];
+        var reused = 0;
+        each_split(pieces[..pieces.len - 1], '\n') { piece =>
+            let fp = str(piece_fingerprint(stamps, piece));
+            let target = str(out, "/index-python-", hash(piece), ".scip");
+            var hit = false;
+            each_split(prev_manifest, '\n') { line =>
+                let f = split(line, '\t');
+                if f.len == 3 && f[0] == piece && f[1] == fp && file_exists(f[2]) { hit = true; }
+            };
+            if hit && !piece_has(dirty, piece) {
+                reused++;
+                add_job("", target, "", "", piece);      // already done: no argv
+            } else {
+                add_python_job(piece, target);
+            }
+            format(manifest, piece, "\t", fp, "\t", target, "\n");
+        };
+        write_file(str(out, "/python-pieces.tsv"), manifest);
+        if reused > 0 { format(report, "python: ", reused, " pieces reused\n"); }
+        // Index files of pieces no longer in the plan go.
+        var old2: u8[>..] = [];
+        if list_dir(out, old2) {
+            each_split(old2, '\n') { nm =>
+                if starts_with(nm, "index-python-") && find(manifest, str(out, "/", nm)) < 0 { delete_file(str(out, "/", nm)); }
+            };
+        }
     }
 
     if l.cargo {
         let target = str(out, "/index-rust.scip");
-        delete_file(target);
         var a: u8[>..] = [];
         arg(a, str(home, "/.tools/rust-analyzer/rust-analyzer"));
         arg(a, "scip");
         arg(a, ".");
         arg(a, "--output");
         arg(a, target);
-        var o: u8[>..] = [];
-        let extra = env_entry("CARGO_TARGET_DIR", str(out, "/cargo-target"));
-        if run_step("rust-analyzer scip", a, repo, child_env(l, extra), 3600000, o) == 0 { arg(scips, target); }
-        else { ok = false; }
+        add_lang_job("rust-analyzer scip", target, a, child_env(l, env_entry("CARGO_TARGET_DIR", str(out, "/cargo-target"))),
+                     lang_fingerprint(repo, [".rs"], ["Cargo.toml", "Cargo.lock"]));
     }
 
     if l.java {
         let target = str(out, "/index-java.scip");
-        delete_file(target);
         var a: u8[>..] = [];
         arg(a, str(home, "/.tools/scip-java/scip-java"));
         arg(a, "index");
@@ -348,14 +581,12 @@ fn map_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> bo
             write_file(cfg, "{\"dependencies\":[],\"jvm\":\"21\"}\n");
             arg(a, str("--scip-config=", cfg));
         }
-        var o: u8[>..] = [];
-        if run_step("scip-java", a, repo, child_env(l, ""), 3600000, o) == 0 { arg(scips, target); }
-        else { ok = false; }
+        add_lang_job("scip-java", target, a, child_env(l, ""),
+                     lang_fingerprint(repo, [".java"], ["pom.xml", "build.gradle", "build.gradle.kts"]));
     }
 
     if l.c || l.cuda {
         let target = str(out, "/index-cxx.scip");
-        delete_file(target);
         var compdb: u8[>..] = [];
         if file_exists(str(repo, "/compile_commands.json")) { format(compdb, repo, "/compile_commands.json"); }
         else if file_exists(str(repo, "/build/compile_commands.json")) { format(compdb, repo, "/build/compile_commands.json"); }
@@ -367,25 +598,108 @@ fn map_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> bo
         arg(a, str(home, "/.tools/scip-clang/scip-clang"));
         arg(a, str("--compdb-path=", compdb));
         arg(a, str("--index-output-path=", target));
-        var o: u8[>..] = [];
-        if run_step("scip-clang", a, repo, child_env(l, ""), 3600000, o) == 0 { arg(scips, target); }
-        else { ok = false; }
+        add_lang_job("scip-clang", target, a, child_env(l, ""),
+                     lang_fingerprint(repo, [".c", ".cc", ".cpp", ".cxx", ".h", ".hpp", ".hh", ".cu", ".cuh"],
+                                      ["compile_commands.json", "build/compile_commands.json"]));
     }
 
-    guard scips.len > 0 else { format(report, "no language found to index in ", repo); return false; }
-    var f: u8[>..] = [];
-    arg(f, "bun");
-    arg(f, str(home, "/tools/scip-flatten.ts"));
-    arg(f, "--root");
-    arg(f, repo);
-    let parts = split(scips[..scips.len - 1], 0);
-    arg(f, parts[0]);
-    arg(f, out);
-    for k in 1..parts.len { arg(f, parts[k]); }
-    var o: u8[>..] = [];
-    guard run_step("flatten", f, home, "", 600000, o) == 0 else { format(report, "flatten failed"); return false; }
+    guard jobs.len > 0 else { format(report, "no language found to index in ", repo); return false; }
+
+    // Run them, at most jobs_limit() at a time.
+    let limit = jobs_limit();
+    var pids: i64[>..] = [];
+    var codes: i64[>..] = [];
+    var began: f64[>..] = [];
+    var took: f64[>..] = [];
+    var running = 0;
+    fn wait_one() {
+        var code: i32 = 0;
+        let pid = swan_wait_any(code);
+        guard pid > 0 else { running = 0; return; }
+        for q, k in pids {
+            if q == pid && codes[k] == -999 { codes[k] = code; took[k] = clock() - began[k]; running--; }
+        }
+    }
+    var idx = 0;
+    each_split(jobs[..jobs.len - 1], 2) { job =>
+        let f = split(job, 1);
+        if f[2].len == 0 {
+            // reused from the last map: nothing to run
+            pids.push(0);
+            codes.push(0);
+            began.push(clock());
+            took.push(0.0);
+        } else {
+            while running >= limit { wait_one(); }
+            pids.push(swan_spawn(f[2], repo, f[3], str(out, "/log-", idx, ".txt")));
+            codes.push(-999);
+            began.push(clock());
+            took.push(0.0);
+            if pids[pids.len - 1] > 0 { running++; } else { codes[codes.len - 1] = -1; }
+        }
+        idx++;
+    };
+    while running > 0 { wait_one(); }
+
+    var scips: u8[>..] = [];      // NUL-separated index files, for the flattener
+    var failed: u8[>..] = [];     // their index files, one per line
+    var ok = true;
+    idx = 0;
+    each_split(jobs[..jobs.len - 1], 2) { job =>
+        let f = split(job, 1);
+        let code = codes[idx];
+        if f[0].len > 0 { format(report, f[0], ": ", (took[idx] * 1000.0) as i64, " ms"); }
+        if code == 0 && file_exists(f[1]) {
+            if f[4].len > 0 { arg(scips, str(f[1], "=", f[4])); } else { arg(scips, f[1]); }
+        } else {
+            ok = false;
+            failed.append(f[1]);
+            failed.push('\n');
+            var log: u8[>..] = [];
+            read_file(str(out, "/log-", idx, ".txt"), log);
+            format(report, " (exit ", code, ") ", if log.len > 400 { log[log.len - 400..] } else { log[..] });
+        }
+        if f[0].len > 0 { report.push('\n'); }
+        idx++;
+    };
+    guard scips.len > 0 else { format(report, "every indexer failed"); return false; }
+    // Remember what each index was made from, failures excepted, and drop
+    // index files no job produced or reused.
+    var kept_index: u8[>..] = [];
+    each_split(index_manifest, '\n') { line =>
+        let f = split(line, '\t');
+        if f.len == 3 && find(failed, f[2]) < 0 { kept_index.append(line); kept_index.push('\n'); }
+    };
+    write_file(str(out, "/index-manifest.tsv"), kept_index);
+    var listing: u8[>..] = [];
+    if list_dir(out, listing) {
+        each_split(listing, '\n') { nm =>
+            if starts_with(nm, "index-") && ends_with(nm, ".scip") && find(jobs, str(out, "/", nm)) < 0 {
+                delete_file(str(out, "/", nm));
+            }
+        };
+    }
     let db = str(out, "/swan.db");
+    if reused_all && file_exists(db) && file_exists(str(out, "/occurrences.tsv")) {
+        format(report, "nothing changed since the last map\nswan map: ", ((clock() - t_start) * 1000.0) as i64, " ms in all");
+        return ok;
+    }
+
+    var fl: u8[>..] = [];
+    arg(fl, "bun");
+    arg(fl, str(home, "/tools/scip-flatten.ts"));
+    arg(fl, "--root");
+    arg(fl, repo);
+    let parts = split(scips[..scips.len - 1], 0);
+    arg(fl, parts[0]);
+    arg(fl, out);
+    for k in 1..parts.len { arg(fl, parts[k]); }
+    var o: u8[>..] = [];
+    let t_flat = clock();
+    guard run_step("flatten", fl, home, "", 600000, o) == 0 else { format(report, "flatten failed"); return false; }
+    format(report, "flatten: ", ((clock() - t_flat) * 1000.0) as i64, " ms\n");
     index_main(out, db, repo, file_exists(db), report);
+    format(report, "\nswan map: ", ((clock() - t_start) * 1000.0) as i64, " ms in all, up to ", limit, " indexers at once");
     if !ok { report.append("\n(some indexers failed; see above)"); }
     return ok;
 }
