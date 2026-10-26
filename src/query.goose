@@ -7,6 +7,7 @@
 import std;
 import os;
 import json;
+import sqlite;
 
 
 fn line_bounds(text: const u8[:], starts: i64[>..]&) {
@@ -43,10 +44,10 @@ fn match_sql(pattern: const u8[:], substring: bool) -> const u8[:], const u8[:] 
 
 fn meta_value(db: i64, key: const u8[:], out: u8[>..]&) {
     let st = prepare_or_die(db, "SELECT value FROM meta WHERE key = ?1");
-    swan_bind_text(st, 1, key);
+    sqlite::bind_text(st, 1, key);
     var err: u8[>..] = [];
-    if swan_step(st, err) == 1 { swan_col_text(st, 0, out); }
-    swan_finalize(st);
+    if sqlite::step(st, err) == 1 { sqlite::col_text(st, 0, out); }
+    sqlite::finalize(st);
 }
 
 fn source_path(db: i64, file: const u8[:]) -> u8[>..] {
@@ -62,33 +63,33 @@ fn symbol_json(st: i64, out: u8[>..]&) {
     var s: u8[>..] = [];
     out.push('{');
     json::format_key(out, "name_path");
-    swan_col_text(st, 1, s); json::format_string(out, s); s.clear();
+    sqlite::col_text(st, 1, s); json::format_string(out, s); s.clear();
     out.push(',');
     json::format_key(out, "kind");
-    swan_col_text(st, 2, s); json::format_string(out, s); s.clear();
+    sqlite::col_text(st, 2, s); json::format_string(out, s); s.clear();
     out.push(',');
     json::format_key(out, "signature");
-    swan_col_text(st, 3, s); json::format_string(out, s); s.clear();
+    sqlite::col_text(st, 3, s); json::format_string(out, s); s.clear();
     out.push(',');
     json::format_key(out, "relative_path");
-    swan_col_text(st, 4, s); json::format_string(out, s);
+    sqlite::col_text(st, 4, s); json::format_string(out, s);
     if is_stale(s) { out.append(",\"stale\":true"); }
     s.clear();
     out.push(',');
     json::format_key(out, "line");
-    json::format_int(out, swan_col_int(st, 5) + 1);
+    json::format_int(out, sqlite::col_int(st, 5) + 1);
     out.push(',');
     json::format_key(out, "column");
-    json::format_int(out, swan_col_int(st, 6) + 1);
+    json::format_int(out, sqlite::col_int(st, 6) + 1);
     var tx: u8[>..] = [];
-    swan_col_text(st, 7, tx);
+    sqlite::col_text(st, 7, tx);
     if tx.len > 0 {
         out.push(',');
         json::format_key(out, "body_lines");
         out.push('[');
-        json::format_int(out, swan_col_int(st, 7) + 1);
+        json::format_int(out, sqlite::col_int(st, 7) + 1);
         out.push(',');
-        json::format_int(out, swan_col_int(st, 8) + 1);
+        json::format_int(out, sqlite::col_int(st, 8) + 1);
         out.push(']');
     }
     out.push('}');
@@ -98,28 +99,28 @@ fn find_symbol(db: i64, pattern: const u8[:], rel: const u8[:], substring: bool,
                limit: i64, out: u8[>..]&) {
     let sql, bind = match_sql(pattern, substring);
     let st = prepare_or_die(db, sql);
-    swan_bind_text(st, 1, bind);
-    swan_bind_text(st, 2, rel);
-    swan_bind_int(st, 3, limit);
+    sqlite::bind_text(st, 1, bind);
+    sqlite::bind_text(st, 2, rel);
+    sqlite::bind_int(st, 3, limit);
     var err: u8[>..] = [];
     var text: u8[>..] = [];
     var starts: i64[>..] = [];
     var n = 0;
     out.push('[');
-    while swan_step(st, err) == 1 {
+    while sqlite::step(st, err) == 1 {
         if n > 0 { out.push(','); }
         n++;
         symbol_json(st, out);
         var bs: u8[>..] = [];
-        swan_col_text(st, 7, bs);
+        sqlite::col_text(st, 7, bs);
         if include_body && bs.len > 0 {
             var file: u8[>..] = [];
-            swan_col_text(st, 4, file);
+            sqlite::col_text(st, 4, file);
             text.clear();
             if read_file(source_path(db, file), text) {
                 line_bounds(text, starts);
                 var body: u8[>..] = [];
-                for l in swan_col_int(st, 7)..swan_col_int(st, 8) + 1 {
+                for l in sqlite::col_int(st, 7)..sqlite::col_int(st, 8) + 1 {
                     body.append(line_of(text, starts, l));
                     body.push('\n');
                 }
@@ -132,7 +133,7 @@ fn find_symbol(db: i64, pattern: const u8[:], rel: const u8[:], substring: bool,
         }
     }
     out.push(']');
-    swan_finalize(st);
+    sqlite::finalize(st);
 }
 
 // The references to every symbol the name path matches, each with the
@@ -146,9 +147,9 @@ fn find_referencing_symbols(db: i64, pattern: const u8[:], rel: const u8[:], lim
                             out: u8[>..]&) {
     let sql, bind = match_sql(pattern, false);
     let st = prepare_or_die(db, sql);
-    swan_bind_text(st, 1, bind);
-    swan_bind_text(st, 2, rel);
-    swan_bind_int(st, 3, 20);
+    sqlite::bind_text(st, 1, bind);
+    sqlite::bind_text(st, 2, rel);
+    sqlite::bind_int(st, 3, 20);
     let refs = prepare_or_die(db, """
         WITH t AS (SELECT id, scip, name,
                           substr(scip, 1, length(rtrim(scip, replace(scip, '/', '')))) AS module
@@ -180,7 +181,7 @@ fn find_referencing_symbols(db: i64, pattern: const u8[:], rel: const u8[:], lim
     var loaded_stale = false;
     var n = 0;
     out.push('[');
-    while swan_step(st, err) == 1 {
+    while sqlite::step(st, err) == 1 {
         if n > 0 { out.push(','); }
         n++;
         out.append("{");
@@ -189,15 +190,15 @@ fn find_referencing_symbols(db: i64, pattern: const u8[:], rel: const u8[:], lim
         out.push(',');
         json::format_key(out, "references");
         out.push('[');
-        swan_bind_int(refs, 1, swan_col_int(st, 0));
-        swan_bind_int(refs, 2, limit);
-        swan_bind_int(refs, 3, if members { 1 } else { 0 });
+        sqlite::bind_int(refs, 1, sqlite::col_int(st, 0));
+        sqlite::bind_int(refs, 2, limit);
+        sqlite::bind_int(refs, 3, if members { 1 } else { 0 });
         var k = 0;
-        while swan_step(refs, err) == 1 {
+        while sqlite::step(refs, err) == 1 {
             if k > 0 { out.push(','); }
             k++;
             var file: u8[>..] = [];
-            swan_col_text(refs, 0, file);
+            sqlite::col_text(refs, 0, file);
             if file != loaded {
                 loaded.clear();
                 loaded.append(file);
@@ -205,7 +206,7 @@ fn find_referencing_symbols(db: i64, pattern: const u8[:], rel: const u8[:], lim
                 text.clear();
                 if read_file(source_path(db, file), text) { line_bounds(text, starts); } else { starts.clear(); }
             }
-            let line = swan_col_int(refs, 1);
+            let line = sqlite::col_int(refs, 1);
             out.push('{');
             json::format_key(out, "relative_path");
             json::format_string(out, file);
@@ -215,23 +216,23 @@ fn find_referencing_symbols(db: i64, pattern: const u8[:], rel: const u8[:], lim
             json::format_int(out, line + 1);
             out.push(',');
             json::format_key(out, "column");
-            json::format_int(out, swan_col_int(refs, 2) + 1);
+            json::format_int(out, sqlite::col_int(refs, 2) + 1);
             var enc: u8[>..] = [];
-            swan_col_text(refs, 3, enc);
+            sqlite::col_text(refs, 3, enc);
             if enc.len > 0 {
                 out.push(',');
                 json::format_key(out, "in_symbol");
                 json::format_string(out, enc);
                 enc.clear();
-                swan_col_text(refs, 4, enc);
+                sqlite::col_text(refs, 4, enc);
                 out.push(',');
                 json::format_key(out, "in_kind");
                 json::format_string(out, enc);
             }
-            if swan_col_int(refs, 6) == 1 { out.append(",\"by_name\":true"); }
-            if swan_col_int(refs, 7) == 1 { out.append(",\"import\":true"); }
+            if sqlite::col_int(refs, 6) == 1 { out.append(",\"by_name\":true"); }
+            if sqlite::col_int(refs, 7) == 1 { out.append(",\"import\":true"); }
             var via: u8[>..] = [];
-            swan_col_text(refs, 5, via);
+            sqlite::col_text(refs, 5, via);
             if via.len > 0 {
                 out.push(',');
                 json::format_key(out, "via");
@@ -244,12 +245,12 @@ fn find_referencing_symbols(db: i64, pattern: const u8[:], rel: const u8[:], lim
             }
             out.push('}');
         }
-        swan_reset(refs);
+        sqlite::reset(refs);
         out.append("]}");
     }
     out.push(']');
-    swan_finalize(refs);
-    swan_finalize(st);
+    sqlite::finalize(refs);
+    sqlite::finalize(st);
 }
 
 // Every symbol a file (or every file under a directory) defines, in order.
@@ -262,17 +263,17 @@ fn get_symbols_overview(db: i64, rel: const u8[:], out: u8[>..]&) {
         ORDER BY def_file, def_line, def_col
         LIMIT 2000
         """);
-    swan_bind_text(st, 1, rel);
+    sqlite::bind_text(st, 1, rel);
     var err: u8[>..] = [];
     var n = 0;
     out.push('[');
-    while swan_step(st, err) == 1 {
+    while sqlite::step(st, err) == 1 {
         if n > 0 { out.push(','); }
         n++;
         symbol_json(st, out);
     }
     out.push(']');
-    swan_finalize(st);
+    sqlite::finalize(st);
 }
 
 fn index_info(db: i64, out: u8[>..]&) {
@@ -280,24 +281,24 @@ fn index_info(db: i64, out: u8[>..]&) {
     var err: u8[>..] = [];
     var n = 0;
     out.push('{');
-    while swan_step(st, err) == 1 {
+    while sqlite::step(st, err) == 1 {
         if n > 0 { out.push(','); }
         n++;
         var k: u8[>..] = [];
         var v: u8[>..] = [];
-        swan_col_text(st, 0, k);
-        swan_col_text(st, 1, v);
+        sqlite::col_text(st, 0, k);
+        sqlite::col_text(st, 1, v);
         json::format_key(out, k);
         json::format_string(out, v);
     }
-    swan_finalize(st);
+    sqlite::finalize(st);
     // Files changed since the SCIP run: the map's answers about them may be old.
     let fs = prepare_or_die(db, "SELECT file FROM files ORDER BY file");
     var stale = 0;
     var listed: u8[>..] = [];
-    while swan_step(fs, err) == 1 {
+    while sqlite::step(fs, err) == 1 {
         var f: u8[>..] = [];
-        swan_col_text(fs, 0, f);
+        sqlite::col_text(fs, 0, f);
         if is_stale(f) {
             if stale < 50 {
                 if stale > 0 { listed.push(','); }
@@ -306,7 +307,7 @@ fn index_info(db: i64, out: u8[>..]&) {
             stale++;
         }
     }
-    swan_finalize(fs);
+    sqlite::finalize(fs);
     out.append(",\"stale_file_count\":");
     json::format_int(out, stale);
     out.append(",\"stale_files\":[");
@@ -333,41 +334,41 @@ fn get_symbol_at(db: i64, rel: const u8[:], line: i64, col: i64, out: u8[>..]&) 
     var err: u8[>..] = [];
     var e2: u8[>..] = [];
     fn run(any_on_line: bool) -> i64 {
-        swan_bind_text(st, 1, rel);
-        swan_bind_int(st, 2, line - 1);
-        swan_bind_int(st, 3, col - 1);
-        swan_bind_int(st, 4, if any_on_line { 1 } else { 0 });
+        sqlite::bind_text(st, 1, rel);
+        sqlite::bind_int(st, 2, line - 1);
+        sqlite::bind_int(st, 3, col - 1);
+        sqlite::bind_int(st, 4, if any_on_line { 1 } else { 0 });
         var n = 0;
-        while swan_step(st, e2) == 1 {
+        while sqlite::step(st, e2) == 1 {
             if n > 0 { out.push(','); }
             n++;
-            if swan_col_int(st, 9) == 1 {
+            if sqlite::col_int(st, 9) == 1 {
                 symbol_json(st, out);
                 out.pop();
             } else {
                 var s: u8[>..] = [];
                 out.append("{\"name_path\":");
-                swan_col_text(st, 1, s); json::format_string(out, s); s.clear();
+                sqlite::col_text(st, 1, s); json::format_string(out, s); s.clear();
                 out.append(",\"kind\":");
-                swan_col_text(st, 2, s); json::format_string(out, s); s.clear();
+                sqlite::col_text(st, 2, s); json::format_string(out, s); s.clear();
                 out.append(",\"signature\":");
-                swan_col_text(st, 3, s); json::format_string(out, s); s.clear();
+                sqlite::col_text(st, 3, s); json::format_string(out, s); s.clear();
                 out.append(",\"package\":");
-                swan_col_text(st, 10, s); json::format_string(out, package_of(s));
+                sqlite::col_text(st, 10, s); json::format_string(out, package_of(s));
             }
-            format(out, ",\"at_columns\":[", swan_col_int(st, 15) + 1, ",", swan_col_int(st, 16), "]");
+            format(out, ",\"at_columns\":[", sqlite::col_int(st, 15) + 1, ",", sqlite::col_int(st, 16), "]");
             var doc: u8[>..] = [];
-            swan_col_text(st, 17, doc);
+            sqlite::col_text(st, 17, doc);
             if doc.len > 0 { out.append(",\"doc\":"); json::format_string(out, doc); }
-            if swan_col_int(st, 11) == 1 { out.append(",\"is_definition\":true"); }
-            if swan_col_int(st, 12) == 1 { out.append(",\"by_name\":true"); }
-            if swan_col_int(st, 13) == 1 { out.append(",\"import\":true"); }
+            if sqlite::col_int(st, 11) == 1 { out.append(",\"is_definition\":true"); }
+            if sqlite::col_int(st, 12) == 1 { out.append(",\"by_name\":true"); }
+            if sqlite::col_int(st, 13) == 1 { out.append(",\"import\":true"); }
             var enc: u8[>..] = [];
-            swan_col_text(st, 14, enc);
+            sqlite::col_text(st, 14, enc);
             if enc.len > 0 { out.append(",\"in_symbol\":"); json::format_string(out, enc); }
             out.push('}');
         }
-        swan_reset(st);
+        sqlite::reset(st);
         return n;
     }
     out.append("{\"at\":[");
@@ -380,6 +381,6 @@ fn get_symbol_at(db: i64, rel: const u8[:], line: i64, col: i64, out: u8[>..]&) 
     }
     if is_stale(rel) { out.append(",\"stale\":true"); }
     out.push('}');
-    swan_finalize(st);
+    sqlite::finalize(st);
     assert(err.len == 0);
 }

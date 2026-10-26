@@ -23,6 +23,7 @@
 import std;
 import os;
 import json;
+import sqlite;
 
 struct Target {
     id: i64,
@@ -84,22 +85,22 @@ fn resolve_target(db: i64, pattern: const u8[:], rel: const u8[:], err: u8[>..]&
     guard rel.len > 0 else { err.append("relative_path is required for an edit"); return t; }
     let sql, bind = match_sql(pattern, false);
     let st = prepare_or_die(db, sql);
-    swan_bind_text(st, 1, bind);
-    swan_bind_text(st, 2, rel);
-    swan_bind_int(st, 3, 5);
+    sqlite::bind_text(st, 1, bind);
+    sqlite::bind_text(st, 2, rel);
+    sqlite::bind_int(st, 3, 5);
     var e: u8[>..] = [];
     var n = 0;
     var names: u8[>..] = [];
-    while swan_step(st, e) == 1 {
+    while sqlite::step(st, e) == 1 {
         n++;
         var file: u8[>..] = [];
-        swan_col_text(st, 4, file);
+        sqlite::col_text(st, 4, file);
         if names.len > 0 { names.append(", "); }
-        swan_col_text(st, 1, names);
-        format(names, " (", file, ":", swan_col_int(st, 5) + 1, ")");
-        if n == 1 { t.id = swan_col_int(st, 0); }
+        sqlite::col_text(st, 1, names);
+        format(names, " (", file, ":", sqlite::col_int(st, 5) + 1, ")");
+        if n == 1 { t.id = sqlite::col_int(st, 0); }
     }
-    swan_finalize(st);
+    sqlite::finalize(st);
     if n == 0 { format(err, "no symbol matches '", pattern, "' in ", rel); t.id = -1; return t; }
     if n > 1 { format(err, "'", pattern, "' matches ", n, " symbols in ", rel, ": ", names,
                       "; use the full name path, starting with '/'"); t.id = -1; return t; }
@@ -108,18 +109,18 @@ fn resolve_target(db: i64, pattern: const u8[:], rel: const u8[:], err: u8[>..]&
                body_start IS NOT NULL AND body_start_col IS NOT NULL
         FROM symbols WHERE id = ?1
         """);
-    swan_bind_int(q, 1, t.id);
-    if swan_step(q, e) == 1 {
-        t.def_line = swan_col_int(q, 0);
-        t.def_col = swan_col_int(q, 1);
-        if swan_col_int(q, 6) == 1 {
-            t.sl = swan_col_int(q, 2);
-            t.sc = swan_col_int(q, 3);
-            t.el = swan_col_int(q, 4);
-            t.ec = swan_col_int(q, 5);
+    sqlite::bind_int(q, 1, t.id);
+    if sqlite::step(q, e) == 1 {
+        t.def_line = sqlite::col_int(q, 0);
+        t.def_col = sqlite::col_int(q, 1);
+        if sqlite::col_int(q, 6) == 1 {
+            t.sl = sqlite::col_int(q, 2);
+            t.sc = sqlite::col_int(q, 3);
+            t.el = sqlite::col_int(q, 4);
+            t.ec = sqlite::col_int(q, 5);
         }
     }
-    swan_finalize(q);
+    sqlite::finalize(q);
     return t;
 }
 
@@ -130,20 +131,20 @@ fn shift_rows(db: i64, file: const u8[:], a: i64, b: i64, n: i64) {
     let d = n - (b - a + 1);
     fn run(sql: const u8[:], x: i64) {
         let st = prepare_or_die(db, sql);
-        swan_bind_text(st, 1, file);
-        swan_bind_int(st, 2, x);
-        swan_bind_int(st, 3, d);
+        sqlite::bind_text(st, 1, file);
+        sqlite::bind_int(st, 2, x);
+        sqlite::bind_int(st, 3, d);
         step_done(st);
-        swan_finalize(st);
+        sqlite::finalize(st);
     }
     exec_or_die(db, "BEGIN;");
     if b >= a {
         let del = prepare_or_die(db, "DELETE FROM occurrences WHERE file = ?1 AND start_line BETWEEN ?2 AND ?3");
-        swan_bind_text(del, 1, file);
-        swan_bind_int(del, 2, a);
-        swan_bind_int(del, 3, b);
+        sqlite::bind_text(del, 1, file);
+        sqlite::bind_int(del, 2, a);
+        sqlite::bind_int(del, 3, b);
         step_done(del);
-        swan_finalize(del);
+        sqlite::finalize(del);
     }
     if d != 0 {
         run("UPDATE occurrences SET start_line = start_line + ?3, end_line = end_line + ?3 WHERE file = ?1 AND start_line > ?2", b);
@@ -156,10 +157,10 @@ fn shift_rows(db: i64, file: const u8[:], a: i64, b: i64, n: i64) {
 
 fn mark_edited(db: i64, file: const u8[:], path: const u8[:]) {
     let st = prepare_or_die(db, "UPDATE files SET edited_mtime = ?2 WHERE file = ?1");
-    swan_bind_text(st, 1, file);
-    swan_bind_int(st, 2, swan_mtime_ns(path));
+    sqlite::bind_text(st, 1, file);
+    sqlite::bind_int(st, 2, swan_mtime_ns(path));
     step_done(st);
-    swan_finalize(st);
+    sqlite::finalize(st);
 }
 
 // Who uses the symbol: what to check after changing it.
@@ -167,12 +168,12 @@ fn used_by(db: i64, id: i64, out: u8[>..]&) {
     let st = prepare_or_die(db, """
         SELECT count(*), count(DISTINCT file) FROM occurrences WHERE symbol_id = ?1 AND is_def = 0
         """);
-    swan_bind_int(st, 1, id);
+    sqlite::bind_int(st, 1, id);
     var e: u8[>..] = [];
     var refs = 0;
     var files = 0;
-    if swan_step(st, e) == 1 { refs = swan_col_int(st, 0); files = swan_col_int(st, 1); }
-    swan_finalize(st);
+    if sqlite::step(st, e) == 1 { refs = sqlite::col_int(st, 0); files = sqlite::col_int(st, 1); }
+    sqlite::finalize(st);
     format(out, ",\"used_by\":{\"references\":", refs, ",\"files\":", files,
            ",\"next\":\"get_callers on this symbol lists them; check those that depend on what changed\"}");
 }
@@ -247,11 +248,11 @@ fn edit_symbol(db: i64, mode: i64, pattern: const u8[:], rel: const u8[:], body:
     if mode == EDIT_REPLACE {
         // The symbol's span now ends where the new code does.
         let st = prepare_or_die(db, "UPDATE symbols SET body_end_col = ?2 WHERE id = ?1");
-        swan_bind_int(st, 1, t.id);
+        sqlite::bind_int(st, 1, t.id);
         let so = offset_of(text, starts, t.sl, t.sc);
-        swan_bind_int(st, 2, col_of(updated, so + code.len));
+        sqlite::bind_int(st, 2, col_of(updated, so + code.len));
         step_done(st);
-        swan_finalize(st);
+        sqlite::finalize(st);
     }
     mark_edited(db, rel, path);
     out.append("{\"edited\":");
@@ -281,10 +282,10 @@ fn rename_symbol(db: i64, pattern: const u8[:], rel: const u8[:], new_name: cons
     var old_name: u8[>..] = [];
     var old_path: u8[>..] = [];
     let q = prepare_or_die(db, "SELECT name, name_path FROM symbols WHERE id = ?1");
-    swan_bind_int(q, 1, t.id);
+    sqlite::bind_int(q, 1, t.id);
     var e: u8[>..] = [];
-    if swan_step(q, e) == 1 { swan_col_text(q, 0, old_name); swan_col_text(q, 1, old_path); }
-    swan_finalize(q);
+    if sqlite::step(q, e) == 1 { sqlite::col_text(q, 0, old_name); sqlite::col_text(q, 1, old_path); }
+    sqlite::finalize(q);
     guard old_name != new_name else { out.append("new_name is the current name"); return false; }
 
     // The new name path, and whether something there already has it.
@@ -296,30 +297,30 @@ fn rename_symbol(db: i64, pattern: const u8[:], rel: const u8[:], new_name: cons
         SELECT name_path, kind, def_file, def_line FROM symbols
         WHERE in_repo = 1 AND name_path = ?1 AND (instr(?1, '/') > 0 OR def_file = ?2)
         """);
-    swan_bind_text(cf, 1, new_path);
-    swan_bind_text(cf, 2, rel);
+    sqlite::bind_text(cf, 1, new_path);
+    sqlite::bind_text(cf, 2, rel);
     var conflicts: u8[>..] = [];
     var nconf = 0;
-    while swan_step(cf, e) == 1 {
+    while sqlite::step(cf, e) == 1 {
         if nconf > 0 { conflicts.push(','); }
         nconf++;
         var s: u8[>..] = [];
         conflicts.append("{\"name_path\":");
-        swan_col_text(cf, 0, s); json::format_string(conflicts, s); s.clear();
+        sqlite::col_text(cf, 0, s); json::format_string(conflicts, s); s.clear();
         conflicts.append(",\"kind\":");
-        swan_col_text(cf, 1, s); json::format_string(conflicts, s); s.clear();
+        sqlite::col_text(cf, 1, s); json::format_string(conflicts, s); s.clear();
         conflicts.append(",\"relative_path\":");
-        swan_col_text(cf, 2, s); json::format_string(conflicts, s);
-        format(conflicts, ",\"line\":", swan_col_int(cf, 3) + 1, "}");
+        sqlite::col_text(cf, 2, s); json::format_string(conflicts, s);
+        format(conflicts, ",\"line\":", sqlite::col_int(cf, 3) + 1, "}");
     }
-    swan_finalize(cf);
+    sqlite::finalize(cf);
 
     // Every site, file by file. Each file is read once and checked fresh.
     let sites_q = prepare_or_die(db, """
         SELECT file, start_line, start_col, end_line, end_col, is_def FROM occurrences
         WHERE symbol_id = ?1 ORDER BY file, start_line, start_col
         """);
-    swan_bind_int(sites_q, 1, t.id);
+    sqlite::bind_int(sites_q, 1, t.id);
     var plan: u8[>..] = [];
     var skipped: u8[>..] = [];
     var stale_files: u8[>..] = [];
@@ -332,9 +333,9 @@ fn rename_symbol(db: i64, pattern: const u8[:], rel: const u8[:], new_name: cons
     var starts: i64[>..] = [];
     var readable = false;
     var cur_stale = false;
-    while swan_step(sites_q, e) == 1 {
+    while sqlite::step(sites_q, e) == 1 {
         var file: u8[>..] = [];
-        swan_col_text(sites_q, 0, file);
+        sqlite::col_text(sites_q, 0, file);
         if file != cur {
             cur.clear();
             cur.append(file);
@@ -349,10 +350,10 @@ fn rename_symbol(db: i64, pattern: const u8[:], rel: const u8[:], new_name: cons
                 json::format_string(stale_files, file);
             }
         }
-        let line = swan_col_int(sites_q, 1);
-        let col = swan_col_int(sites_q, 2);
-        let el = swan_col_int(sites_q, 3);
-        let ec = swan_col_int(sites_q, 4);
+        let line = sqlite::col_int(sites_q, 1);
+        let col = sqlite::col_int(sites_q, 2);
+        let el = sqlite::col_int(sites_q, 3);
+        let ec = sqlite::col_int(sites_q, 4);
         var ok = readable && el == line;
         if ok {
             let so = offset_of(text, starts, line, col);
@@ -363,7 +364,7 @@ fn rename_symbol(db: i64, pattern: const u8[:], rel: const u8[:], new_name: cons
         entry.append("{\"relative_path\":");
         json::format_string(entry, file);
         format(entry, ",\"line\":", line + 1, ",\"column\":", col + 1);
-        if swan_col_int(sites_q, 5) == 1 { entry.append(",\"definition\":true"); }
+        if sqlite::col_int(sites_q, 5) == 1 { entry.append(",\"definition\":true"); }
         if !ok { entry.append(",\"why\":\"the text there is not the old name (an alias, a re-export or a generated use)\""); }
         entry.push('}');
         if ok {
@@ -376,7 +377,7 @@ fn rename_symbol(db: i64, pattern: const u8[:], rel: const u8[:], new_name: cons
             skipped.append(entry);
         }
     }
-    swan_finalize(sites_q);
+    sqlite::finalize(sites_q);
 
     out.append("{\"rename\":");
     json::format_string(out, old_path);
@@ -402,7 +403,7 @@ fn rename_symbol(db: i64, pattern: const u8[:], rel: const u8[:], new_name: cons
         SELECT file, start_line, start_col, end_line, end_col FROM occurrences
         WHERE symbol_id = ?1 ORDER BY file, start_line DESC, start_col DESC
         """);
-    swan_bind_int(again, 1, t.id);
+    sqlite::bind_int(again, 1, t.id);
     let d = new_name.len - old_name.len;   // identifiers are ASCII here
     var sites: Site[>..] = [];
     cur.clear();
@@ -432,12 +433,12 @@ fn rename_symbol(db: i64, pattern: const u8[:], rel: const u8[:], new_name: cons
         updated.append(text[at..]);
         fn shift(sql: const u8[:], line: i64, col: i64) {
             let st = prepare_or_die(db, sql);
-            swan_bind_text(st, 1, cur);
-            swan_bind_int(st, 2, line);
-            swan_bind_int(st, 3, col);
-            swan_bind_int(st, 4, d);
+            sqlite::bind_text(st, 1, cur);
+            sqlite::bind_int(st, 2, line);
+            sqlite::bind_int(st, 3, col);
+            sqlite::bind_int(st, 4, d);
             step_done(st);
-            swan_finalize(st);
+            sqlite::finalize(st);
         }
         if write_file_atomic(path, updated) {
             exec_or_die(db, "BEGIN;");
@@ -454,33 +455,33 @@ fn rename_symbol(db: i64, pattern: const u8[:], rel: const u8[:], new_name: cons
         }
         sites.clear();
     }
-    while swan_step(again, e) == 1 {
+    while sqlite::step(again, e) == 1 {
         var file: u8[>..] = [];
-        swan_col_text(again, 0, file);
+        sqlite::col_text(again, 0, file);
         if file != cur { flush(); cur.clear(); cur.append(file); }
-        if swan_col_int(again, 3) == swan_col_int(again, 1) {
-            sites.push(Site { line: swan_col_int(again, 1), col: swan_col_int(again, 2),
-                              end_col: swan_col_int(again, 4) });
+        if sqlite::col_int(again, 3) == sqlite::col_int(again, 1) {
+            sites.push(Site { line: sqlite::col_int(again, 1), col: sqlite::col_int(again, 2),
+                              end_col: sqlite::col_int(again, 4) });
         }
     }
     flush();
-    swan_finalize(again);
+    sqlite::finalize(again);
 
     // The map's names follow: the symbol, and the paths of what it holds.
     let rn = prepare_or_die(db, """
         UPDATE symbols SET name_path = ?3 || substr(name_path, length(?2) + 1)
         WHERE def_file = ?4 AND (name_path = ?2 OR name_path LIKE ?2 || '/%')
         """);
-    swan_bind_text(rn, 4, rel);
-    swan_bind_text(rn, 2, old_path);
-    swan_bind_text(rn, 3, new_path);
+    sqlite::bind_text(rn, 4, rel);
+    sqlite::bind_text(rn, 2, old_path);
+    sqlite::bind_text(rn, 3, new_path);
     step_done(rn);
-    swan_finalize(rn);
+    sqlite::finalize(rn);
     let nm = prepare_or_die(db, "UPDATE symbols SET name = ?2 WHERE id = ?1");
-    swan_bind_int(nm, 1, t.id);
-    swan_bind_text(nm, 2, new_name);
+    sqlite::bind_int(nm, 1, t.id);
+    sqlite::bind_text(nm, 2, new_name);
     step_done(nm);
-    swan_finalize(nm);
+    sqlite::finalize(nm);
     format(out, ",\"applied\":true,\"files_written\":", written, "}");
     return true;
 }

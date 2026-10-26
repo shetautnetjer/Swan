@@ -5,6 +5,7 @@
 import std;
 import os;
 import json;
+import sqlite;
 
 let SWAN_VERSION = "0.1.0";
 
@@ -225,5 +226,5 @@ fn serve_main(db_path: const u8[:]) {
         flush_stdout();
     }
     live_stop();
-    swan_db_close(db);
+    sqlite::close(db);
 }

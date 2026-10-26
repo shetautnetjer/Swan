@@ -1,9 +1,8 @@
-// Swan's native part: SQLite (vendored amalgamation) and the thin shim over it,
-// and the live language-server client.
-// build/swanlsp.c is the swan-lsp library (lsp/), Goose compiled to C on its
-// own by scripts/build.sh; native/lsp_glue.c is the door to it.
-c_sources = ["../native/swan_sqlite.c", "../vendor/sqlite/sqlite3.c",
-             "../native/proc.c", "../native/lsp_glue.c", "../build/swanlsp.c"];
-c_include = ["../vendor/sqlite"];
-c_defines = ["SQLITE_OMIT_LOAD_EXTENSION=1", "SQLITE_THREADSAFE=0", "SQLITE_DQS=0", "SQLITE_DEFAULT_MEMSTATUS=0"];
+// Swan's native part: file and process helpers (SQLite is the goose-sqlite
+// package), and the live language-server client.
+// build/golsp.c is the goose-lsp library (the lsp/ submodule), Goose
+// compiled to C on its own by scripts/build.sh; lsp/native/glue.c is the door
+// to it.
+c_sources = ["../native/swan_sys.c",
+             "../lsp/native/proc.c", "../lsp/native/glue.c", "../build/golsp.c"];
 output = "swan";

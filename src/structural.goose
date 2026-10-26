@@ -9,6 +9,7 @@ import std;
 import os;
 import json;
 import treesitter;
+import sqlite;
 
 let STRUCT_LANGS = ["typescript", "tsx", "javascript", "python", "rust", "java", "c", "cpp", "cuda", "kotlin"];
 
@@ -35,11 +36,11 @@ fn symbol_around(db: i64, file: const u8[:], line: i64, out: u8[>..]&) {
         SELECT name_path FROM symbols WHERE def_file = ?1 AND body_start <= ?2 AND body_end >= ?2
         ORDER BY body_end - body_start, body_start DESC LIMIT 1
         """);
-    swan_bind_text(st, 1, file);
-    swan_bind_int(st, 2, line);
+    sqlite::bind_text(st, 1, file);
+    sqlite::bind_int(st, 2, line);
     var err: u8[>..] = [];
-    if swan_step(st, err) == 1 { swan_col_text(st, 0, out); }
-    swan_finalize(st);
+    if sqlite::step(st, err) == 1 { sqlite::col_text(st, 0, out); }
+    sqlite::finalize(st);
 }
 
 fn first_line(s: const u8[:]) -> const u8[:] {

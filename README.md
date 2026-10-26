@@ -98,8 +98,9 @@ Every answer about a file that changed after the SCIP run carries
 ## Use
 
 ```bash
-scripts/fetch-tools.sh                          # Goose and rust-analyzer (sha256-pinned) into .tools/, scip-typescript and scip-python into tools/
-scripts/build.sh                                # bin/swan
+git clone --recurse-submodules https://github.com/shetautnetjer/Swan   # lsp/ is the goose-lsp submodule
+scripts/fetch-tools.sh                          # Goose and the indexers and servers (sha256-pinned) into .tools/, the npm tools into tools/
+scripts/build.sh                                # bin/swan; the first build fetches goose-sqlite and goose-treesitter
 bin/swan map <repo> data/<name>                 # every indexer the repo needs -> map (refreshes if it exists)
 bin/swan check <repo> data/<name>               # tsc / cargo check / pyright -> diagnostics in the map
 scripts/index-repo.sh <ts-repo> data/<name>     # index.scip, TSV rows, swan.db

@@ -6,6 +6,7 @@
 import std;
 import os;
 import json;
+import sqlite;
 
 // What the placeholders in modules.json stand for.
 struct ModCtx { repo: u8[..2048], out: u8[..2048], home: u8[..2048], python: u8[..2048] }
@@ -230,16 +231,16 @@ fn affected_tests(db: i64, ids: const u8[:], depth: i64) -> u8[>..] {
         WHERE s.def_file IS NOT NULL
         """, "#IDS#", ids);
     let st = prepare_or_die(db, sql);
-    swan_bind_int(st, 1, depth);
+    sqlite::bind_int(st, 1, depth);
     var e: u8[>..] = [];
     var tests: u8[>..] = [];
-    while swan_step(st, e) == 1 {
+    while sqlite::step(st, e) == 1 {
         var f: u8[>..] = [];
-        swan_col_text(st, 0, f);
+        sqlite::col_text(st, 0, f);
         // Rust keeps unit tests in a `mod tests` inside the source file.
-        if is_test_path(f) || swan_col_int(st, 1) == 1 { tests.append(f); tests.push('\n'); }
+        if is_test_path(f) || sqlite::col_int(st, 1) == 1 { tests.append(f); tests.push('\n'); }
     }
-    swan_finalize(st);
+    sqlite::finalize(st);
     return tests;
 }
 
@@ -257,21 +258,21 @@ fn test_main(repo_arg: const u8[:], out_arg: const u8[:], target: const u8[:], r
     if file_exists(str(repo, "/", target)) {
         if is_test_path(target) { tests.append(target); tests.push('\n'); }
         let st = prepare_or_die(db, "SELECT id FROM symbols WHERE def_file = ?1 AND in_repo = 1 AND kind NOT IN ('parameter', 'module')");
-        swan_bind_text(st, 1, target);
+        sqlite::bind_text(st, 1, target);
         var e: u8[>..] = [];
-        while swan_step(st, e) == 1 { if ids.len > 0 { ids.push(','); } format(ids, swan_col_int(st, 0)); }
-        swan_finalize(st);
+        while sqlite::step(st, e) == 1 { if ids.len > 0 { ids.push(','); } format(ids, sqlite::col_int(st, 0)); }
+        sqlite::finalize(st);
     } else {
         var ignored: u8[>..] = [];
         ids = targets(db, target, rel, ignored);
         if targets_matched > 1 {
             format(report, "'", target, "' matches ", targets_matched, " symbols; pass relative_path");
-            swan_db_close(db);
+            sqlite::close(db);
             return false;
         }
     }
     if ids.len > 0 { tests.append(affected_tests(db, ids, depth)); }
-    swan_db_close(db);
+    sqlite::close(db);
     // One line per file, without repeats.
     var uniq: u8[>..] = [];
     each_split(tests, '\n') { t => if t.len > 0 && find(uniq, str(t, "\n")) < 0 { uniq.append(t); uniq.push('\n'); } };

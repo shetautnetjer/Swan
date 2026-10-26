@@ -19,7 +19,8 @@ import .pipeline;
 import .modules;
 import .live;
 import .structural;
-import treesitter from "../pkg/treesitter";   // tree-sitter and its grammars, built once and cached
+import treesitter from "shetautnetjer/goose-treesitter@v0.1.1";   // tree-sitter and its grammars, built once and cached
+import sqlite from "shetautnetjer/goose-sqlite@v0.1.0";   // SQLite, built once and cached
 
 fn usage() {
     write_stderr("""
@@ -40,7 +41,7 @@ fn usage() {
 fn open_db(path: const u8[:]) -> i64 {
     guard file_exists(path) else { abort(str("swan: no index at ", path)); }
     var err: u8[>..] = [];
-    let db = swan_db_open(path, err);
+    let db = sqlite::open(path, err);
     if db == 0 { abort(str("swan: cannot open ", path, ": ", err)); }
     load_freshness(db);
     return db;

@@ -102,37 +102,6 @@ if [ ! -x .tools/py-tools/bin/ruff ]; then
   uv venv -q .tools/py-tools
   uv pip install -q --python .tools/py-tools/bin/python ruff==0.17.2 pytest==9.1.1
 fi
-# Tree-sitter's runtime and grammars (npm tarballs, which carry the generated
-# C), for structural search: pkg/treesitter compiles them once.
-TS_PKGS=(
-  "07aeba8dd71630e7e72b2d4ca3bd2680c3471824100cc5ebff44e78a6ed0b6d3 tree-sitter-0.25.1"
-  "8e9ecd7687665d2fa1b3c07fbd1f4380b7d285850d6954629e2156e1b757451e tree-sitter-c-0.24.1"
-  "615d152f70e7a6bed8f15a93c3c0c264c40dc71c1b6a1445646fff9439e776bc tree-sitter-cpp-0.23.4"
-  "93a855b34aadae8269a9f6d31431f2ce0a9f60dbb8fd495cc489205bf1832efe tree-sitter-cuda-0.21.2"
-  "6b6c1b62605f9d8bb80efd2ebe5951a87b182faafa3eeb67c460a667818551b6 tree-sitter-java-0.23.5"
-  "6214ce23d03aba525ba8edd6ca7caf365c969f2c2dbfc353e376ca54507ffb92 tree-sitter-javascript-0.25.0"
-  "63b76b3fa8181fd79eaad4abcdb21e2babcb504dbfc7710a89934fa456d26096 tree-sitter-python-0.25.0"
-  "4248da0b9ea40fec13ef010822e7b92a9d1ebdf74f6f2733539b1dbbb086c5bb tree-sitter-rust-0.24.0"
-  "0fdf63c35930a75885145d75ee63cb879da2d49db9bfe454bd8e60b08ba778a1 tree-sitter-typescript-0.23.2"
-)
-# Kotlin's grammar is published under a scope, so its URL and folder are spelled out.
-KT_SUM=28916be3fdb0487dbd4fd0ea62281f969f15cab2bf13132ceb18d2fb167aa697
-KT_TGZ=.tools/tree-sitter/pkg/tree-sitter-grammars-tree-sitter-kotlin-1.1.0.tgz
-if [ ! -d .tools/tree-sitter/tree-sitter-kotlin ]; then
-  mkdir -p .tools/tree-sitter/pkg .tools/tree-sitter/tree-sitter-kotlin
-  curl -fsSL -o "$KT_TGZ" "https://registry.npmjs.org/@tree-sitter-grammars/tree-sitter-kotlin/-/tree-sitter-kotlin-1.1.0.tgz"
-  echo "$KT_SUM  $KT_TGZ" | sha256sum -c -
-  tar -xzf "$KT_TGZ" -C .tools/tree-sitter/tree-sitter-kotlin --strip-components=1
-fi
-for entry in "${TS_PKGS[@]}"; do
-  sum=${entry%% *}; pkg=${entry#* }; name=${pkg%-*.*.*}
-  if [ ! -d ".tools/tree-sitter/$name" ]; then
-    mkdir -p .tools/tree-sitter/pkg ".tools/tree-sitter/$name"
-    curl -fsSL -o ".tools/tree-sitter/pkg/$pkg.tgz" "https://registry.npmjs.org/$name/-/$pkg.tgz"
-    echo "$sum  .tools/tree-sitter/pkg/$pkg.tgz" | sha256sum -c -
-    tar -xzf ".tools/tree-sitter/pkg/$pkg.tgz" -C ".tools/tree-sitter/$name" --strip-components=1
-  fi
-done
 # JetBrains' Kotlin language server (standalone, with its own JBR), for live
 # Kotlin answers. About 1.5 GB unpacked; it keeps its caches in the map's
 # folder (--system-path).
@@ -151,4 +120,6 @@ fi
 mkdir -p .tools/gradle-home
 [ -f .tools/gradle-home/gradle.properties ] || printf 'org.gradle.daemon.idletimeout=600000\norg.gradle.jvmargs=-Xmx2g\n' > .tools/gradle-home/gradle.properties
 (cd tools && npm install --no-fund --no-audit --silent)
+# The lsp/ submodule (goose-lsp), if the clone was not recursive.
+git submodule update --init lsp
 echo "goose: $dir/goose"

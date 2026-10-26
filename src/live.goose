@@ -1,18 +1,19 @@
 // Live answers from a language server that `swan serve` keeps running
 // (rust-analyzer first): diagnostics right after an edit, without a full
 // check, and implementations as the server sees them now. The client is the
-// swan-lsp library (lsp/swanlsp.goose), compiled to C on its own and linked
-// in, so it never adds to swan's own Goose build. Which server, with which
+// goose-lsp library (the lsp/ submodule), compiled to C on its own and
+// linked in, so it never adds to swan's own Goose build. Which server, with which
 // options, comes from the "lsp" entries in tools/modules.json.
 
 import std;
 import os;
 import json;
+import sqlite;
 
-extern fn swan_lsp_start(repo: const u8[:], log: const u8[:], init_json: const u8[:], argv: const u8[:],
+extern fn golsp_start(repo: const u8[:], log: const u8[:], init_json: const u8[:], argv: const u8[:],
                          env: const u8[:], lang_id: const u8[:]) -> bool;
-extern fn swan_lsp_ask(question: const u8[:], out: u8[>..]&);
-extern fn swan_lsp_stop();
+extern fn golsp_ask(question: const u8[:], out: u8[>..]&);
+extern fn golsp_stop();
 
 var live_lang: u8[..64];        // the language whose server is running; empty when none
 var live_settle: u8[..16];      // its "settle" from modules.json: check or publish
@@ -54,7 +55,7 @@ fn live_start(db: i64, lang: const u8[:], why: u8[>..]&) -> bool {
                 env_all.append(base);
                 env_all.append(extra);
                 let log = str(dir, "/lsp-", lang, ".log");
-                started = swan_lsp_start(root, log, init, argv, env_all, if l_ok { lid } else { lang });
+                started = golsp_start(root, log, init, argv, env_all, if l_ok { lid } else { lang });
                 if !started { format(why, "the ", lang, " language server did not start; see ", log); }
                 let st, st_ok = json::as_string(json::member(cand, "settle"));
                 live_settle.clear();
@@ -69,7 +70,7 @@ fn live_start(db: i64, lang: const u8[:], why: u8[>..]&) -> bool {
 
 fn live_stop() {
     guard live_lang.len > 0;
-    swan_lsp_stop();
+    golsp_stop();
     live_lang.clear();
 }
 
@@ -80,7 +81,7 @@ fn live_ask(db: i64, rel: const u8[:], question: const u8[:], out: u8[>..]&) -> 
     var why: u8[>..] = [];
     guard live_start(db, lang, why) else { out.append(why); return false; }
     var a: u8[>..] = [];
-    swan_lsp_ask(question, a);
+    golsp_ask(question, a);
     if find(a, "\"gone\":true") >= 0 { live_lang.clear(); }   // the next question starts it again
     out.append(a);
     return starts_with(a, "{\"ok\":true");
@@ -116,8 +117,8 @@ fn live_implementations(db: i64, pattern: const u8[:], rel: const u8[:], out: u8
     var line = 0;
     var col = 0;
     var err: u8[>..] = [];
-    if swan_step(st, err) == 1 { swan_col_text(st, 0, file); line = swan_col_int(st, 1) + 1; col = swan_col_int(st, 2) + 1; }
-    swan_finalize(st);
+    if sqlite::step(st, err) == 1 { sqlite::col_text(st, 0, file); line = sqlite::col_int(st, 1) + 1; col = sqlite::col_int(st, 2) + 1; }
+    sqlite::finalize(st);
     guard file.len > 0 else { out.append("no definition of that symbol in the map"); return false; }
     var q: u8[>..] = [];
     q.append("{\"op\":\"implementations\",\"file\":");

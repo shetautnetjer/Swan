@@ -69,3 +69,16 @@ punctuation the pattern leaves out is skipped, a pattern's last sibling may
 be followed by more (an if with an else), `$X` is one named node, and a
 metavariable that the grammar wraps (an expression statement) or reports as
 an error still counts as one.
+
+## 2026-10-26 — Swan's reusable parts as their own Goose packages
+
+Goose has no package registry: a package is a git repository and a tag,
+imported from the root file. SQLite, tree-sitter structural search and the
+language-server client are useful beyond Swan, so they are goose-sqlite,
+goose-treesitter and goose-lsp under shetautnetjer, MIT. The two packages
+build their C once per compiler in Goose's cache; goose-lsp is a submodule
+because Swan compiles it standalone (its Goose would otherwise join Swan's
+whole-program build). The language adapters (rust-analyzer, pyright, the TS
+and Kotlin servers) are configuration in tools/modules.json and stay in Swan.
+No third-party binaries are re-hosted: kotlin-lsp, the JDK and the Android
+SDK are fetched from their makers, pinned.

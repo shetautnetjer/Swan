@@ -11,6 +11,7 @@ import std;
 import os;
 import json;
 import dictionary;
+import sqlite;
 
 extern fn swan_realpath(path: const u8[:], out: u8[>..]&) -> bool;
 
@@ -442,7 +443,7 @@ fn dependents_of_changes(out: const u8[:], stamps: const u8[:], prev: const u8[:
     let db_path = str(out, "/swan.db");
     guard changed.len > 0 && file_exists(db_path) else { return dirty; }
     var err: u8[>..] = [];
-    let db = swan_db_open(db_path, err);
+    let db = sqlite::open(db_path, err);
     guard db != 0 else { return dirty; }
     let st = prepare_or_die(db, """
         SELECT DISTINCT o.file FROM occurrences o JOIN symbols s ON s.id = o.symbol_id
@@ -450,12 +451,12 @@ fn dependents_of_changes(out: const u8[:], stamps: const u8[:], prev: const u8[:
         """);
     each_split(changed, '\n') { f =>
         guard f.len > 0;
-        swan_bind_text(st, 1, f);
-        while swan_step(st, err) == 1 { swan_col_text(st, 0, dirty); dirty.push('\n'); }
-        swan_reset(st);
+        sqlite::bind_text(st, 1, f);
+        while sqlite::step(st, err) == 1 { sqlite::col_text(st, 0, dirty); dirty.push('\n'); }
+        sqlite::reset(st);
     };
-    swan_finalize(st);
-    swan_db_close(db);
+    sqlite::finalize(st);
+    sqlite::close(db);
     return dirty;
 }
 
@@ -481,9 +482,9 @@ fn map_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> bo
     let old_db = str(out, "/swan.db");
     if file_exists(old_db) {
         var e: u8[>..] = [];
-        let h = swan_db_open(old_db, e);
+        let h = sqlite::open(old_db, e);
         var v: u8[>..] = [];
-        if h != 0 { meta_value(h, "schema_version", v); swan_db_close(h); }
+        if h != 0 { meta_value(h, "schema_version", v); sqlite::close(h); }
         if v != str(SCHEMA_VERSION) {
             format(report, "map schema ", if v.len > 0 { v[..] } else { "?" }, " is older than ", SCHEMA_VERSION, ": rebuilding\n");
             for f in ["/swan.db", "/index-manifest.tsv", "/python-pieces.tsv", "/python-files.tsv"] { delete_file(str(out, f)); }

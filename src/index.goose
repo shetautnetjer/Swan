@@ -17,6 +17,7 @@
 import std;
 import os;
 import dictionary;
+import sqlite;
 
 let SCHEMA_VERSION = 9;
 
@@ -148,7 +149,7 @@ fn index_main(dir: const u8[:], db_path: const u8[:], root: const u8[:], refresh
     if !refresh && file_exists(tmp) { delete_file(tmp); }
     if refresh && !file_exists(db_path) { abort(str("swan refresh: no index at ", db_path, "; run swan index first")); }
     var err: u8[>..] = [];
-    let db = swan_db_open(path, err);
+    let db = sqlite::open(path, err);
     if db == 0 { abort(str("swan: cannot open ", path, ": ", err)); }
     if refresh {
         var version: u8[>..] = [];
@@ -180,34 +181,34 @@ fn index_main(dir: const u8[:], db_path: const u8[:], root: const u8[:], refresh
     let put_seen = prepare_or_die(db, "INSERT INTO temp.seen VALUES (?1)");
     hashes.each() { file, h =>
         let fp = str(h);
-        swan_bind_text(put_seen, 1, file);
+        sqlite::bind_text(put_seen, 1, file);
         step_done(put_seen);
         var stored: u8[>..] = [];
-        swan_bind_text(get_hash, 1, file);
-        if swan_step(get_hash, err) == 1 { swan_col_text(get_hash, 0, stored); }
-        swan_reset(get_hash);
+        sqlite::bind_text(get_hash, 1, file);
+        if sqlite::step(get_hash, err) == 1 { sqlite::col_text(get_hash, 0, stored); }
+        sqlite::reset(get_hash);
         if stored != fp {
             changed.insert(file, true);
             if refresh {
-                swan_bind_text(drop_occ, 1, file);
+                sqlite::bind_text(drop_occ, 1, file);
                 step_done(drop_occ);
-                swan_bind_text(drop_rel, 1, file);
+                sqlite::bind_text(drop_rel, 1, file);
                 step_done(drop_rel);
-                swan_bind_text(reset_defs, 1, file);
+                sqlite::bind_text(reset_defs, 1, file);
                 step_done(reset_defs);
             }
-            swan_bind_text(put_file, 1, file);
-            swan_bind_text(put_file, 2, fp);
+            sqlite::bind_text(put_file, 1, file);
+            sqlite::bind_text(put_file, 2, fp);
             let n = rows.get(file);
-            swan_bind_int(put_file, 3, if n { n } else { 0 });
+            sqlite::bind_int(put_file, 3, if n { n } else { 0 });
             step_done(put_file);
         }
     };
     var removed = 0;
     if refresh {
         let gone = prepare_or_die(db, "SELECT count(*) FROM files WHERE file NOT IN (SELECT file FROM temp.seen)");
-        if swan_step(gone, err) == 1 { removed = swan_col_int(gone, 0); }
-        swan_finalize(gone);
+        if sqlite::step(gone, err) == 1 { removed = sqlite::col_int(gone, 0); }
+        sqlite::finalize(gone);
         exec_or_die(db, """
             DELETE FROM occurrences WHERE file NOT IN (SELECT file FROM temp.seen);
             DELETE FROM relationships WHERE file NOT IN (SELECT file FROM temp.seen);
@@ -217,12 +218,12 @@ fn index_main(dir: const u8[:], db_path: const u8[:], root: const u8[:], refresh
             DELETE FROM files WHERE file NOT IN (SELECT file FROM temp.seen);
             """);
     }
-    swan_finalize(get_hash);
-    swan_finalize(put_file);
-    swan_finalize(drop_occ);
-    swan_finalize(drop_rel);
-    swan_finalize(reset_defs);
-    swan_finalize(put_seen);
+    sqlite::finalize(get_hash);
+    sqlite::finalize(put_file);
+    sqlite::finalize(drop_occ);
+    sqlite::finalize(drop_rel);
+    sqlite::finalize(reset_defs);
+    sqlite::finalize(put_seen);
 
     // Symbols: found in this run's rows first, then in the database, and
     // otherwise added. A symbol keeps its id across refreshes.
@@ -238,24 +239,24 @@ fn index_main(dir: const u8[:], db_path: const u8[:], root: const u8[:], refresh
         let got = ids.get(scip);
         if got { return got; }
         var db_id = -1;
-        swan_bind_text(find_sym, 1, scip);
-        if swan_step(find_sym, err) == 1 { db_id = swan_col_int(find_sym, 0); }
-        swan_reset(find_sym);
+        sqlite::bind_text(find_sym, 1, scip);
+        if sqlite::step(find_sym, err) == 1 { db_id = sqlite::col_int(find_sym, 0); }
+        sqlite::reset(find_sym);
         if db_id < 0 {
             var path: u8[>..] = [];
             let name, suffix, parent = describe(scip, path);
             let m = sigs.get(scip);
             let s = if m { m.sig } else { scip[0..0] };
             let sk = if m { m.kind } else { 0 };
-            swan_bind_text(add_sym, 1, scip);
-            swan_bind_text(add_sym, 2, name);
-            swan_bind_text(add_sym, 3, path);
-            swan_bind_text(add_sym, 4, kind_word(s, suffix, parent, sk));
-            swan_bind_text(add_sym, 5, s);
-            swan_bind_text(add_sym, 6, language_of(scip));
-            if swan_step(add_sym, err) != 1 { abort(str("sqlite: ", err)); }
-            db_id = swan_col_int(add_sym, 0);
-            swan_reset(add_sym);
+            sqlite::bind_text(add_sym, 1, scip);
+            sqlite::bind_text(add_sym, 2, name);
+            sqlite::bind_text(add_sym, 3, path);
+            sqlite::bind_text(add_sym, 4, kind_word(s, suffix, parent, sk));
+            sqlite::bind_text(add_sym, 5, s);
+            sqlite::bind_text(add_sym, 6, language_of(scip));
+            if sqlite::step(add_sym, err) != 1 { abort(str("sqlite: ", err)); }
+            db_id = sqlite::col_int(add_sym, 0);
+            sqlite::reset(add_sym);
         }
         let k = syms.len;
         syms.push(Sym { db_id: db_id, def_file: scip[0..0], line: -1, col: -1,
@@ -321,23 +322,23 @@ fn index_main(dir: const u8[:], db_path: const u8[:], root: const u8[:], refresh
             syms[k].line = sl;
             syms[k].col = sc;
         }
-        swan_bind_int(ins_occ, 1, syms[k].db_id);
-        swan_bind_text(ins_occ, 2, f[1]);
-        swan_bind_int(ins_occ, 3, sl);
-        swan_bind_int(ins_occ, 4, sc);
-        swan_bind_int(ins_occ, 5, field_int(f[4]));
-        swan_bind_int(ins_occ, 6, field_int(f[5]));
-        swan_bind_int(ins_occ, 7, if is_def { 1 } else { 0 });
-        swan_bind_int(ins_occ, 9, if f[6] == "name" { 1 } else { 0 });
-        swan_bind_int(ins_occ, 10, if f[6] == "imp" { 1 } else { 0 });
+        sqlite::bind_int(ins_occ, 1, syms[k].db_id);
+        sqlite::bind_text(ins_occ, 2, f[1]);
+        sqlite::bind_int(ins_occ, 3, sl);
+        sqlite::bind_int(ins_occ, 4, sc);
+        sqlite::bind_int(ins_occ, 5, field_int(f[4]));
+        sqlite::bind_int(ins_occ, 6, field_int(f[5]));
+        sqlite::bind_int(ins_occ, 7, if is_def { 1 } else { 0 });
+        sqlite::bind_int(ins_occ, 9, if f[6] == "name" { 1 } else { 0 });
+        sqlite::bind_int(ins_occ, 10, if f[6] == "imp" { 1 } else { 0 });
         if !is_def {
             let enc = enclosing(f[1], sl, sc);
-            if enc >= 0 { swan_bind_int(ins_occ, 8, enc); }
+            if enc >= 0 { sqlite::bind_int(ins_occ, 8, enc); }
         }
         step_done(ins_occ);
         occ_count++;
     };
-    swan_finalize(ins_occ);
+    sqlite::finalize(ins_occ);
 
     // relationships.tsv: symbol, file, related_symbol, flags (impl,ref,type,def)
     let ins_rel = prepare_or_die(db, "INSERT INTO relationships VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)");
@@ -349,19 +350,19 @@ fn index_main(dir: const u8[:], db_path: const u8[:], root: const u8[:], refresh
         let k = intern(f[0]);
         let j = intern(f[2]);
         let flags = split(f[3], ',');
-        swan_bind_int(ins_rel, 1, syms[k].db_id);
-        swan_bind_int(ins_rel, 2, syms[j].db_id);
-        swan_bind_text(ins_rel, 3, f[1]);
-        swan_bind_int(ins_rel, 4, if flags.contains("impl") { 1 } else { 0 });
-        swan_bind_int(ins_rel, 5, if flags.contains("ref") { 1 } else { 0 });
-        swan_bind_int(ins_rel, 6, if flags.contains("type") { 1 } else { 0 });
-        swan_bind_int(ins_rel, 7, if flags.contains("def") { 1 } else { 0 });
+        sqlite::bind_int(ins_rel, 1, syms[k].db_id);
+        sqlite::bind_int(ins_rel, 2, syms[j].db_id);
+        sqlite::bind_text(ins_rel, 3, f[1]);
+        sqlite::bind_int(ins_rel, 4, if flags.contains("impl") { 1 } else { 0 });
+        sqlite::bind_int(ins_rel, 5, if flags.contains("ref") { 1 } else { 0 });
+        sqlite::bind_int(ins_rel, 6, if flags.contains("type") { 1 } else { 0 });
+        sqlite::bind_int(ins_rel, 7, if flags.contains("def") { 1 } else { 0 });
         step_done(ins_rel);
         rel_count++;
     };
-    swan_finalize(ins_rel);
-    swan_finalize(find_sym);
-    swan_finalize(add_sym);
+    sqlite::finalize(ins_rel);
+    sqlite::finalize(find_sym);
+    sqlite::finalize(add_sym);
 
     // The definitions found in rewritten files, and their current signatures.
     let upd_sym = prepare_or_die(db, """
@@ -378,25 +379,25 @@ fn index_main(dir: const u8[:], db_path: const u8[:], root: const u8[:], refresh
         let m = sigs.get(scip);
         let sg = if m { m.sig } else { scip[0..0] };
         let sk = if m { m.kind } else { 0 };
-        swan_bind_int(upd_sym, 1, s.db_id);
-        swan_bind_text(upd_sym, 2, kind_word(sg, suffix, parent, sk));
-        swan_bind_text(upd_sym, 3, sg);
-        if m && m.doc.len > 0 { swan_bind_text(upd_sym, 12, m.doc); }
+        sqlite::bind_int(upd_sym, 1, s.db_id);
+        sqlite::bind_text(upd_sym, 2, kind_word(sg, suffix, parent, sk));
+        sqlite::bind_text(upd_sym, 3, sg);
+        if m && m.doc.len > 0 { sqlite::bind_text(upd_sym, 12, m.doc); }
         if s.has_def {
-            swan_bind_text(upd_sym, 4, s.def_file);
-            swan_bind_int(upd_sym, 5, s.line);
-            swan_bind_int(upd_sym, 6, s.col);
+            sqlite::bind_text(upd_sym, 4, s.def_file);
+            sqlite::bind_int(upd_sym, 5, s.line);
+            sqlite::bind_int(upd_sym, 6, s.col);
         }
         if s.body_start >= 0 {
-            swan_bind_int(upd_sym, 7, s.body_start);
-            swan_bind_int(upd_sym, 8, s.body_end);
-            swan_bind_int(upd_sym, 10, s.body_start_col);
-            swan_bind_int(upd_sym, 11, s.body_end_col);
+            sqlite::bind_int(upd_sym, 7, s.body_start);
+            sqlite::bind_int(upd_sym, 8, s.body_end);
+            sqlite::bind_int(upd_sym, 10, s.body_start_col);
+            sqlite::bind_int(upd_sym, 11, s.body_end_col);
         }
-        swan_bind_int(upd_sym, 9, if s.has_def { 1 } else { 0 });
+        sqlite::bind_int(upd_sym, 9, if s.has_def { 1 } else { 0 });
         step_done(upd_sym);
     };
-    swan_finalize(upd_sym);
+    sqlite::finalize(upd_sym);
 
     // A symbol nothing mentions any more goes.
     if refresh {
@@ -405,15 +406,15 @@ fn index_main(dir: const u8[:], db_path: const u8[:], root: const u8[:], refresh
 
     let ins_meta = prepare_or_die(db, "INSERT OR REPLACE INTO meta VALUES (?1, ?2)");
     fn meta(key: const u8[:], value: const u8[:]) {
-        swan_bind_text(ins_meta, 1, key);
-        swan_bind_text(ins_meta, 2, value);
+        sqlite::bind_text(ins_meta, 1, key);
+        sqlite::bind_text(ins_meta, 2, value);
         step_done(ins_meta);
     }
     let cnt = prepare_or_die(db, "SELECT (SELECT count(*) FROM symbols), (SELECT count(*) FROM occurrences)");
     var n_syms = 0;
     var n_occ = 0;
-    if swan_step(cnt, err) == 1 { n_syms = swan_col_int(cnt, 0); n_occ = swan_col_int(cnt, 1); }
-    swan_finalize(cnt);
+    if sqlite::step(cnt, err) == 1 { n_syms = sqlite::col_int(cnt, 0); n_occ = sqlite::col_int(cnt, 1); }
+    sqlite::finalize(cnt);
     meta("schema_version", str(SCHEMA_VERSION));
     if !refresh || root.len > 0 { meta("root", root); }
     meta("source", dir);
@@ -422,13 +423,13 @@ fn index_main(dir: const u8[:], db_path: const u8[:], root: const u8[:], refresh
     meta("symbols", str(n_syms));
     meta("occurrences", str(n_occ));
     meta("files", str(hashes.count));
-    swan_finalize(ins_meta);
+    sqlite::finalize(ins_meta);
 
     // scip-java names Kotlin symbols like Java ones; the file says which.
     exec_or_die(db, "UPDATE symbols SET language = 'kotlin' WHERE language = 'java' AND (def_file LIKE '%.kt' OR def_file LIKE '%.kts');");
     exec_or_die(db, "COMMIT;");
     if !refresh { exec_or_die(db, INDEXES); }
-    swan_db_close(db);
+    sqlite::close(db);
     if !refresh {
         guard rename_file(tmp, db_path) else { abort(str("swan index: cannot rename ", tmp, " to ", db_path)); }
     }

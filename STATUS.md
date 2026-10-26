@@ -200,6 +200,19 @@ as_of: 2026-10-25
   on current Kotlin works; Mani's new app will start there. Its Gradle
   build otherwise ran (3.6 min first time, 3.5 GB peak).
 
+## 2026-10-26: the reusable parts as Goose packages
+
+- goose-sqlite (SQLite + shim), goose-treesitter (tree-sitter, grammars as
+  pinned submodules, the matcher and worker pool) and goose-lsp (the
+  language-server client) are their own public repos, tagged v0.1.0
+  (goose-treesitter v0.1.1: the CUDA grammar is copied in, because its
+  repository's nested submodule breaks a recursive clone). Swan imports the
+  first two by tag (goose fetches them into its cache and builds their C
+  once) and has goose-lsp as the lsp/ submodule, compiled standalone.
+- Goose has no registry: a package is a git repo and a tag.
+- A fresh build fetching both packages took 69 s; a core edit builds in
+  5.0 s, as before. All tests pass.
+
 ## Next
 
 1. Bake-off reported 2026-10-25 (README "Against the code-map bake-off"):

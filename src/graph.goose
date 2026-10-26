@@ -7,6 +7,7 @@
 
 import std;
 import json;
+import sqlite;
 
 // JS/TS (.test., .spec., __tests__), Python (test_*.py, *_test.py, conftest),
 // and test directories anywhere (Rust's tests/ included).
@@ -39,21 +40,21 @@ fn targets(db: i64, pattern: const u8[:], rel: const u8[:], out: u8[>..]&) -> u8
     var ids: u8[>..] = [];
     let sql, bind = match_sql(pattern, false);
     let st = prepare_or_die(db, sql);
-    swan_bind_text(st, 1, bind);
-    swan_bind_text(st, 2, rel);
-    swan_bind_int(st, 3, 20);
+    sqlite::bind_text(st, 1, bind);
+    sqlite::bind_text(st, 2, rel);
+    sqlite::bind_int(st, 3, 20);
     var err: u8[>..] = [];
     json::format_key(out, "targets");
     out.push('[');
     targets_matched = 0;
-    while swan_step(st, err) == 1 {
+    while sqlite::step(st, err) == 1 {
         if ids.len > 0 { ids.push(','); out.push(','); }
-        format(ids, swan_col_int(st, 0));
+        format(ids, sqlite::col_int(st, 0));
         symbol_json(st, out);
         targets_matched++;
     }
     out.push(']');
-    swan_finalize(st);
+    sqlite::finalize(st);
     // A class in Java is used through its constructors (`new Square(2)`
     // references Square#<init>(), not Square#), so they count as the class.
     if ids.len > 0 {
@@ -63,8 +64,8 @@ fn targets(db: i64, pattern: const u8[:], rel: const u8[:], out: u8[>..]&) -> u8
             WHERE c.name = '<init>' AND substr(c.scip, 1, length(t.scip)) = t.scip
             """, "#IDS#", ids);
         let cs = prepare_or_die(db, sql);
-        while swan_step(cs, err) == 1 { format(ids, ",", swan_col_int(cs, 0)); }
-        swan_finalize(cs);
+        while sqlite::step(cs, err) == 1 { format(ids, ",", sqlite::col_int(cs, 0)); }
+        sqlite::finalize(cs);
     }
     return ids;
 }
@@ -99,40 +100,40 @@ fn get_callers(db: i64, pattern: const u8[:], rel: const u8[:], depth: i64, limi
     // and the test files are then read from.
     exec_or_die(db, "DROP TABLE IF EXISTS temp.callers_found;");
     let mk = prepare_or_die(db, str("CREATE TEMP TABLE callers_found AS ", walk, "SELECT * FROM found"));
-    swan_bind_int(mk, 1, depth);
+    sqlite::bind_int(mk, 1, depth);
     step_done(mk);
-    swan_finalize(mk);
+    sqlite::finalize(mk);
 
     let st = prepare_or_die(db, "SELECT * FROM temp.callers_found ORDER BY distance, def_file, def_line LIMIT ?1");
-    swan_bind_int(st, 1, limit);
+    sqlite::bind_int(st, 1, limit);
     out.append(",");
     json::format_key(out, "callers");
     out.push('[');
     var n = 0;
-    while swan_step(st, err) == 1 {
+    while sqlite::step(st, err) == 1 {
         if n > 0 { out.push(','); }
         n++;
         symbol_json(st, out);
         var file: u8[>..] = [];
-        swan_col_text(st, 4, file);
+        sqlite::col_text(st, 4, file);
         out.pop();
         out.push(',');
         json::format_key(out, "distance");
-        json::format_int(out, swan_col_int(st, 9));
+        json::format_int(out, sqlite::col_int(st, 9));
         out.push(',');
         json::format_key(out, "is_test");
         json::format_bool(out, is_test_path(file));
         out.push('}');
     }
     out.push(']');
-    swan_finalize(st);
+    sqlite::finalize(st);
 
     // The summary covers every caller, not only the ones listed.
     let sum = prepare_or_die(db, "SELECT count(*), count(DISTINCT def_file) FROM temp.callers_found");
     var total = 0;
     var files = 0;
-    if swan_step(sum, err) == 1 { total = swan_col_int(sum, 0); files = swan_col_int(sum, 1); }
-    swan_finalize(sum);
+    if sqlite::step(sum, err) == 1 { total = sqlite::col_int(sum, 0); files = sqlite::col_int(sum, 1); }
+    sqlite::finalize(sum);
     let tf = prepare_or_die(db, "SELECT DISTINCT def_file FROM temp.callers_found ORDER BY def_file");
     out.append(",");
     json::format_key(out, "summary");
@@ -149,16 +150,16 @@ fn get_callers(db: i64, pattern: const u8[:], rel: const u8[:], depth: i64, limi
     json::format_key(out, "test_files");
     out.push('[');
     var t = 0;
-    while swan_step(tf, err) == 1 {
+    while sqlite::step(tf, err) == 1 {
         var file: u8[>..] = [];
-        swan_col_text(tf, 0, file);
+        sqlite::col_text(tf, 0, file);
         if is_test_path(file) {
             if t > 0 { out.push(','); }
             t++;
             json::format_string(out, file);
         }
     }
-    swan_finalize(tf);
+    sqlite::finalize(tf);
     out.append("]}}");
 }
 
@@ -182,38 +183,38 @@ fn get_callees(db: i64, pattern: const u8[:], rel: const u8[:], limit: i64, out:
         LIMIT ?1
         """, "#IDS#", ids);
     let st = prepare_or_die(db, sql);
-    swan_bind_int(st, 1, limit);
+    sqlite::bind_int(st, 1, limit);
     var err: u8[>..] = [];
     out.append(",");
     json::format_key(out, "callees");
     out.push('[');
     var n = 0;
-    while swan_step(st, err) == 1 {
+    while sqlite::step(st, err) == 1 {
         if n > 0 { out.push(','); }
         n++;
-        if swan_col_int(st, 9) == 1 {
+        if sqlite::col_int(st, 9) == 1 {
             symbol_json(st, out);
             out.pop();
         } else {
             var s: u8[>..] = [];
             out.push('{');
             json::format_key(out, "name_path");
-            swan_col_text(st, 1, s); json::format_string(out, s); s.clear();
+            sqlite::col_text(st, 1, s); json::format_string(out, s); s.clear();
             out.push(',');
             json::format_key(out, "kind");
-            swan_col_text(st, 2, s); json::format_string(out, s); s.clear();
+            sqlite::col_text(st, 2, s); json::format_string(out, s); s.clear();
             out.push(',');
             json::format_key(out, "package");
-            swan_col_text(st, 10, s);
+            sqlite::col_text(st, 10, s);
             json::format_string(out, package_of(s));
         }
         out.push(',');
         json::format_key(out, "uses");
-        json::format_int(out, swan_col_int(st, 11));
+        json::format_int(out, sqlite::col_int(st, 11));
         out.push('}');
     }
     out.append("]}");
-    swan_finalize(st);
+    sqlite::finalize(st);
 }
 
 // The type hierarchy from SCIP relationships: a class implementing an
@@ -248,37 +249,37 @@ fn hierarchy(db: i64, ids: const u8[:], down: bool, depth: i64, limit: i64, out:
         LIMIT ?2
         """);
     let st = prepare_or_die(db, sql);
-    swan_bind_int(st, 1, depth);
-    swan_bind_int(st, 2, limit);
+    sqlite::bind_int(st, 1, depth);
+    sqlite::bind_int(st, 2, limit);
     var err: u8[>..] = [];
     out.push('[');
     var n = 0;
-    while swan_step(st, err) == 1 {
+    while sqlite::step(st, err) == 1 {
         if n > 0 { out.push(','); }
         n++;
-        if swan_col_int(st, 10) == 1 {
+        if sqlite::col_int(st, 10) == 1 {
             symbol_json(st, out);
             out.pop();
         } else {
             var s: u8[>..] = [];
             out.push('{');
             json::format_key(out, "name_path");
-            swan_col_text(st, 1, s); json::format_string(out, s); s.clear();
+            sqlite::col_text(st, 1, s); json::format_string(out, s); s.clear();
             out.push(',');
             json::format_key(out, "kind");
-            swan_col_text(st, 2, s); json::format_string(out, s); s.clear();
+            sqlite::col_text(st, 2, s); json::format_string(out, s); s.clear();
             out.push(',');
             json::format_key(out, "package");
-            swan_col_text(st, 11, s);
+            sqlite::col_text(st, 11, s);
             json::format_string(out, package_of(s));
         }
         out.push(',');
         json::format_key(out, "distance");
-        json::format_int(out, swan_col_int(st, 9));
+        json::format_int(out, sqlite::col_int(st, 9));
         out.push('}');
     }
     out.push(']');
-    swan_finalize(st);
+    sqlite::finalize(st);
 }
 
 // What implements, extends or overrides the target, at any depth up to 5:
@@ -326,14 +327,14 @@ fn find_unused_symbols(db: i64, rel: const u8[:], include_tests: bool, limit: i6
                    AND EXISTS (SELECT 1 FROM relationships r WHERE r.symbol_id = s.id))
         ORDER BY s.def_file, s.def_line
         """);
-    swan_bind_text(st, 1, rel);
+    sqlite::bind_text(st, 1, rel);
     var err: u8[>..] = [];
     var n = 0;
     var total = 0;
     out.append("{\"unused\":[");
-    while swan_step(st, err) == 1 {
+    while sqlite::step(st, err) == 1 {
         var file: u8[>..] = [];
-        swan_col_text(st, 4, file);
+        sqlite::col_text(st, 4, file);
         if !include_tests && is_test_path(file) { continue; }
         total++;
         if n >= limit { continue; }
@@ -341,7 +342,7 @@ fn find_unused_symbols(db: i64, rel: const u8[:], include_tests: bool, limit: i6
         n++;
         symbol_json(st, out);
     }
-    swan_finalize(st);
+    sqlite::finalize(st);
     out.append("],\"total\":");
     json::format_int(out, total);
     out.push('}');

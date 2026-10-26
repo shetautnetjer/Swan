@@ -9,6 +9,7 @@
 import std;
 import os;
 import json;
+import sqlite;
 
 let DIAG_TABLE = """
     CREATE TABLE IF NOT EXISTS diagnostics (
@@ -35,7 +36,7 @@ fn diagnostics_main(dir: const u8[:], db_path: const u8[:], report: u8[>..]&) {
     let path = str(dir, "/diagnostics.tsv");
     guard read_file(path, text) else { abort(str("cannot read ", path)); }
     var err: u8[>..] = [];
-    let db = swan_db_open(db_path, err);
+    let db = sqlite::open(db_path, err);
     if db == 0 { abort(str("swan: cannot open ", db_path, ": ", err)); }
     exec_or_die(db, DIAG_TABLE);
     exec_or_die(db, "BEGIN; DELETE FROM diagnostics;");
@@ -55,26 +56,26 @@ fn diagnostics_main(dir: const u8[:], db_path: const u8[:], report: u8[>..]&) {
         guard it.len > 0;
         let f = split(it, '\t');
         guard f.len >= 9;
-        swan_bind_text(ins, 1, f[0]);
-        swan_bind_int(ins, 2, field_int(f[1]));
-        swan_bind_int(ins, 3, field_int(f[2]));
-        swan_bind_int(ins, 4, field_int(f[3]));
-        swan_bind_int(ins, 5, field_int(f[4]));
-        swan_bind_text(ins, 6, f[5]);
-        swan_bind_text(ins, 7, f[6]);
-        swan_bind_text(ins, 8, f[7]);
-        swan_bind_text(ins, 9, f[8]);
+        sqlite::bind_text(ins, 1, f[0]);
+        sqlite::bind_int(ins, 2, field_int(f[1]));
+        sqlite::bind_int(ins, 3, field_int(f[2]));
+        sqlite::bind_int(ins, 4, field_int(f[3]));
+        sqlite::bind_int(ins, 5, field_int(f[4]));
+        sqlite::bind_text(ins, 6, f[5]);
+        sqlite::bind_text(ins, 7, f[6]);
+        sqlite::bind_text(ins, 8, f[7]);
+        sqlite::bind_text(ins, 9, f[8]);
         step_done(ins);
         n++;
         if f[5] == "error" { errors++; }
     };
-    swan_finalize(ins);
+    sqlite::finalize(ins);
     let m = prepare_or_die(db, "INSERT OR REPLACE INTO meta VALUES ('diagnostics_time', ?1)");
-    swan_bind_text(m, 1, str(swan_mtime_ns(path)));
+    sqlite::bind_text(m, 1, str(swan_mtime_ns(path)));
     step_done(m);
-    swan_finalize(m);
+    sqlite::finalize(m);
     exec_or_die(db, "COMMIT;");
-    swan_db_close(db);
+    sqlite::close(db);
     format(report, "swan diagnostics: ", n, " loaded (", errors, " errors) into ", db_path, " in ",
           ((clock() - t0) * 1000.0) as i64, " ms");
 }
@@ -139,59 +140,59 @@ fn get_diagnostics(db: i64, pattern: const u8[:], rel: const u8[:], depth: i64, 
             """);
     }
     let st = prepare_or_die(db, scope);
-    swan_bind_int(st, 1, depth);
-    swan_bind_int(st, 2, if errors_only { 1 } else { 0 });
-    swan_bind_int(st, 3, limit);
-    if pattern.len == 0 { swan_bind_text(st, 4, rel); }
+    sqlite::bind_int(st, 1, depth);
+    sqlite::bind_int(st, 2, if errors_only { 1 } else { 0 });
+    sqlite::bind_int(st, 3, limit);
+    if pattern.len == 0 { sqlite::bind_text(st, 4, rel); }
     out.append("\"diagnostics\":[");
     var n = 0;
     var errors = 0;
-    while swan_step(st, e) == 1 {
+    while sqlite::step(st, e) == 1 {
         if n > 0 { out.push(','); }
         n++;
         var s: u8[>..] = [];
-        swan_col_text(st, 0, s);
+        sqlite::col_text(st, 0, s);
         let file_changed = swan_mtime_ns(source_path(db, s)) > checked;
         out.append("{\"relative_path\":");
         json::format_string(out, s);
-        format(out, ",\"line\":", swan_col_int(st, 1) + 1, ",\"column\":", swan_col_int(st, 2) + 1);
+        format(out, ",\"line\":", sqlite::col_int(st, 1) + 1, ",\"column\":", sqlite::col_int(st, 2) + 1);
         s.clear();
-        swan_col_text(st, 3, s);
+        sqlite::col_text(st, 3, s);
         if s == "error" { errors++; }
         out.append(",\"severity\":");
         json::format_string(out, s);
         s.clear();
-        swan_col_text(st, 4, s);
+        sqlite::col_text(st, 4, s);
         out.append(",\"source\":");
         json::format_string(out, s);
         s.clear();
-        swan_col_text(st, 5, s);
+        sqlite::col_text(st, 5, s);
         out.append(",\"code\":");
         json::format_string(out, s);
         s.clear();
-        swan_col_text(st, 6, s);
+        sqlite::col_text(st, 6, s);
         out.append(",\"message\":");
         json::format_string(out, s);
         s.clear();
-        swan_col_text(st, 7, s);
+        sqlite::col_text(st, 7, s);
         if s.len > 0 { out.append(",\"in_symbol\":"); json::format_string(out, s); }
-        let dist = swan_col_int(st, 8);
+        let dist = sqlite::col_int(st, 8);
         if dist >= 0 { format(out, ",\"distance\":", dist); }
         if file_changed { out.append(",\"stale\":true"); }
         out.push('}');
     }
-    swan_finalize(st);
+    sqlite::finalize(st);
     format(out, "],\"shown\":", n, ",\"errors_shown\":", errors);
 
     // The whole map, for the question "where are the errors at all".
     let sum = prepare_or_die(db, """
         SELECT count(*), sum(severity = 'error'), count(DISTINCT file) FROM diagnostics
         """);
-    if swan_step(sum, e) == 1 {
-        format(out, ",\"map_total\":{\"diagnostics\":", swan_col_int(sum, 0), ",\"errors\":",
-               swan_col_int(sum, 1), ",\"files\":", swan_col_int(sum, 2), "}");
+    if sqlite::step(sum, e) == 1 {
+        format(out, ",\"map_total\":{\"diagnostics\":", sqlite::col_int(sum, 0), ",\"errors\":",
+               sqlite::col_int(sum, 1), ",\"files\":", sqlite::col_int(sum, 2), "}");
     }
-    swan_finalize(sum);
+    sqlite::finalize(sum);
     out.append(",\"note\":\"from the last tsc / cargo check run; rerun scripts/diagnose-repo.sh after edits\"}");
     return true;
 }

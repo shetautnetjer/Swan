@@ -8,6 +8,7 @@
 
 import std;
 import os;
+import sqlite;
 
 var fresh_root: u8[..4096];
 var fresh_scip_time: i64 = 0;    // ns since the epoch; 0 when unknown
@@ -32,13 +33,13 @@ fn edited_mtime(file: const u8[:]) -> i64 {
     guard fresh_edited != 0 else { return -1; }
     var err: u8[>..] = [];
     var t = -1;
-    swan_bind_text(fresh_edited, 1, file);
-    if swan_step(fresh_edited, err) == 1 {
+    sqlite::bind_text(fresh_edited, 1, file);
+    if sqlite::step(fresh_edited, err) == 1 {
         var v: u8[>..] = [];
-        swan_col_text(fresh_edited, 0, v);
-        if v.len > 0 { t = swan_col_int(fresh_edited, 0); }
+        sqlite::col_text(fresh_edited, 0, v);
+        if v.len > 0 { t = sqlite::col_int(fresh_edited, 0); }
     }
-    swan_reset(fresh_edited);
+    sqlite::reset(fresh_edited);
     return t;
 }
 
