@@ -149,6 +149,21 @@ as_of: 2026-10-25
   0.7 s single-threaded); ast-grep takes 0.1 s on 32 threads. Core build after
   a core edit 5.0 s (4.3 s before), the matcher being Goose in the core.
 
+## 2026-10-26: Kotlin, step 1 (structural search)
+
+- The Kotlin grammar (@tree-sitter-grammars/tree-sitter-kotlin 1.1.0, MIT,
+  pinned in fetch-tools.sh) is in pkg/treesitter. A Kotlin-only repo maps
+  to an empty map (no SCIP indexer runs yet), so search_pattern and
+  rewrite_pattern work on .kt/.kts.
+- A pattern node holding only punctuation and a $$$ run (`{ $$$B }`) may
+  match a node of another kind: Kotlin parses `{ __swan_mvm_B }` as a
+  different node than a class body.
+- fixtures/tiny-kt: same matches as ast-grep on 5 Kotlin cases. On
+  android/nowinandroid (350 .kt files): equal counts on 4 patterns in about
+  0.01 s each; `@Composable fun $F($$$P) { $$$B }` finds 80 where ast-grep
+  finds 75, the 5 more being composables whose parameter lists end with a
+  trailing comma, which ast-grep's `$$$P` does not take.
+
 ## Next
 
 1. Bake-off reported 2026-10-25 (README "Against the code-map bake-off"):

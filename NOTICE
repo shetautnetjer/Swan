@@ -16,8 +16,8 @@ tools/ uses scip-typescript (https://github.com/sourcegraph/scip-typescript,
 Apache-2.0) as an installed tool; it is not part of this repository.
 
 pkg/treesitter/ compiles tree-sitter (https://github.com/tree-sitter/tree-sitter)
-and its grammars for TypeScript/TSX, JavaScript, Python, Rust, Java, C, C++
-and CUDA, all MIT, fetched into .tools/ by scripts/fetch-tools.sh; none of
+and its grammars for TypeScript/TSX, JavaScript, Python, Rust, Java, Kotlin,
+C, C++ and CUDA, all MIT, fetched into .tools/ by scripts/fetch-tools.sh; none of
 their code is in this repository. Structural search follows ast-grep's
 pattern syntax and matching rules (https://ast-grep.github.io, MIT); no
 ast-grep code is used. The live adapters drive rust-analyzer, pyright and

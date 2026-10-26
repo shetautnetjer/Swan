@@ -22,6 +22,7 @@ const TSLanguage *tree_sitter_java(void);
 const TSLanguage *tree_sitter_c(void);
 const TSLanguage *tree_sitter_cpp(void);
 const TSLanguage *tree_sitter_cuda(void);
+const TSLanguage *tree_sitter_kotlin(void);
 
 static bool is(ts_slice s, const char *name) {
     size_t n = strlen(name);
@@ -38,6 +39,7 @@ static const TSLanguage *language(ts_slice name) {
     if (is(name, "c")) return tree_sitter_c();
     if (is(name, "cpp")) return tree_sitter_cpp();
     if (is(name, "cuda")) return tree_sitter_cuda();
+    if (is(name, "kotlin")) return tree_sitter_kotlin();
     return NULL;
 }
 

@@ -115,6 +115,15 @@ TS_PKGS=(
   "4248da0b9ea40fec13ef010822e7b92a9d1ebdf74f6f2733539b1dbbb086c5bb tree-sitter-rust-0.24.0"
   "0fdf63c35930a75885145d75ee63cb879da2d49db9bfe454bd8e60b08ba778a1 tree-sitter-typescript-0.23.2"
 )
+# Kotlin's grammar is published under a scope, so its URL and folder are spelled out.
+KT_SUM=28916be3fdb0487dbd4fd0ea62281f969f15cab2bf13132ceb18d2fb167aa697
+KT_TGZ=.tools/tree-sitter/pkg/tree-sitter-grammars-tree-sitter-kotlin-1.1.0.tgz
+if [ ! -d .tools/tree-sitter/tree-sitter-kotlin ]; then
+  mkdir -p .tools/tree-sitter/pkg .tools/tree-sitter/tree-sitter-kotlin
+  curl -fsSL -o "$KT_TGZ" "https://registry.npmjs.org/@tree-sitter-grammars/tree-sitter-kotlin/-/tree-sitter-kotlin-1.1.0.tgz"
+  echo "$KT_SUM  $KT_TGZ" | sha256sum -c -
+  tar -xzf "$KT_TGZ" -C .tools/tree-sitter/tree-sitter-kotlin --strip-components=1
+fi
 for entry in "${TS_PKGS[@]}"; do
   sum=${entry%% *}; pkg=${entry#* }; name=${pkg%-*.*.*}
   if [ ! -d ".tools/tree-sitter/$name" ]; then

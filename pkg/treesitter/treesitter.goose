@@ -65,6 +65,7 @@ fn language_of_path(p: const u8[:]) -> const u8[:] {
     if ends_with(p, ".cc") || ends_with(p, ".cpp") || ends_with(p, ".cxx") || ends_with(p, ".hpp") ||
        ends_with(p, ".hh") || ends_with(p, ".hxx") { return "cpp"; }
     if ends_with(p, ".cu") || ends_with(p, ".cuh") { return "cuda"; }
+    if ends_with(p, ".kt") || ends_with(p, ".kts") { return "kotlin"; }
     return "";
 }
 
@@ -255,10 +256,28 @@ fn bind(name: const u8[:], a: i64, b: i64) -> bool {
     return true;
 }
 
+// Whether a pattern node holds only punctuation and metavariables, one of
+// them a $$$ run: `{ $$$B }` say. A grammar can give such a node another kind than the code it
+// stands for (Kotlin parses it as a lambda-like block rather than a class
+// body), so it matches by its punctuation and metavariables alone.
+fn only_holes(p: i64) -> bool {
+    var c = solid(p_nodes, first(p_nodes, p));
+    var holes = 0;
+    while c >= 0 {
+        var name: u8[..64] = [];
+        let m = meta(c, name);
+        if m == 3 { holes++; }
+        else if m == 1 {}
+        else if (flags(p_nodes, c) & F_NAMED) != 0 { return false; }
+        c = solid(p_nodes, next(p_nodes, c));
+    }
+    return holes > 0;
+}
+
 recursive fn match_node(p: i64, t: i64) -> bool {
     var name: u8[..64] = [];
     if meta(p, name) == 1 { return (flags(t_nodes, t) & F_NAMED) != 0 && bind(name, t, t); }   // $X is one named node
-    guard sym(p_nodes, p) == sym(t_nodes, t) else { return false; }
+    guard sym(p_nodes, p) == sym(t_nodes, t) || (first(t_nodes, t) >= 0 && (flags(t_nodes, t) & F_NAMED) != 0 && only_holes(p)) else { return false; }
     if first(p_nodes, p) < 0 { return ptext(p) == ttext(t); }
     return match_seq(solid(p_nodes, first(p_nodes, p)), solid(t_nodes, first(t_nodes, t)));
 }

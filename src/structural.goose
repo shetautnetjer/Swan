@@ -10,7 +10,7 @@ import os;
 import json;
 import treesitter;
 
-let STRUCT_LANGS = ["typescript", "tsx", "javascript", "python", "rust", "java", "c", "cpp", "cuda"];
+let STRUCT_LANGS = ["typescript", "tsx", "javascript", "python", "rust", "java", "c", "cpp", "cuda", "kotlin"];
 
 // The repo's files under rel with a grammar (of `lang`, if given), relative
 // to the repo, one per line.

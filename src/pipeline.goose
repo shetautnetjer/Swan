@@ -23,6 +23,7 @@ fn abs_path(p: const u8[:]) -> u8[>..] {
 // What a repo holds, found by walking it.
 struct Langs {
     ts: bool, js: bool, py: bool, rs: bool, java: bool, c: bool, cuda: bool,
+    kt: bool,                   // Kotlin: tree-sitter only for now, no SCIP indexer runs
     tsconfig: bool, cargo: bool, maven: bool, gradle: bool,
     venv: u8[..2048],           // a virtualenv inside the repo, if any
 }
@@ -60,7 +61,7 @@ fn each_file<F>(repo: const u8[:]) {
 }
 
 fn detect(repo: const u8[:]) -> Langs {
-    var l = Langs { ts: false, js: false, py: false, rs: false, java: false, c: false, cuda: false,
+    var l = Langs { ts: false, js: false, py: false, rs: false, java: false, c: false, cuda: false, kt: false,
                     tsconfig: file_exists(str(repo, "/tsconfig.json")),
                     cargo: file_exists(str(repo, "/Cargo.toml")),
                     maven: file_exists(str(repo, "/pom.xml")),
@@ -81,6 +82,8 @@ fn detect(repo: const u8[:]) -> Langs {
             l.rs = true;
         } else if ends_with(name, ".java") {
             l.java = true;
+        } else if ends_with(name, ".kt") || ends_with(name, ".kts") {
+            l.kt = true;
         } else if ends_with(name, ".cu") || ends_with(name, ".cuh") {
             l.cuda = true;
         } else if is_c_source(name) || ends_with(name, ".h") || ends_with(name, ".hpp") || ends_with(name, ".hh") {
@@ -471,7 +474,7 @@ fn map_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> bo
     let l = detect(repo);
     format(report, "languages:", if l.ts { " typescript" } else { "" }, if l.js { " javascript" } else { "" },
            if l.java { " java" } else { "" }, if l.c { " c/c++" } else { "" }, if l.cuda { " cuda" } else { "" },
-           if l.py { " python" } else { "" }, if l.rs || l.cargo { " rust" } else { "" },
+           if l.py { " python" } else { "" }, if l.rs || l.cargo { " rust" } else { "" }, if l.kt { " kotlin" } else { "" },
            if l.venv.len > 0 { str(" (venv ", l.venv, ")") } else { str("") }, "\n");
     // A map from an older Swan is rebuilt from scratch, indexers included:
     // reusing their output would skip what the new schema needs.
@@ -732,6 +735,15 @@ fn map_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> bo
                                       ["compile_commands.json", "build/compile_commands.json"]));
     }
 
+    if jobs.len == 0 && l.kt {
+        // Nothing to index, but Kotlin can still be searched by structure:
+        // an empty map records the repo for search_pattern and the rest.
+        for t in ["symbols.tsv", "extents.tsv", "relationships.tsv", "occurrences.tsv"] { write_file(str(out, "/", t), ""); }
+        index_main(out, str(out, "/swan.db"), repo, false, report);
+        format(report, "\nkotlin: no SCIP indexer runs yet; search_pattern and rewrite_pattern work on .kt files");
+        format(report, "\nswan map: ", ((clock() - t_start) * 1000.0) as i64, " ms in all");
+        return true;
+    }
     guard jobs.len > 0 else { format(report, "no language found to index in ", repo); return false; }
 
     // Run them, at most jobs_limit() at a time.

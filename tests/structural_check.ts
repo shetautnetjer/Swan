@@ -33,6 +33,11 @@ const CASES: Case[] = [
   { lang: "java", sg: "java", pattern: "System.out.println($X)", covers: "Java statement inside a method" },
   { lang: "java", sg: "java", pattern: "new $C($$$A)", covers: "Java object creation" },
   { lang: "c", sg: "c", pattern: "printf($$$A)", covers: "C calls" },
+  { lang: "kotlin", sg: "kotlin", pattern: "$X.area()", covers: "Kotlin method calls" },
+  { lang: "kotlin", sg: "kotlin", pattern: "fun $F($$$P): $T = $E", covers: "expression-bodied functions" },
+  { lang: "kotlin", sg: "kotlin", pattern: "$X!!", covers: "non-null assertions" },
+  { lang: "kotlin", sg: "kotlin", pattern: "class $C($$$P) : $S { $$$B }", covers: "a class body the grammar parses as another kind" },
+  { lang: "kotlin", sg: "kotlin", pattern: "override fun $F(): Double = $E", covers: "modifiers in the pattern" },
   { lang: "cuda", sg: "", pattern: "$K<<<$$$L>>>($$$A)", covers: "CUDA kernel launches", expect: ["vec.cu:14:5", "vec.cu:18:5"] },
 ];
 
@@ -43,7 +48,7 @@ const check = (what: string, ok: boolean, detail: unknown = "") => {
 };
 
 const EXT: Record<string, RegExp> = {
-  typescript: /\.(ts|mts|cts)$/, python: /\.pyi?$/, rust: /\.rs$/, java: /\.java$/, c: /\.[ch]$/, cuda: /\.(cu|cuh)$/,
+  typescript: /\.(ts|mts|cts)$/, kotlin: /\.kts?$/, python: /\.pyi?$/, rust: /\.rs$/, java: /\.java$/, c: /\.[ch]$/, cuda: /\.(cu|cuh)$/,
 };
 
 function compare(db: string, root: string, rel: string, label: string) {
@@ -80,7 +85,7 @@ if (external) {
   compare(external, info.root, process.argv[3] ?? "", "repo");
 } else {
   for (const [fx, map] of [["tiny-ts", "data/tiny-ts"], ["tiny-py", "data/struct/py"], ["tiny-rs", "data/struct/rs"],
-                           ["tiny-java", "data/struct/java"], ["tiny-cuda", "data/struct/cuda"]]) {
+                           ["tiny-java", "data/struct/java"], ["tiny-cuda", "data/struct/cuda"], ["tiny-kt", "data/struct/kt"]]) {
     if (fx !== "tiny-ts") {
       const m = sh(["bin/swan", "map", `fixtures/${fx}`, map]);
       if (m.code !== 0) { check(`map ${fx}`, false, m.err.slice(-400)); continue; }
