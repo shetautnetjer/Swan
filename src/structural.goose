@@ -121,38 +121,75 @@ fn each_structural_match<F>(db: i64, pattern: const u8[:], lang: const u8[:], re
 
 fn search_pattern(db: i64, pattern: const u8[:], lang: const u8[:], rel: const u8[:], limit: i64, out: u8[>..]&) -> bool {
     guard pattern.len > 0 else { out.append("pattern is required"); return false; }
+    var root: u8[>..] = [];
+    meta_value(db, "root", root);
+    guard root.len > 0 else { out.append("the map does not record its repo; rebuild it with swan map"); return false; }
+    if root[root.len - 1] == '/' { root.pop(); }
+    let files = structural_files(root, rel, lang);
     var skipped: u8[>..] = [];
     var searched = 0;
     var n = 0;
     var body: u8[>..] = [];
-    let ok = each_structural_match(db, pattern, lang, rel, skipped, searched) { f, text, node =>
-        n++;
-        if n <= limit {
-            if n > 1 { body.push(','); }
-            body.append("{\"relative_path\":");
-            json::format_string(body, f);
-            let r = treesitter::match_row(node);
-            format(body, ",\"line\":", r + 1, ",\"column\":", treesitter::match_col(node) + 1,
-                   ",\"end_line\":", r + count_newlines(treesitter::match_text(node)) + 1, ",\"text\":");
-            json::format_string(body, first_line(treesitter::match_text(node)));
-            body.append(",\"captures\":{");
-            var k = 0;
-            treesitter::each_binding() { name, t =>
-                if k > 0 { body.push(','); }
-                k++;
-                json::format_string(body, name);
-                body.push(':');
-                json::format_string(body, first_line(t));
-            };
-            body.push('}');
-            var sym: u8[>..] = [];
-            symbol_around(db, f, r, sym);
-            if sym.len > 0 { body.append(",\"in_symbol\":"); json::format_string(body, sym); }
-            if is_stale(f) { body.append(",\"stale\":true"); }
-            body.push('}');
+    for li in 0..STRUCT_LANGS.len {
+        var l: u8[..32] = [];
+        format(l, STRUCT_LANGS[li]);
+        var mine: u8[>..] = [];     // relative, one per line
+        var paths: u8[>..] = [];    // absolute, one per line
+        var count = 0;
+        each_split(files, '\n') { f =>
+            if f.len > 0 && treesitter::language_of_path(f) == l { format(mine, f, "\n"); format(paths, root, "/", f, "\n"); count++; }
+        };
+        if count > 0 {
+            var why: u8[>..] = [];
+            if !treesitter::compile(l, pattern, why) {
+                if skipped.len > 0 { skipped.push(','); }
+                skipped.append("{\"language\":");
+                json::format_string(skipped, l);
+                skipped.append(",\"why\":");
+                json::format_string(skipped, why);
+                skipped.push('}');
+            } else {
+                searched += count;
+                let rels = split(mine, '\n');
+                var text: u8[>..] = [];
+                var text_of: i64 = -1;
+                treesitter::search_files(paths) { idx, s0, e0, r, c, cap =>
+                    let f = rels[idx];
+                    if text_of != idx { text.clear(); read_file(str(root, "/", f), text); text_of = idx; }
+                    {
+                        n++;
+                        if n <= limit && e0 <= text.len {
+                            let mt = text[s0..e0];
+                            if n > 1 { body.push(','); }
+                            body.append("{\"relative_path\":");
+                            json::format_string(body, f);
+                            format(body, ",\"line\":", r + 1, ",\"column\":", c + 1,
+                                   ",\"end_line\":", r + count_newlines(mt) + 1, ",\"text\":");
+                            json::format_string(body, first_line(mt));
+                            body.append(",\"captures\":{");
+                            var m = 0;
+                            each_split(cap, 0x1e) { one =>
+                                let sep = find(one, "\x1f");
+                                if sep >= 0 {
+                                    if m > 0 { body.push(','); }
+                                    m++;
+                                    json::format_string(body, one[..sep]);
+                                    body.push(':');
+                                    json::format_string(body, first_line(one[sep + 1..]));
+                                }
+                            };
+                            body.push('}');
+                            var sym: u8[>..] = [];
+                            symbol_around(db, f, r, sym);
+                            if sym.len > 0 { body.append(",\"in_symbol\":"); json::format_string(body, sym); }
+                            if is_stale(f) { body.append(",\"stale\":true"); }
+                            body.push('}');
+                        }
+                    }
+                };
+            }
         }
-    };
-    guard ok else { out.append("the map does not record its repo; rebuild it with swan map"); return false; }
+    }
     out.append("{\"pattern\":");
     json::format_string(out, pattern);
     format(out, ",\"matches\":[", body, "],\"count\":", n, ",\"files_searched\":", searched);

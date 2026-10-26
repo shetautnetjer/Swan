@@ -141,9 +141,12 @@ as_of: 2026-10-25
   `await $X`, 18614 `return $X`) and on private Python and Rust copies. The
   only differences are in files .gitignore names, which ast-grep's walk
   skips and Swan reads. CUDA has no ast-grep grammar; checked by hand.
-- Speed on AEON (2358 files): 0.16 s for a pattern with a rare word
-  (files without the pattern's words are never parsed), 0.7 s when every
-  file must be parsed; ast-grep takes 0.1 s on 32 threads. Core build after
+- Speed on AEON (2358 files): search_pattern runs on a pool of Goose
+  worker threads (thread_fn + typed queues, up to 16; each copies the
+  compiled pattern at the spawn): 0.05 s for a pattern with a rare word
+  (files without the pattern's words are never parsed), 0.27 to 0.33 s when
+  every file must be parsed and 16 to 20 thousand matches written out (was
+  0.7 s single-threaded); ast-grep takes 0.1 s on 32 threads. Core build after
   a core edit 5.0 s (4.3 s before), the matcher being Goose in the core.
 
 ## Next

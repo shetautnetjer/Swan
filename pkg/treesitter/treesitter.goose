@@ -355,3 +355,91 @@ fn fill_template(template: const u8[:], out: u8[>..]&) {
         i = e;
     }
 }
+
+// --- searching on every core --------------------------------------------------
+// Workers are Goose threads: each gets its own copy of the compiled pattern
+// (globals are copied at the spawn) and takes files from a queue; results
+// come back on another. Nothing is shared.
+
+struct SearchJob { idx: i64, path: u8[>..] }
+
+// One file's matches, each "start end row column" 0x1f, then its captures
+// as name 0x1f text 0x1e, and a 0x1d after each match.
+struct SearchDone { idx: i64, data: u8[>..] }
+
+thread_fn search_worker() {
+    loop {
+        let job = qget<SearchJob>();
+        guard job.idx >= 0 else { break; }
+        var done = SearchDone { idx: job.idx, .. };
+        var text: u8[>..] = [];
+        if read_file(job.path, text) && might_match(text) {
+            t_text.clear();
+            t_text.append(text);
+            if parse(p_lang, t_text, t_nodes) {
+                for i in 0..t_nodes.len / R {
+                    nb = 0;
+                    if (flags(t_nodes, i) & F_EXTRA) == 0 && match_node(p_root, i) {
+                        format(done.data, start(t_nodes, i), " ", end(t_nodes, i), " ", row(t_nodes, i), " ", col(t_nodes, i));
+                        done.data.push(0x1f);
+                        for k in 0..nb {
+                            done.data.append(binds[k].name[..]);
+                            done.data.push(0x1f);
+                            done.data.append(span_text(binds[k].a, binds[k].b));
+                            done.data.push(0x1e);
+                        }
+                        done.data.push(0x1d);
+                    }
+                }
+            }
+        }
+        qput(done);
+    }
+}
+
+// Searches the files (absolute paths, one per line) with the compiled
+// pattern on every core, then calls F(file index, start, end, row, column,
+// captures) for each match, in file order; captures as name 0x1f text 0x1e.
+fn search_files<F>(paths: const u8[:]) {
+    var n = 0;
+    each_split(paths, '\n') { p =>
+        if p.len > 0 {
+            var job = SearchJob { idx: n, .. };
+            job.path.append(p);
+            qput(job);
+            n++;
+        }
+    };
+    guard n > 0;
+    let workers = max(1, min(min(hardware_threads(), 16), n));
+    for w in 0..workers { qput(SearchJob { idx: -1, .. }); }
+    var ids: i64[>..] = [];
+    for w in 0..workers { ids.push(thread_spawn(search_worker)); }
+    // Results arrive in any order; they are kept in one buffer and read back
+    // in file order.
+    var all: u8[>..] = [];
+    var at: i64[>..] = [];
+    var len: i64[>..] = [];
+    at.resize(n, 0);
+    len.resize(n, 0);
+    for k in 0..n {
+        let d = qget<SearchDone>();
+        at[d.idx] = all.len;
+        len[d.idx] = d.data.len;
+        all.append(d.data);
+    }
+    for id in ids { thread_wait(id); }
+    for idx in 0..n {
+        each_split(all[at[idx]..at[idx] + len[idx]], 0x1d) { one =>
+            let head_end = find(one, "\x1f");
+            if head_end > 0 {
+                let nums = split(one[..head_end], ' ');
+                let a, a_ok = parse_int(nums[0]);
+                let b, b_ok = parse_int(nums[1]);
+                let r, r_ok = parse_int(nums[2]);
+                let c, c_ok = parse_int(nums[3]);
+                F(idx, a, b, r, c, one[head_end + 1..]);
+            }
+        };
+    }
+}
