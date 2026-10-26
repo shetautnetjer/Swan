@@ -1,0 +1,61 @@
+{
+  "_about": "Per-language tools Swan runs after edits: linters (into get_diagnostics; they must not write into the repo, so their caches are off), formatters (format_file) and test runners (run_tests), which act on the repo by design. Each kind is a list of candidates; the first whose conditions hold is used. when_file: one of these exists in the repo. when_cmd: this command exits 0. Placeholders: {repo}, {python} (the repo's virtualenv, else python3), {tools} (Swan's .tools), {bin} (Swan's tools/node_modules/.bin), {out} (the map folder), {files} and {tests} (one argument each; a candidate needing them is skipped when there are none). parser: how output becomes diagnostics (github: ::error file=..,line=..,col=..::message; cargo: cargo's JSON lines). lsp: a language server swan serve keeps running for live answers (get_diagnostics and find_implementations with live): language_id for didOpen, init the settings as a JSON string (placeholders expanded; sent as initializationOptions and as the answer to workspace/configuration, by section), settle: check (wait for the check a save starts: rust-analyzer) or publish (wait for the file's next published set).",
+  "python": {
+    "match": [".py", ".pyi"],
+    "lint": [
+      {"cmd": ["{tools}/py-tools/bin/ruff", "check", "--no-cache", "--output-format", "github", "--exit-zero", "."], "parser": "github", "source": "ruff"}
+    ],
+    "format": [
+      {"cmd": ["{tools}/py-tools/bin/ruff", "format", "{files}"]}
+    ],
+    "test": [
+      {"when_cmd": ["{python}", "-c", "import pytest"], "cmd": ["{python}", "-m", "pytest", "-q", "-p", "no:cacheprovider", "{tests}"], "env": ["PYTHONDONTWRITEBYTECODE=1"]},
+      {"cmd": ["{tools}/py-tools/bin/python", "-m", "pytest", "-q", "-p", "no:cacheprovider", "{tests}"], "env": ["PYTHONDONTWRITEBYTECODE=1"]}
+    ],
+    "lsp": [
+      {"cmd": ["{bin}/pyright-langserver", "--stdio"], "language_id": "python", "settle": "publish",
+       "init": "{\"python\":{\"pythonPath\":\"{python}\",\"analysis\":{\"diagnosticMode\":\"openFilesOnly\"}}}"}
+    ]
+  },
+  "typescript": {
+    "match": [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"],
+    "lint": [
+      {"cmd": ["{bin}/biome", "lint", "--reporter=github", "--max-diagnostics=none", "."], "parser": "github", "source": "biome"}
+    ],
+    "format": [
+      {"cmd": ["{bin}/biome", "format", "--write", "{files}"]}
+    ],
+    "test": [
+      {"when_file": ["vitest.config.ts", "vitest.config.js", "vitest.config.mts"], "cmd": ["npx", "vitest", "run", "{tests}"]},
+      {"cmd": ["bun", "test", "{tests}"]}
+    ],
+    "lsp": [
+      {"cmd": ["{bin}/typescript-language-server", "--stdio"], "language_id": "typescript", "settle": "publish", "init": "{}"}
+    ]
+  },
+  "kotlin": {
+    "match": [".kt", ".kts"],
+    "lsp": [
+      {"cmd": ["{tools}/kotlin-lsp/kotlin-server-263.7084.0/bin/intellij-server", "--stdio", "--system-path", "{out}/kotlin-lsp"],
+       "language_id": "kotlin", "settle": "publish", "init": "{}",
+       "env": ["GRADLE_USER_HOME={tools}/gradle-home"]}
+    ]
+  },
+  "rust": {
+    "match": [".rs"],
+    "lint": [
+      {"cmd": ["cargo", "clippy", "--workspace", "--all-targets", "--message-format=json", "--quiet"], "parser": "cargo", "source": "clippy", "env": ["CARGO_TARGET_DIR={out}/cargo-target"]}
+    ],
+    "format": [
+      {"cmd": ["rustfmt", "--edition", "2021", "{files}"]}
+    ],
+    "test": [
+      {"cmd": ["cargo", "test", "--quiet"], "env": ["CARGO_TARGET_DIR={out}/cargo-target"]}
+    ],
+    "lsp": [
+      {"cmd": ["{tools}/rust-analyzer/rust-analyzer"], "language_id": "rust",
+       "init": "{\"cargo\":{\"targetDir\":\"{out}/ra-target\"},\"checkOnSave\":true,\"check\":{\"command\":\"check\"}}", "settle": "check",
+       "env": ["CARGO_TARGET_DIR={out}/ra-target"]}
+    ]
+  }
+}

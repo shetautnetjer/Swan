@@ -1,0 +1,7 @@
+/.tools/
+/bin/
+/data/
+/tools/node_modules
+*.db
+*.db.tmp
+/build/
