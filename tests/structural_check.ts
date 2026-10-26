@@ -87,10 +87,13 @@ if (external) {
   for (const [fx, map] of [["tiny-ts", "data/tiny-ts"], ["tiny-py", "data/struct/py"], ["tiny-rs", "data/struct/rs"],
                            ["tiny-java", "data/struct/java"], ["tiny-cuda", "data/struct/cuda"], ["tiny-kt", "data/struct/kt"]]) {
     if (fx !== "tiny-ts") {
-      const m = sh(["bin/swan", "map", `fixtures/${fx}`, map]);
+      // Kotlin's map runs a Gradle build, which writes into the repo: map a copy.
+      const src = fx === "tiny-kt" ? `${map}-repo` : `fixtures/${fx}`;
+      if (fx === "tiny-kt") { rmSync(src, { recursive: true, force: true }); cpSync(`fixtures/${fx}`, src, { recursive: true }); }
+      const m = sh(["bin/swan", "map", src, map]);
       if (m.code !== 0) { check(`map ${fx}`, false, m.err.slice(-400)); continue; }
     }
-    compare(`${map}/swan.db`, `fixtures/${fx}`, "", fx);
+    compare(`${map}/swan.db`, fx === "tiny-kt" ? `${map}-repo` : `fixtures/${fx}`, "", fx);
   }
 
   // Rewrite on a scratch copy: plan, apply, and the stale refusal.

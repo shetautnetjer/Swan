@@ -169,7 +169,7 @@ fn child_env(l: const Langs&, extra: const u8[:]) -> u8[>..] {
     var path: u8[>..] = [];
     if l.venv.len > 0 { format(path, l.venv, "/bin:"); }
     var jh: u8[>..] = [];
-    if l.java {
+    if l.java || l.kt {
         jh = java_home(swan_home());
         if jh.len > 0 { format(path, jh, "/bin:"); }
     }
@@ -699,7 +699,9 @@ fn map_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> bo
                      lang_fingerprint(repo, [".rs"], ["Cargo.toml", "Cargo.lock"]));
     }
 
-    if l.java {
+    // scip-java indexes Java, and Kotlin built with Gradle (its compiler
+    // plugin follows the current Kotlin, 2.4 as of scip-java 0.13.2).
+    if l.java || (l.kt && l.gradle) {
         let target = str(out, "/index-java.scip");
         var a: u8[>..] = [];
         arg(a, str(home, "/.tools/scip-java/scip-java"));
@@ -713,8 +715,28 @@ fn map_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> bo
             write_file(cfg, "{\"dependencies\":[],\"jvm\":\"21\"}\n");
             arg(a, str("--scip-config=", cfg));
         }
-        add_lang_job("scip-java", target, a, child_env(l, ""),
-                     lang_fingerprint(repo, [".java"], ["pom.xml", "build.gradle", "build.gradle.kts"]));
+        var genv: u8[>..] = [];
+        if l.gradle {
+            // The build runs with Swan's Gradle home and, for Android, Swan's
+            // SDK. scip-java's init script cannot run with the configuration
+            // cache or isolated projects, which newer builds turn on. Note
+            // its `clean`: the repo's build/ output is rebuilt.
+            arg(a, "--");
+            arg(a, "-Dorg.gradle.configuration-cache=false");
+            arg(a, "-Dorg.gradle.isolated-projects=false");
+            arg(a, "-Dorg.gradle.jvmargs=-Xmx3g");
+            arg(a, "-Dkotlin.daemon.jvmargs=-Xmx3g");
+            for t in ["clean", "scipPrintDependencies", "scipCompileAll"] { arg(a, t); }
+            genv.append(env_entry("GRADLE_USER_HOME", str(home, "/.tools/gradle-home")));
+            let sdk = str(home, "/.tools/android-sdk");
+            if file_exists(str(sdk, "/licenses/android-sdk-license")) {
+                genv.append(env_entry("ANDROID_HOME", sdk));
+                genv.append(env_entry("ANDROID_SDK_ROOT", sdk));
+            }
+        }
+        add_lang_job("scip-java", target, a, child_env(l, genv),
+                     lang_fingerprint(repo, [".java", ".kt", ".kts"], ["pom.xml", "build.gradle", "build.gradle.kts",
+                                                                       "settings.gradle", "settings.gradle.kts"]));
     }
 
     if l.c || l.cuda {

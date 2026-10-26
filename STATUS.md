@@ -183,6 +183,23 @@ as_of: 2026-10-25
   outlived swan serve. The Gradle daemon is in a session of its own and is
   left to its idle timeout.
 
+## 2026-10-26: Kotlin, step 3 (the full map through Gradle)
+
+- `swan map` runs scip-java on Kotlin Gradle projects too (it indexes Java
+  and Kotlin), with Swan's Gradle home and, once its license is accepted,
+  Swan's Android SDK (.tools/android-sdk; Mani accepted Google's terms
+  himself). Configuration cache and isolated projects are turned off for
+  the run (scip-java's init script cannot run with them), the build JVMs
+  keep to 3 GB, and scip-java's `clean` rebuilds the repo's build/ output.
+- tiny-kt (Kotlin 2.4.21): mapped in 5.6 s warm, about 1.2 GB peak;
+  find_implementations and get_callers answer from it. Kotlin symbols are
+  labelled kotlin by their file.
+- android/nowinandroid does not index yet: it uses Kotlin 2.3.0, and
+  scip-java 0.13.2's Kotlin compiler plugin follows Kotlin 2.4
+  (ClassNotFoundException: ExtensionPointDescriptor in kotlinc). A project
+  on current Kotlin works; Mani's new app will start there. Its Gradle
+  build otherwise ran (3.6 min first time, 3.5 GB peak).
+
 ## Next
 
 1. Bake-off reported 2026-10-25 (README "Against the code-map bake-off"):

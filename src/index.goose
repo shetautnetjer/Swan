@@ -424,6 +424,8 @@ fn index_main(dir: const u8[:], db_path: const u8[:], root: const u8[:], refresh
     meta("files", str(hashes.count));
     swan_finalize(ins_meta);
 
+    // scip-java names Kotlin symbols like Java ones; the file says which.
+    exec_or_die(db, "UPDATE symbols SET language = 'kotlin' WHERE language = 'java' AND (def_file LIKE '%.kt' OR def_file LIKE '%.kts');");
     exec_or_die(db, "COMMIT;");
     if !refresh { exec_or_die(db, INDEXES); }
     swan_db_close(db);

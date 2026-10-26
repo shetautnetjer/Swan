@@ -1,5 +1,6 @@
-// Live Kotlin answers from JetBrains' Kotlin language server: maps a copy of
-// fixtures/tiny-kt, then asks for diagnostics before and after an edit. The
+// Kotlin end to end: maps a copy of fixtures/tiny-kt (scip-java through its
+// Gradle build), checks the map, then asks JetBrains' Kotlin language server
+// for diagnostics before and after an edit. The
 // first run imports the Gradle build (Gradle fetches itself and the Kotlin
 // plugin into .tools/gradle-home), which takes minutes; later runs reuse it.
 //
@@ -27,11 +28,19 @@ async function tool(name: string, args: any) {
   console.log(`  ${name} ${JSON.stringify(args)}: ${ms.toFixed(0)} ms`);
   return { ok: !r.isError, body: JSON.parse(r.content[0].text), ms };
 }
+
+
 let failures = 0;
 const check = (what: string, ok: boolean, detail: unknown = "") => {
   console.log(`${ok ? "ok  " : "FAIL"} ${what}${ok ? "" : `\n     ${JSON.stringify(detail).slice(0, 600)}`}`);
   if (!ok) failures++;
 };
+// The map itself: scip-java through the repo's Gradle build.
+const q = (...a: string[]) => JSON.parse(Bun.spawnSync(["bin/swan", "query", "data/kt-live/out/swan.db", ...a], { stdout: "pipe" }).stdout.toString());
+check("kotlin map: Square and Circle implement Shape",
+  q("impls", "Shape").implementations.map((s: any) => s.name_path).sort().join(",") === "Circle,Square");
+check("kotlin map: main calls totalArea",
+  q("callers", "totalArea").callers.some((c: any) => c.name_path === "main"));
 
 const rel = "src/main/kotlin/demo/Main.kt";
 const file = `data/kt-live/repo/${rel}`;
