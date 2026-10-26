@@ -107,5 +107,32 @@ if (run("java")) {
     !ren.isError && renamed.includes("static double sumOfAreas(") && renamed.includes("println(sumOfAreas("), ren);
 }
 
+if (run("cuda")) {
+  // scip-clang in clang's CUDA mode, with NVIDIA's headers from pip wheels and
+  // clang's builtin CUDA headers; no nvcc, no GPU.
+  const w = "data/cuda-check";
+  sh(["rm", "-rf", w]);
+  sh(["mkdir", "-p", w]);
+  sh(["cp", "-r", "fixtures/tiny-cuda", `${w}/repo`]);
+  sh(["bin/swan", "map", `${w}/repo`, `${w}/map`]);
+  sh(["bin/swan", "check", `${w}/repo`, `${w}/map`]);
+  const q = (...a: string[]) => JSON.parse(sh(["bin/swan", "query", `${w}/map/swan.db`, ...a]));
+  const chain = q("callers", "scale").callers.map((c: any) => `${c.name_path}@${c.distance}`);
+  check("cuda: callers of the device function scale(): scaled_kernel, then launch_scaled (a <<<>>> launch), then main",
+    chain.join(",") === "scaled_kernel@1,launch_scaled@2,main@3", chain);
+  check("cuda: the kernel launch add_kernel<<<...>>> is a reference from launch_add",
+    q("refs", "add_kernel")[0].references.some((r: any) => r.in_symbol === "launch_add"));
+  check("cuda: clang finds no errors in the clean fixture", q("diagfile", ".").map_total.errors === 0);
+  const r = Bun.spawnSync(["bin/swan", "serve", `${w}/map/swan.db`], {
+    stdin: Buffer.from(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "replace_symbol_body",
+      arguments: { name_path: "scale", relative_path: "vec.cuh", body: "__device__ inline float scale(float x, float k, float bias) { return x * k + bias; }" } } }) + "\n"),
+    stdout: "pipe" });
+  check("cuda: replace_symbol_body on a __device__ function in a .cuh header", !JSON.parse(r.stdout.toString()).result.isError);
+  sh(["bin/swan", "check", `${w}/repo`, `${w}/map`]);
+  const diag = q("diag", "scale", "vec.cuh").diagnostics;
+  check("cuda: clang's error for the old call lands in scaled_kernel",
+    diag.some((d: any) => d.severity === "error" && d.in_symbol === "scaled_kernel" && d.distance === 1), diag);
+}
+
 console.log(failures ? `${failures} check(s) failed` : "all language checks passed");
 process.exit(failures ? 1 : 0);

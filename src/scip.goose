@@ -199,7 +199,7 @@ fn language_of(sym: const u8[:]) -> const u8[:] {
     let sp = find(sym, " ");
     let scheme = if sp > 0 { sym[..sp] } else { sym };
     if scheme == "rust-analyzer" { return "rust"; }
-    if scheme == "scip-clang" { return "c++"; }
+    if scheme == "scip-clang" || scheme == "cxx" { return "c++"; }   // scip-clang writes "cxx"
     if scheme == "scip-dotnet" { return "csharp"; }
     if starts_with(scheme, "scip-") { return scheme[5..]; }
     return scheme;

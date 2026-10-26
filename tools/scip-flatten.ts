@@ -83,6 +83,9 @@ if (!indexPath || !outDir) {
 // Rows per document, in document order, so each file's rows stay together.
 const occByDoc = new Map<string, string[]>();
 const rustDocs: { path: string; taken: Set<string> }[] = [];
+// C, C++ and CUDA definitions without an enclosing range (scip-clang writes
+// none), whose spans cBodies() works out from the source.
+const cDefs: { path: string; symbol: string; line: number; col: number }[] = [];
 const ext: string[] = [];
 const rel: string[] = [];
 const syms = new Map<string, string>();
@@ -154,6 +157,43 @@ function rustImplLinks(path: string, pending: { range: number[]; symbol: string;
 }
 
 const defined = new Set<string>();
+
+// scip-clang gives no enclosing ranges, so Swan could not say which function
+// a use sits in, nor edit a function by symbol. For each function or type
+// definition, this finds its body in the source: from the name, the first
+// '{' before any ';' (a ';' first means a declaration, which has no body),
+// to its matching '}', skipping comments, strings and character literals.
+// The span starts at the definition's line, where its return type or
+// keyword sits.
+function cBodies() {
+  const texts = new Map<string, string[]>();
+  for (const d of cDefs) {
+    let lines = texts.get(d.path);
+    if (!lines) {
+      try { lines = readFileSync(join(repoRoot, d.path), "utf8").split("\n"); } catch { continue; }
+      texts.set(d.path, lines);
+    }
+    let l = d.line, c = d.col, depth = 0, started = false, done = false;
+    let inStr = "", inBlock = false;
+    scan: while (l < lines.length) {
+      const line = lines[l];
+      while (c < line.length) {
+        const ch = line[c], two = line.slice(c, c + 2);
+        if (inBlock) { if (two === "*/") { inBlock = false; c += 2; continue; } c++; continue; }
+        if (inStr) { if (ch === "\\") { c += 2; continue; } if (ch === inStr) inStr = ""; c++; continue; }
+        if (two === "//") break;
+        if (two === "/*") { inBlock = true; c += 2; continue; }
+        if (ch === '"' || ch === "'") { inStr = ch; c++; continue; }
+        if (!started && ch === ";") break scan;
+        if (ch === "{") { depth++; started = true; }
+        else if (ch === "}" && started && --depth === 0) { done = true; break scan; }
+        c++;
+      }
+      l++; c = 0;
+    }
+    if (done) ext.push([d.symbol, d.path, d.line, 0, l, c + 1].join("\t"));
+  }
+}
 
 // scip-java writes method implementation links both ways (Shape#area() ->
 // Circle#area() as well as Circle#area() -> Shape#area()). The owners' own
@@ -317,6 +357,8 @@ root.fields((f, _wt, r) => {
   for (const { range, enclosing, symbol, roles } of pending) {
     if (!symbol || symbol.startsWith("local ")) continue;
     if (roles & ROLE_DEFINITION) defined.add(symbol);
+    if ((roles & ROLE_DEFINITION) && enclosing.length < 3 && symbol.startsWith("cxx ") && /(\)\.|#)$/.test(symbol))
+      cDefs.push({ path, symbol, line: range[0], col: range[1] });
     rows.push([symbol, path, ...span(range), roles & ROLE_DEFINITION ? "def" : "ref"].join("\t"));
     if (enclosing.length >= 3) ext.push([symbol, path, ...span(enclosing)].join("\t"));
   }
@@ -324,6 +366,7 @@ root.fields((f, _wt, r) => {
 }
 
 if (repoRoot) rustMacroUses();
+if (repoRoot) cBodies();
 dropReverseImplLinks();
 const occ = [...occByDoc.values()].flat();
 

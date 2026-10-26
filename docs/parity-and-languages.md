@@ -154,6 +154,31 @@ workspace (21 .rs files), mapped together with its one Python file.**
   tools itself, but neither is installed here, and `swan check` skips javac
   for them.
 
+**CUDA (and C/C++): scip-clang 0.4.1 on `fixtures/tiny-cuda` (two .cu files
+and a .cuh header). No nvcc, no CUDA toolkit, no GPU here.**
+- scip-clang supports CUDA through clang's CUDA mode. It needs clang's
+  builtin CUDA headers (`__clang_cuda_runtime_wrapper.h`) and the CUDA
+  headers. Swan gets both without installing either:
+  - clang 21's header folder from a sparse checkout (8 MB), plus a stand-in
+    `clang++` that answers the two questions scip-clang asks it;
+  - NVIDIA's pip wheels (runtime, nvcc's libdevice, cccl, curand), linked
+    into the layout `--cuda-path` expects.
+- With no compile_commands.json, `swan map` writes one outside the repo:
+  host-side CUDA, `sm_80`, the repo root on the include path.
+- scip-clang writes no enclosing ranges, so the flattener finds each
+  function's body by matching its braces in the source. Callers, edits and
+  diagnostics then work as in other languages.
+- Verified: the call chain `main` -> `launch_scaled` -> `scaled_kernel`
+  (through a `<<<...>>>` launch) -> the `__device__` function `scale`.
+  Kernel launches count as references. `replace_symbol_body` works in a
+  `.cuh`. Diagnostics come from clang's own frontend, run by scip-clang with
+  `--show-compiler-diagnostics`: changing `scale`'s signature puts the error
+  in `scaled_kernel`.
+- Limits: host-side only (device-only code paths are parsed, not checked as
+  nvcc would), one GPU architecture, and repos with their own build flags
+  should provide a compile_commands.json (CMake:
+  `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON`).
+
 What Swan must change for many languages: run the right indexer per
 language (detect by files present), store a `language` column, and fix two
 TypeScript-specific spots. `kind_word` reads scip-typescript's signature

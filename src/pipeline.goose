@@ -10,6 +10,7 @@
 import std;
 import os;
 import json;
+import dictionary;
 
 extern fn swan_realpath(path: const u8[:], out: u8[>..]&) -> bool;
 
@@ -21,7 +22,7 @@ fn abs_path(p: const u8[:]) -> u8[>..] {
 
 // What a repo holds, found by walking it.
 struct Langs {
-    ts: bool, js: bool, py: bool, rs: bool, java: bool,
+    ts: bool, js: bool, py: bool, rs: bool, java: bool, c: bool, cuda: bool,
     tsconfig: bool, cargo: bool, maven: bool, gradle: bool,
     venv: u8[..2048],           // a virtualenv inside the repo, if any
 }
@@ -59,7 +60,7 @@ fn each_file<F>(repo: const u8[:]) {
 }
 
 fn detect(repo: const u8[:]) -> Langs {
-    var l = Langs { ts: false, js: false, py: false, rs: false, java: false,
+    var l = Langs { ts: false, js: false, py: false, rs: false, java: false, c: false, cuda: false,
                     tsconfig: file_exists(str(repo, "/tsconfig.json")),
                     cargo: file_exists(str(repo, "/Cargo.toml")),
                     maven: file_exists(str(repo, "/pom.xml")),
@@ -80,9 +81,67 @@ fn detect(repo: const u8[:]) -> Langs {
             l.rs = true;
         } else if ends_with(name, ".java") {
             l.java = true;
+        } else if ends_with(name, ".cu") || ends_with(name, ".cuh") {
+            l.cuda = true;
+        } else if is_c_source(name) || ends_with(name, ".h") || ends_with(name, ".hpp") || ends_with(name, ".hh") {
+            l.c = true;
         }
     };
     return l;
+}
+
+fn is_c_source(name: const u8[:]) -> bool {
+    ends_with(name, ".c") || ends_with(name, ".cc") || ends_with(name, ".cpp") || ends_with(name, ".cxx")
+}
+
+// The CUDA toolkit: $CUDA_PATH, /usr/local/cuda, or the headers-only one
+// scripts/fetch-tools.sh assembles in .tools/cuda-sdk from NVIDIA's pip
+// wheels (enough to index; nvcc itself is not needed).
+fn cuda_path(home: const u8[:]) -> u8[>..] {
+    var p: u8[>..] = [];
+    if env("CUDA_PATH", p) && p.len > 0 { return p; }
+    p.clear();
+    if is_dir("/usr/local/cuda/include") { p.append("/usr/local/cuda"); return p; }
+    format(p, home, "/.tools/cuda-sdk");
+    return p;
+}
+
+// A compile_commands.json for repos without one, outside the repo: every C,
+// C++ and CUDA source, with the repo root on the include path. CUDA is
+// compiled host-side by clang's CUDA mode against cuda_path.
+fn write_compdb(repo: const u8[:], home: const u8[:], path: const u8[:]) -> i64 {
+    let cuda = cuda_path(home);
+    var j: u8[>..] = [];
+    j.push('[');
+    var n = 0;
+    each_file(repo) { full, name =>
+        let is_cu = ends_with(name, ".cu");
+        if is_cu || is_c_source(name) {
+            if n > 0 { j.push(','); }
+            n++;
+            j.append("{\"directory\":");
+            json::format_string(j, repo);
+            j.append(",\"file\":");
+            json::format_string(j, full);
+            j.append(",\"arguments\":[");
+            if is_cu {
+                j.append("\"clang++\",\"-x\",\"cuda\",");
+                json::format_string(j, str("--cuda-path=", cuda));
+                j.append(",\"--cuda-gpu-arch=sm_80\",\"--cuda-host-only\",\"-nocudalib\",\"-std=c++17\",");
+            } else if ends_with(name, ".c") {
+                j.append("\"clang\",\"-std=c11\",");
+            } else {
+                j.append("\"clang++\",\"-std=c++17\",");
+            }
+            json::format_string(j, str("-I", repo));
+            j.append(",\"-c\",");
+            json::format_string(j, full);
+            j.append("]}");
+        }
+    };
+    j.append("]\n");
+    write_file(path, j);
+    return n;
 }
 
 // The JDK: $JAVA_HOME, else the one scripts/fetch-tools.sh puts in .tools/jdk.
@@ -111,7 +170,14 @@ fn child_env(l: const Langs&, extra: const u8[:]) -> u8[>..] {
         jh = java_home(swan_home());
         if jh.len > 0 { format(path, jh, "/bin:"); }
     }
-    env("PATH", path);
+    var p0: u8[>..] = [];
+    env("PATH", p0);
+    if (l.c || l.cuda) && !has_clang(p0) {
+        // scip-clang asks `clang++` only where clang's builtin headers are;
+        // .tools/llvm has those headers and a stand-in that answers.
+        format(path, swan_home(), "/.tools/llvm/bin:");
+    }
+    path.append(p0);
     var e: u8[>..] = [];
     format(e, "PATH=", path);
     arg(vars, e);
@@ -132,6 +198,12 @@ fn child_env(l: const Langs&, extra: const u8[:]) -> u8[>..] {
     arg(vars, e);
     vars.append(extra);
     return vars;
+}
+
+fn has_clang(path: const u8[:]) -> bool {
+    var found = false;
+    each_split(path, ':') { d => if !found && file_exists(str(d, "/clang++")) { found = true; } };
+    return found;
 }
 
 // One more environment entry, for child_env's `extra`.
@@ -166,7 +238,7 @@ fn map_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> bo
     let bin = str(home, "/tools/node_modules/.bin/");
     let l = detect(repo);
     format(report, "languages:", if l.ts { " typescript" } else { "" }, if l.js { " javascript" } else { "" },
-           if l.java { " java" } else { "" },
+           if l.java { " java" } else { "" }, if l.c { " c/c++" } else { "" }, if l.cuda { " cuda" } else { "" },
            if l.py { " python" } else { "" }, if l.rs || l.cargo { " rust" } else { "" },
            if l.venv.len > 0 { str(" (venv ", l.venv, ")") } else { str("") }, "\n");
     // Edits after this moment make answers stale (src/fresh.goose).
@@ -278,6 +350,25 @@ fn map_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> bo
         }
         var o: u8[>..] = [];
         if run_step("scip-java", a, repo, child_env(l, ""), 3600000, o) == 0 { arg(scips, target); }
+        else { ok = false; }
+    }
+
+    if l.c || l.cuda {
+        let target = str(out, "/index-cxx.scip");
+        delete_file(target);
+        var compdb: u8[>..] = [];
+        if file_exists(str(repo, "/compile_commands.json")) { format(compdb, repo, "/compile_commands.json"); }
+        else if file_exists(str(repo, "/build/compile_commands.json")) { format(compdb, repo, "/build/compile_commands.json"); }
+        else {
+            format(compdb, out, "/compile_commands.json");
+            write_compdb(repo, home, compdb);
+        }
+        var a: u8[>..] = [];
+        arg(a, str(home, "/.tools/scip-clang/scip-clang"));
+        arg(a, str("--compdb-path=", compdb));
+        arg(a, str("--index-output-path=", target));
+        var o: u8[>..] = [];
+        if run_step("scip-clang", a, repo, child_env(l, ""), 3600000, o) == 0 { arg(scips, target); }
         else { ok = false; }
     }
 
@@ -448,6 +539,29 @@ fn parse_javac(text: const u8[:], repo: const u8[:], rows: u8[>..]&) -> i64 {
     return n;
 }
 
+// clang: `path:line:col: error: message` (it prints each diagnostic once per
+// compilation side, host and device, so repeats are dropped).
+fn parse_clang(text: const u8[:], repo: const u8[:], rows: u8[>..]&) -> i64 {
+    var n = 0;
+    var seen = dictionary<const u8[:], bool> {};
+    each_split(text, '\n') { line =>
+        guard starts_with(line, "/") && !seen.contains(line);
+        let parts = split(line, ':');
+        guard parts.len >= 5;
+        let ln, ok1 = parse_int(parts[1]);
+        let cn, ok2 = parse_int(parts[2]);
+        guard ok1 && ok2;
+        let sev = trim(parts[3]);
+        guard sev == "error" || sev == "warning" || sev == "fatal error";
+        seen.insert(line, true);
+        let msg_at = find(line, str(parts[3], ":")) + parts[3].len + 1;
+        put_row(rows, relative_to(repo, parts[0]), ln - 1, cn - 1, ln - 1, cn - 1,
+                if sev == "warning" { "warning" } else { "error" }, "clang", "", trim(line[msg_at..]));
+        n++;
+    };
+    return n;
+}
+
 fn check_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> bool {
     let repo = abs_path(repo_arg);
     let out = abs_path(out_arg);
@@ -534,6 +648,28 @@ fn check_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> 
         format(ran, " javac:", parse_javac(e, repo, rows));
     } else if l.java {
         format(ran, " javac: skipped (Maven/Gradle repo; its build tool is not run yet)");
+    }
+    if l.c || l.cuda {
+        // No nvcc needed: clang's own frontend, as scip-clang runs it, reports
+        // the errors (CUDA in host mode), from the same compile commands.
+        var compdb: u8[>..] = [];
+        if file_exists(str(repo, "/compile_commands.json")) { format(compdb, repo, "/compile_commands.json"); }
+        else if file_exists(str(repo, "/build/compile_commands.json")) { format(compdb, repo, "/build/compile_commands.json"); }
+        else {
+            format(compdb, out, "/compile_commands.json");
+            write_compdb(repo, home, compdb);
+        }
+        var a: u8[>..] = [];
+        arg(a, str(home, "/.tools/scip-clang/scip-clang"));
+        arg(a, "--show-compiler-diagnostics");
+        arg(a, str("--compdb-path=", compdb));
+        arg(a, str("--index-output-path=", out, "/check-cxx.scip"));
+        var o: u8[>..] = [];
+        var e: u8[>..] = [];
+        let t0 = clock();
+        swan_run(a, repo, child_env(l, ""), 3600000, o, e);
+        write_stderr(str("clang (via scip-clang): ", ((clock() - t0) * 1000.0) as i64, " ms\n"));
+        format(ran, " clang:", parse_clang(e, repo, rows));
     }
     guard ran.len > 0 else { format(report, "no checker for the languages in ", repo); return false; }
     write_file(str(out, "/diagnostics.tsv"), rows);
