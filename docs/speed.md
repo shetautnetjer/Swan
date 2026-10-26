@@ -81,3 +81,35 @@ and requires identical rows.
 | Python research repo, first map | 63.8 s | 64.2 s (unchanged) |
 | Rust workspace (copy), first map | 5.4 s | 5.5 s (unchanged) |
 | `get_callers` depth 3, AEON | 23 to 29 ms | 9.5 to 12 ms |
+
+## Third pass (2026-10-26): an edit reindexes only what it touches
+
+TypeScript chunks each load the shared code, about 7 s on AEON, so rerunning
+even one costs most of a full map. Now:
+
+- The chunk plan is kept while the set of files is the same, so an edit no
+  longer moves files between chunks.
+- The changed files and the files that use their symbols (by the last map)
+  are indexed as a small run of their own, a *layer*. Layers are flattened
+  before the chunks, and the first rows for a file win, so the newest layer
+  wins. Older layers are kept. Past 6 layers, or once the layers cover a
+  quarter of the files, the chunks run again and the layers go.
+- `tsc --listFilesOnly` is kept with a key of the file names and the config,
+  and asked again only when files come or go.
+- Files with `/// <reference types=...>` go into every chunk and layer, as
+  the .d.ts files do: they bring ambient types such as bun:test, which a
+  chunk without them missed.
+
+AEON copy (2,361 files), each a one-line edit:
+
+| Edit | Files reindexed | swan map | Before |
+| --- | --- | --- | --- |
+| a file 1 other file uses | 2 | 2.0 s | 8.4 s |
+| a file 8 others use | 9 | 3.1 s | 9.3 s |
+| src/backend/backend.ts (266 users) | 267 | 7.8 s | 9.9 s |
+| nothing changed | 0 | 0.07 s | 1.7 s |
+
+After that series, the map matches a fresh one on 713,233 of 713,268
+occurrence rows. The 35 that differ are scip-typescript's order-dependent
+counters for repeated anonymous names (`text0` against `text2`), which also
+differ between two fresh chunked maps.

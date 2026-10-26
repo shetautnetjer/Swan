@@ -327,14 +327,21 @@ fn plan_python(repo: const u8[:], k: i64) -> u8[>..] {
 // largest first, each into the lightest chunk. Returns one line per chunk,
 // files separated by tabs, and the declaration files as `decls`; nothing
 // when one run will do.
-fn plan_ts(repo: const u8[:], listing: const u8[:], k: i64, decls: u8[>..]&) -> u8[>..] {
+fn plan_ts(repo: const u8[:], listing: const u8[:], k: i64, decls: u8[>..]&, refs: u8[>..]&) -> u8[>..] {
     var files: u8[>..] = [];
     var sizes: i64[>..] = [];
     each_split(listing, '\n') { raw =>
         let f = trim(raw);
         if f.len > repo.len && starts_with(f, repo) && f[repo.len] == '/' && find(f, "/node_modules/") < 0 {
             if ends_with(f, ".d.ts") { decls.append(f); decls.push('\n'); }
-            else { files.append(f); files.push('\n'); sizes.push(max(swan_file_size(f), 1)); }
+            else {
+                files.append(f); files.push('\n'); sizes.push(max(swan_file_size(f), 1));
+                // A file with `/// <reference types=...>` brings ambient types
+                // (bun-types' "bun:test", say) to whatever is compiled with it,
+                // so every chunk gets it, as it gets the .d.ts files.
+                var head: u8[>..] = [];
+                if read_file(f, head) && find(head[..min(head.len, 4096)], "/// <reference") >= 0 { refs.append(f); refs.push('\n'); }
+            }
         }
     };
     var plan: u8[>..] = [];
@@ -392,6 +399,33 @@ fn lang_fingerprint(repo: const u8[:], endings: const u8[:][:], roots: const u8[
         if file_exists(p) { h = hash_combine(h, hash(str(p, "\t", swan_file_size(p), "\t", swan_mtime_ns(p)))); }
     }
     return h;
+}
+
+// Whether two chunk plans (lines of tab-separated files) hold the same files.
+fn same_file_set(a: const u8[:], b: const u8[:]) -> bool {
+    var x: u8[>..] = [];
+    var y: u8[>..] = [];
+    each_split(a, '\n') { l => each_split(l, '\t') { f => if f.len > 0 { format(x, f, "\n"); } }; };
+    each_split(b, '\n') { l => each_split(l, '\t') { f => if f.len > 0 { format(y, f, "\n"); } }; };
+    var xs = split(x, '\n');
+    var ys = split(y, '\n');
+    guard xs.len == ys.len else { return false; }
+    sort(xs) { p, q => compare(p, q) < 0 };
+    sort(ys) { p, q => compare(p, q) < 0 };
+    for v, i in xs { if v != ys[i] { return false; } }
+    return true;
+}
+
+fn contains_line_prefix(lines: const u8[:], p: const u8[:]) -> bool {
+    var yes = false;
+    each_split(lines, '\n') { l => if !yes && starts_with(l, p) { yes = true; } };
+    return yes;
+}
+
+fn contains_line(lines: const u8[:], s: const u8[:]) -> bool {
+    var yes = false;
+    each_split(lines, '\n') { l => if !yes && l == s { yes = true; } };
+    return yes;
 }
 
 fn count_lines(s: const u8[:]) -> i64 {
@@ -564,16 +598,154 @@ fn map_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> bo
         let others = (if l.py { count_lines(plan_python(repo, min(jobs_limit(), 6))) } else { 0 }) +
                      (if l.cargo { 1 } else { 0 }) + (if l.java { 1 } else { 0 }) + (if l.c || l.cuda { 1 } else { 0 });
         let ts_k = jobs_limit() - others;
+        // tsc's list changes only when files come or go or the config
+        // changes, so it is kept with a key of those and asked again only then.
+        var names_key: u64 = 0;
+        each_file(repo) { full, name =>
+            for e in [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"] {
+                if ends_with(name, e) { names_key = hash_combine(names_key, hash(full)); }
+            }
+        };
+        for r in ["tsconfig.json", "package.json"] {
+            let pth = str(repo, "/", r);
+            if file_exists(pth) { names_key = hash_combine(names_key, hash(str(pth, "\t", swan_file_size(pth), "\t", swan_mtime_ns(pth)))); }
+        }
         var listing: u8[>..] = [];
-        let listed = ts_k >= 2 && run_step("tsc --listFilesOnly", la, repo, child_env(l, ""), 600000, listing) == 0;
+        var cached: u8[>..] = [];
+        read_file(str(out, "/tsc-files.txt"), cached);
+        let key_line = str(names_key, "\n");
+        var listed = false;
+        if ts_k >= 2 && starts_with(cached, key_line) {
+            listing.append(cached[key_line.len..]);
+            listed = true;
+        } else if ts_k >= 2 && run_step("tsc --listFilesOnly", la, repo, child_env(l, ""), 600000, listing) == 0 {
+            listed = true;
+            write_file(str(out, "/tsc-files.txt"), str(key_line, listing));
+        }
         var decls: u8[>..] = [];
-        let chunks: u8[>..] = if listed { plan_ts(repo, listing, ts_k, decls) } else { str("") };
+        var refs: u8[>..] = [];
+        var chunks: u8[>..] = if listed { plan_ts(repo, listing, ts_k, decls, refs) } else { str("") };
+        // Keep the last map's chunks while the set of files is the same, so
+        // that an edit reruns only the chunks it touches (sizes moving files
+        // between chunks would rerun them all).
+        var same_plan = false;
+        if chunks.len > 0 {
+            var prev_plan: u8[>..] = [];
+            read_file(str(out, "/typescript-chunks.txt"), prev_plan);
+            if prev_plan.len > 0 && same_file_set(prev_plan, chunks) { chunks.clear(); chunks.append(prev_plan); same_plan = true; }
+            write_file(str(out, "/typescript-chunks.txt"), chunks);
+        }
         if chunks.len == 0 {
             add_lang_job("scip-typescript", target, a, child_env(l, ""), ts_fp);
         } else {
             // Each chunk extends the project's tsconfig (or Swan's own) with its
             // own include list, plus every .d.ts, since declarations such as
             // module augmentations shape how the chunk's code resolves.
+            //
+            // Reuse, as for Python pieces: a chunk whose files, the shared
+            // declarations and the config are unchanged, and none of whose
+            // files use a symbol defined in a changed file (by the last map),
+            // keeps its last index.
+            var stamps: u8[>..] = [];
+            var shared: u64 = 0;
+            for r in ["tsconfig.json", "package.json"] {
+                let pth = str(repo, "/", r);
+                if file_exists(pth) { shared = hash_combine(shared, hash(str(r, "\t", swan_file_size(pth), "\t", swan_mtime_ns(pth)))); }
+            }
+            shared = hash_combine(shared, hash(base));
+            each_split(decls, '\n') { f =>
+                if f.len > repo.len {
+                    let st = str(f[repo.len + 1..], "\t", swan_file_size(f), "\t", swan_mtime_ns(f));
+                    shared = hash_combine(shared, hash(st));
+                    format(stamps, st, "\n");
+                }
+            };
+            each_split(chunks, '\n') { chunk => each_split(chunk, '\t') { f =>
+                if f.len > repo.len { format(stamps, f[repo.len + 1..], "\t", swan_file_size(f), "\t", swan_mtime_ns(f), "\n"); }
+            }; };
+            var prev_stamps: u8[>..] = [];
+            read_file(str(out, "/typescript-files.tsv"), prev_stamps);
+            let dirty = dependents_of_changes(out, stamps, prev_stamps);
+            write_file(str(out, "/typescript-files.tsv"), stamps);
+            // A small edit: rather than rerun whole chunks (each loads the
+            // shared code, about 7 s on AEON), index just the changed files
+            // and their users as a run of their own, a layer. Layers are
+            // listed newest first, before the chunks, and the flattener keeps
+            // the first rows it sees for a file, so the newest wins. Earlier
+            // layers are kept as they are. When the layers cover more than a
+            // quarter of the files, or there are more than 6, the chunks run
+            // again and the layers go.
+            var prev_layers: u8[>..] = [];       // "id\tfile,file,..." per line, newest first
+            read_file(str(out, "/typescript-layers.txt"), prev_layers);
+            var nfiles = count_lines(stamps);
+            var fresh: u8[>..] = [];             // this map's changed files and their users
+            each_split(dirty, '\n') { rel =>
+                if rel.len > 0 && !contains_line(fresh, rel) && !ends_with(rel, ".d.ts") &&
+                   contains_line_prefix(stamps, str(rel, "\t")) { format(fresh, rel, "\n"); }
+            };
+            var covered: u8[>..] = [];
+            each_split(fresh, '\n') { f => if f.len > 0 { format(covered, f, "\n"); } };
+            var next_id: i64 = 0;
+            var nlayers = 0;
+            each_split(prev_layers, '\n') { line =>
+                let tab = find(line, "\t");
+                if tab > 0 {
+                    nlayers++;
+                    let id, ok = parse_int(line[..tab]);
+                    if ok && id >= next_id { next_id = id + 1; }
+                    each_split(line[tab + 1..], ',') { f => if f.len > 0 && !contains_line(covered, f) { format(covered, f, "\n"); } };
+                }
+            };
+            var chunk_files_present = true;
+            for c in count_lines(chunks) { if !file_exists(str(out, "/index-typescript-", c, ".scip")) { chunk_files_present = false; } }
+            var layers_present = true;
+            each_split(prev_layers, '\n') { line =>
+                let tab = find(line, "\t");
+                if tab > 0 && !file_exists(str(out, "/index-typescript-layer-", line[..tab], ".scip")) { layers_present = false; }
+            };
+            let use_delta = same_plan && chunk_files_present && layers_present && covered.len > 0 &&
+                            count_lines(covered) * 4 <= nfiles && nlayers + (if fresh.len > 0 { 1 } else { 0 }) <= 6;
+            if use_delta {
+                var layers: u8[>..] = [];
+                if fresh.len > 0 {
+                    let dir = str(out, "/tsproject-layer");
+                    make_dir(dir);
+                    var cfg: u8[>..] = [];
+                    cfg.append("{\"extends\":");
+                    json::format_string(cfg, base);
+                    cfg.append(",\"include\":[],\"files\":[");
+                    var first = true;
+                    each_split(fresh, '\n') { f => if f.len > 0 { if !first { cfg.push(','); } json::format_string(cfg, str(repo, "/", f)); first = false; } };
+                    each_split(decls, '\n') { f => if f.len > 0 { cfg.push(','); json::format_string(cfg, f); } };
+                    each_split(refs, '\n') { f => if f.len > 0 && !contains_line(fresh, f[repo.len + 1..]) { cfg.push(','); json::format_string(cfg, f); } };
+                    cfg.append("]}\n");
+                    write_file(str(dir, "/tsconfig.json"), cfg);
+                    let t = str(out, "/index-typescript-layer-", next_id, ".scip");
+                    var da: u8[>..] = [];
+                    arg(da, str(bin, "scip-typescript"));
+                    arg(da, "index");
+                    arg(da, "--output");
+                    arg(da, t);
+                    arg(da, "--cwd");
+                    arg(da, repo);
+                    arg(da, dir);
+                    add_job(str("scip-typescript changed files (", count_lines(fresh), ")"), t, da, child_env(l, ""), "");
+                    format(layers, next_id, "\t");
+                    var firstf = true;
+                    each_split(fresh, '\n') { f => if f.len > 0 { if !firstf { layers.push(','); } layers.append(f); firstf = false; } };
+                    layers.push('\n');
+                }
+                each_split(prev_layers, '\n') { line =>
+                    let tab = find(line, "\t");
+                    if tab > 0 {
+                        add_job("", str(out, "/index-typescript-layer-", line[..tab], ".scip"), "", "", "");
+                        format(layers, line, "\n");
+                    }
+                };
+                write_file(str(out, "/typescript-layers.txt"), layers);
+            } else {
+                write_file(str(out, "/typescript-layers.txt"), "");
+            }
             var n = 0;
             each_split(chunks[..chunks.len - 1], '\n') { chunk =>
                 let dir = str(out, "/tsproject-", n);
@@ -587,6 +759,7 @@ fn map_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> bo
                 var first = true;
                 each_split(chunk, '\t') { f => if !first { cfg.push(','); } json::format_string(cfg, f); first = false; };
                 each_split(decls, '\n') { f => if f.len > 0 { cfg.push(','); json::format_string(cfg, f); } };
+                each_split(refs, '\n') { f => if f.len > 0 && find(chunk, f) < 0 { cfg.push(','); json::format_string(cfg, f); } };
                 cfg.append("]}\n");
                 write_file(str(dir, "/tsconfig.json"), cfg);
                 let t = str(out, "/index-typescript-", n, ".scip");
@@ -598,7 +771,25 @@ fn map_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> bo
                 arg(ca, "--cwd");
                 arg(ca, repo);
                 arg(ca, dir);
-                add_lang_job(str("scip-typescript ", n, "/", count_lines(chunks)), t, ca, child_env(l, ""), ts_fp);
+                var fp = shared;
+                var touched = false;
+                each_split(chunk, '\t') { f =>
+                    if f.len > repo.len {
+                        let rel = f[repo.len + 1..];
+                        fp = hash_combine(fp, hash(str(rel, "\t", swan_file_size(f), "\t", swan_mtime_ns(f))));
+                        if !touched && contains_line(dirty, rel) { touched = true; }
+                    }
+                };
+                // A chunk a changed file's users fall in counts as changed.
+                if touched { fp = hash_combine(fp, hash(str(clock()))); }
+                if use_delta {
+                    // Kept as it is; the changed-files run covers what moved. Its
+                    // manifest line can never match, so a later full run redoes it.
+                    format(index_manifest, "scip-typescript ", n, "/", count_lines(chunks), "\tstale\t", t, "\n");
+                    add_job("", t, "", "", "");
+                } else {
+                    add_lang_job(str("scip-typescript ", n, "/", count_lines(chunks)), t, ca, child_env(l, ""), fp);
+                }
                 n++;
             };
         }
