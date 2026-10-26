@@ -460,6 +460,19 @@ fn map_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> bo
            if l.java { " java" } else { "" }, if l.c { " c/c++" } else { "" }, if l.cuda { " cuda" } else { "" },
            if l.py { " python" } else { "" }, if l.rs || l.cargo { " rust" } else { "" },
            if l.venv.len > 0 { str(" (venv ", l.venv, ")") } else { str("") }, "\n");
+    // A map from an older Swan is rebuilt from scratch, indexers included:
+    // reusing their output would skip what the new schema needs.
+    let old_db = str(out, "/swan.db");
+    if file_exists(old_db) {
+        var e: u8[>..] = [];
+        let h = swan_db_open(old_db, e);
+        var v: u8[>..] = [];
+        if h != 0 { meta_value(h, "schema_version", v); swan_db_close(h); }
+        if v != str(SCHEMA_VERSION) {
+            format(report, "map schema ", if v.len > 0 { v[..] } else { "?" }, " is older than ", SCHEMA_VERSION, ": rebuilding\n");
+            for f in ["/swan.db", "/index-manifest.tsv", "/python-pieces.tsv", "/python-files.tsv"] { delete_file(str(out, f)); }
+        }
+    }
     // Edits after this moment make answers stale (src/fresh.goose).
     write_file(str(out, "/scip-started"), "");
 

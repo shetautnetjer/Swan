@@ -21,6 +21,20 @@ fn is_test_path(p: const u8[:]) -> bool {
 
 // The symbols a name path matches, written as "targets", and their ids as a
 // SQL list ("3,17"). Empty when nothing matches.
+// How many symbols the last targets() call matched, constructors aside.
+var targets_matched = 0;
+
+// For questions about one symbol's impact (callers, callees, diagnostics),
+// several matches would merge unrelated answers, so the question is sent
+// back, as JetBrains does with an ambiguous call hierarchy. Writes the end of
+// the JSON object and returns true when it did.
+fn refuse_ambiguous(out: u8[>..]&) -> bool {
+    guard targets_matched > 1 else { return false; }
+    format(out, ",\"ambiguous\":true,\"hint\":\"", targets_matched,
+           " symbols match: pass relative_path for the file that defines the one you mean, or its full name path starting with '/'\"}");
+    return true;
+}
+
 fn targets(db: i64, pattern: const u8[:], rel: const u8[:], out: u8[>..]&) -> u8[>..] {
     var ids: u8[>..] = [];
     let sql, bind = match_sql(pattern, false);
@@ -31,10 +45,12 @@ fn targets(db: i64, pattern: const u8[:], rel: const u8[:], out: u8[>..]&) -> u8
     var err: u8[>..] = [];
     json::format_key(out, "targets");
     out.push('[');
+    targets_matched = 0;
     while swan_step(st, err) == 1 {
         if ids.len > 0 { ids.push(','); out.push(','); }
         format(ids, swan_col_int(st, 0));
         symbol_json(st, out);
+        targets_matched++;
     }
     out.push(']');
     swan_finalize(st);
@@ -60,6 +76,7 @@ fn get_callers(db: i64, pattern: const u8[:], rel: const u8[:], depth: i64, limi
     out.push('{');
     let ids = targets(db, pattern, rel, out);
     guard ids.len > 0 else { out.append(",\"callers\":[]}"); return; }
+    if refuse_ambiguous(out) { return; }
     var walk: u8[>..] = [];
     format_replaced(walk, """
         WITH RECURSIVE up(id, depth) AS (
@@ -68,7 +85,7 @@ fn get_callers(db: i64, pattern: const u8[:], rel: const u8[:], depth: i64, limi
             SELECT o.enclosing_id, up.depth + 1
             FROM up
             JOIN symbols su ON su.id = up.id AND su.kind != 'module'
-            JOIN occurrences o ON o.symbol_id = up.id AND o.is_def = 0
+            JOIN occurrences o ON o.symbol_id = up.id AND o.is_def = 0 AND o.is_import = 0
             WHERE up.depth < ?1 AND o.enclosing_id IS NOT NULL AND o.enclosing_id != up.id)
         , found AS (
             SELECT s.id, s.name_path, s.kind, s.signature, s.def_file, s.def_line, s.def_col,
@@ -152,6 +169,7 @@ fn get_callees(db: i64, pattern: const u8[:], rel: const u8[:], limit: i64, out:
     out.push('{');
     let ids = targets(db, pattern, rel, out);
     guard ids.len > 0 else { out.append(",\"callees\":[]}"); return; }
+    if refuse_ambiguous(out) { return; }
     var sql: u8[>..] = [];
     format_replaced(sql, """
         SELECT s.id, s.name_path, s.kind, s.signature, s.def_file, s.def_line, s.def_col,

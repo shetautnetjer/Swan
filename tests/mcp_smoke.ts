@@ -131,6 +131,27 @@ check("an edited file's answers say stale, others don't",
   stale[0].references.every((r: any) => !!r.stale === (r.relative_path === "src/report.ts")) &&
   staleInfo.stale_files.join(",") === "src/report.ts");
 
+const amb = await tool("get_callers", { name_path: "total" });
+check("get_callers with a name three symbols share sends the question back instead of merging",
+  amb.ambiguous === true && amb.targets.length === 3 && !amb.callers);
+const one = await tool("get_callers", { name_path: "total", relative_path: "src/format.ts" });
+check("with relative_path it answers for that one", !one.ambiguous && one.callers.some((c: any) => c.relative_path === "src/main.ts"));
+
+const ms = await tool("get_callers", { name_path: "/makeStore" });
+check("get_callers leaves import lines out: makeStore's callers are main.ts's top level and testSummary",
+  ms.callers.map((c: any) => c.name_path).sort().join(",") === "main.ts,testSummary", ms.callers);
+const msRefs = await tool("find_referencing_symbols", { name_path: "/makeStore" });
+check("find_referencing_symbols keeps them, marked import",
+  msRefs[0].references.some((r: any) => r.import === true && r.relative_path === "src/store.test.ts"));
+
+const at = await tool("get_symbol_at", { relative_path: "src/main.ts", line: 8, column: 15 });
+check("get_symbol_at main.ts:8:15 is formatItem's target, format() in src/format.ts:3",
+  at.at[0]?.name_path === "format" && at.at[0]?.relative_path === "src/format.ts" && at.at[0]?.line === 3, at);
+const atDef = await tool("get_symbol_at", { relative_path: "src/store.ts", line: 11, column: 4 });
+check("get_symbol_at on a definition says so", atDef.at[0]?.name_path === "Store/add" && atDef.at[0]?.is_definition === true, atDef);
+const atNone = await tool("get_symbol_at", { relative_path: "src/main.ts", line: 8, column: 27 });
+check("get_symbol_at on a column with nothing lists the line's symbols", atNone.nothing_at_column && atNone.on_this_line.length > 0);
+
 const info = await tool("index_info", {});
 check("index_info reports counts", Number(info.symbols) > 0 && Number(info.occurrences) > 0);
 

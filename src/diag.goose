@@ -100,6 +100,9 @@ fn get_diagnostics(db: i64, pattern: const u8[:], rel: const u8[:], depth: i64, 
         let ids = targets(db, pattern, rel, out);
         out.push(',');
         guard ids.len > 0 else { out.append("\"diagnostics\":[]}"); return true; }
+        out.pop();     // targets() is followed by a comma here; refuse_ambiguous adds its own
+        if refuse_ambiguous(out) { return true; }
+        out.push(',');
         format_replaced(scope, """
             WITH RECURSIVE up(id, distance) AS (
                 SELECT id, 0 FROM symbols WHERE id IN (#IDS#)
@@ -107,7 +110,7 @@ fn get_diagnostics(db: i64, pattern: const u8[:], rel: const u8[:], depth: i64, 
                 SELECT o.enclosing_id, up.distance + 1
                 FROM up
                 JOIN symbols su ON su.id = up.id AND su.kind != 'module'
-                JOIN occurrences o ON o.symbol_id = up.id AND o.is_def = 0
+                JOIN occurrences o ON o.symbol_id = up.id AND o.is_def = 0 AND o.is_import = 0
                 WHERE up.distance < ?1 AND o.enclosing_id IS NOT NULL),
             -- A symbol's diagnostics include those of what it holds (a class's
             -- methods). A module caller stands for its top-level code only.

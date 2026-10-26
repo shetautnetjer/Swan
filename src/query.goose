@@ -165,7 +165,7 @@ fn find_referencing_symbols(db: i64, pattern: const u8[:], rel: const u8[:], lim
                 OR substr(s.scip, 1, length(t.module) + length(t.name) + 7) = t.module || 'impl#[' || t.name || ']'
                 OR substr(s.scip, 1, length(t.module) + length(t.name) + 8) = t.module || 'impl#[`' || t.name || '<'))
         SELECT o.file, o.start_line, o.start_col, e.name_path, e.kind,
-               CASE WHEN o.symbol_id = ?1 THEN '' ELSE v.name_path END, o.by_name
+               CASE WHEN o.symbol_id = ?1 THEN '' ELSE v.name_path END, o.by_name, o.is_import
         FROM occurrences o
         JOIN symbols v ON v.id = o.symbol_id
         LEFT JOIN symbols e ON e.id = o.enclosing_id
@@ -229,6 +229,7 @@ fn find_referencing_symbols(db: i64, pattern: const u8[:], rel: const u8[:], lim
                 json::format_string(out, enc);
             }
             if swan_col_int(refs, 6) == 1 { out.append(",\"by_name\":true"); }
+            if swan_col_int(refs, 7) == 1 { out.append(",\"import\":true"); }
             var via: u8[>..] = [];
             swan_col_text(refs, 5, via);
             if via.len > 0 {
@@ -311,4 +312,74 @@ fn index_info(db: i64, out: u8[>..]&) {
     out.append(",\"stale_files\":[");
     out.append(listed);
     out.append("]}");
+}
+
+// What is at a position: the symbol whose occurrence covers line:column
+// (1-based), with its definition, signature and the symbol around it.
+// JetBrains' get_symbol_info. When nothing covers the column, the line's
+// other occurrences are listed, to help aim.
+fn get_symbol_at(db: i64, rel: const u8[:], line: i64, col: i64, out: u8[>..]&) {
+    let st = prepare_or_die(db, """
+        SELECT s.id, s.name_path, s.kind, s.signature, s.def_file, s.def_line, s.def_col,
+               s.body_start, s.body_end, s.in_repo, s.scip, o.is_def, o.by_name, o.is_import,
+               e.name_path, o.start_col, o.end_col, s.doc
+        FROM occurrences o JOIN symbols s ON s.id = o.symbol_id
+        LEFT JOIN symbols e ON e.id = o.enclosing_id
+        WHERE o.file = ?1 AND o.start_line = ?2 AND ((o.start_col <= ?3 AND o.end_col > ?3) OR ?4 = 1)
+        ORDER BY CASE WHEN o.start_col <= ?3 AND o.end_col > ?3 THEN 0 ELSE 1 END,
+                 o.end_col - o.start_col, o.start_col
+        LIMIT 20
+        """);
+    var err: u8[>..] = [];
+    var e2: u8[>..] = [];
+    fn run(any_on_line: bool) -> i64 {
+        swan_bind_text(st, 1, rel);
+        swan_bind_int(st, 2, line - 1);
+        swan_bind_int(st, 3, col - 1);
+        swan_bind_int(st, 4, if any_on_line { 1 } else { 0 });
+        var n = 0;
+        while swan_step(st, e2) == 1 {
+            if n > 0 { out.push(','); }
+            n++;
+            if swan_col_int(st, 9) == 1 {
+                symbol_json(st, out);
+                out.pop();
+            } else {
+                var s: u8[>..] = [];
+                out.append("{\"name_path\":");
+                swan_col_text(st, 1, s); json::format_string(out, s); s.clear();
+                out.append(",\"kind\":");
+                swan_col_text(st, 2, s); json::format_string(out, s); s.clear();
+                out.append(",\"signature\":");
+                swan_col_text(st, 3, s); json::format_string(out, s); s.clear();
+                out.append(",\"package\":");
+                swan_col_text(st, 10, s); json::format_string(out, package_of(s));
+            }
+            format(out, ",\"at_columns\":[", swan_col_int(st, 15) + 1, ",", swan_col_int(st, 16), "]");
+            var doc: u8[>..] = [];
+            swan_col_text(st, 17, doc);
+            if doc.len > 0 { out.append(",\"doc\":"); json::format_string(out, doc); }
+            if swan_col_int(st, 11) == 1 { out.append(",\"is_definition\":true"); }
+            if swan_col_int(st, 12) == 1 { out.append(",\"by_name\":true"); }
+            if swan_col_int(st, 13) == 1 { out.append(",\"import\":true"); }
+            var enc: u8[>..] = [];
+            swan_col_text(st, 14, enc);
+            if enc.len > 0 { out.append(",\"in_symbol\":"); json::format_string(out, enc); }
+            out.push('}');
+        }
+        swan_reset(st);
+        return n;
+    }
+    out.append("{\"at\":[");
+    let n = run(false);
+    out.push(']');
+    if n == 0 {
+        out.append(",\"nothing_at_column\":true,\"on_this_line\":[");
+        run(true);
+        out.push(']');
+    }
+    if is_stale(rel) { out.append(",\"stale\":true"); }
+    out.push('}');
+    swan_finalize(st);
+    assert(err.len == 0);
 }

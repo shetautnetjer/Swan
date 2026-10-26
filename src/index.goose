@@ -18,7 +18,7 @@ import std;
 import os;
 import dictionary;
 
-let SCHEMA_VERSION = 7;
+let SCHEMA_VERSION = 9;
 
 let SCHEMA = """
     CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
@@ -35,6 +35,7 @@ let SCHEMA = """
         name_path TEXT NOT NULL,
         kind TEXT NOT NULL,
         signature TEXT NOT NULL,
+        doc TEXT,                        -- the documentation's prose, code blocks taken out
         def_file TEXT,
         def_line INTEGER,
         def_col INTEGER,
@@ -64,7 +65,8 @@ let SCHEMA = """
         end_col INTEGER NOT NULL,
         is_def INTEGER NOT NULL,
         enclosing_id INTEGER,
-        by_name INTEGER NOT NULL DEFAULT 0   -- matched by name in a macro call, not resolved
+        by_name INTEGER NOT NULL DEFAULT 0,  -- matched by name in a macro call, not resolved
+        is_import INTEGER NOT NULL DEFAULT 0 -- the name in an import statement
     );
     """;
 
@@ -82,7 +84,7 @@ let INDEXES = """
     CREATE INDEX relationships_file ON relationships (file);
     """;
 
-struct SymMeta { sig: const u8[:], kind: i64 }   // from symbols.tsv
+struct SymMeta { sig: const u8[:], doc: const u8[:], kind: i64 }   // from symbols.tsv
 
 struct Sym {
     db_id: i64,
@@ -126,7 +128,8 @@ fn index_main(dir: const u8[:], db_path: const u8[:], root: const u8[:], refresh
         let f = split(it, '\t');
         var kind = 0;
         if f.len > 2 { let k, ok = parse_int(f[2]); if ok { kind = k; } }
-        sigs.insert(f[0], SymMeta { sig: if f.len > 4 { f[4] } else { f[0][0..0] }, kind: kind });
+        sigs.insert(f[0], SymMeta { sig: if f.len > 4 { f[4] } else { f[0][0..0] },
+                                    doc: if f.len > 5 { f[5] } else { f[0][0..0] }, kind: kind });
     };
 
     // Each file's fingerprint: its extent and occurrence rows, in order.
@@ -301,7 +304,7 @@ fn index_main(dir: const u8[:], db_path: const u8[:], root: const u8[:], refresh
     }
 
     // occurrences.tsv: symbol, file, start_line, start_col, end_line, end_col, def|ref
-    let ins_occ = prepare_or_die(db, "INSERT INTO occurrences VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)");
+    let ins_occ = prepare_or_die(db, "INSERT INTO occurrences VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)");
     var occ_count = 0;
     each_split(text[r..d], '\n') {
         guard it.len > 0;
@@ -326,6 +329,7 @@ fn index_main(dir: const u8[:], db_path: const u8[:], root: const u8[:], refresh
         swan_bind_int(ins_occ, 6, field_int(f[5]));
         swan_bind_int(ins_occ, 7, if is_def { 1 } else { 0 });
         swan_bind_int(ins_occ, 9, if f[6] == "name" { 1 } else { 0 });
+        swan_bind_int(ins_occ, 10, if f[6] == "imp" { 1 } else { 0 });
         if !is_def {
             let enc = enclosing(f[1], sl, sc);
             if enc >= 0 { swan_bind_int(ins_occ, 8, enc); }
@@ -361,7 +365,7 @@ fn index_main(dir: const u8[:], db_path: const u8[:], root: const u8[:], refresh
 
     // The definitions found in rewritten files, and their current signatures.
     let upd_sym = prepare_or_die(db, """
-        UPDATE symbols SET kind = ?2, signature = ?3, def_file = ?4, def_line = ?5, def_col = ?6,
+        UPDATE symbols SET kind = ?2, signature = ?3, doc = ?12, def_file = ?4, def_line = ?5, def_col = ?6,
                            body_start = ?7, body_end = ?8, in_repo = ?9,
                            body_start_col = ?10, body_end_col = ?11
         WHERE id = ?1
@@ -377,6 +381,7 @@ fn index_main(dir: const u8[:], db_path: const u8[:], root: const u8[:], refresh
         swan_bind_int(upd_sym, 1, s.db_id);
         swan_bind_text(upd_sym, 2, kind_word(sg, suffix, parent, sk));
         swan_bind_text(upd_sym, 3, sg);
+        if m && m.doc.len > 0 { swan_bind_text(upd_sym, 12, m.doc); }
         if s.has_def {
             swan_bind_text(upd_sym, 4, s.def_file);
             swan_bind_int(upd_sym, 5, s.line);

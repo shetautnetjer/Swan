@@ -14,8 +14,9 @@
 //
 // Writes <out-dir>/occurrences.tsv with the columns shared with the
 // code-map bake-off (symbol, file, start_line, start_col, end_line, end_col,
-// role def|ref; 0-based lines and columns) and <out-dir>/symbols.tsv
-// (symbol, display_name, kind, enclosing_symbol, first doc line) and
+// role def|ref|imp|name; 0-based lines and columns; imp marks the name in an
+// import statement) and <out-dir>/symbols.tsv
+// (symbol, display_name, kind, enclosing_symbol, first doc line, docs) and
 // <out-dir>/extents.tsv (symbol, file, start_line, start_col, end_line,
 // end_col): the whole span of each definition, from SCIP's enclosing_range,
 // which is what lets Swan say which symbol a reference sits inside, and
@@ -89,6 +90,7 @@ const clean = (s: string) =>
     // across runs and across the parallel chunks swan map splits TS into.
     .replace(/typeLiteral\d+/g, "typeLiteral");
 const ROLE_DEFINITION = 1;
+const ROLE_IMPORT = 2;   // the name in an import statement: a use, not a call
 
 const argv = process.argv.slice(2);
 let repoRoot = "";
@@ -110,11 +112,17 @@ const rel: string[] = [];
 const syms = new Map<string, string>();
 
 function symbolInfo(r: Reader, path: string) {
-  let symbol = "", display = "", kind = 0, enclosing = "", doc = "";
+  let symbol = "", display = "", kind = 0, enclosing = "", doc = "", prose = "";
   const related: string[][] = [];
   r.fields((f, wt, s) => {
     if (f === 1) symbol = clean(s.string());
-    else if (f === 3 && !doc) doc = s.string().split("\n").find((l) => l.trim() && !l.startsWith("```")) ?? "";
+    else if (f === 3) {
+      const text = s.string();
+      if (!doc) doc = text.split("\n").find((l) => l.trim() && !l.startsWith("```")) ?? "";
+      // The prose: documentation with its code blocks taken out.
+      const p = text.replace(/```[\s\S]*?```/g, "").replace(/^\s*---\s*$/gm, "").trim();
+      if (p) prose = prose ? `${prose} ${p}` : p;
+    }
     else if (f === 5 && wt === 0) kind = s.varint();
     else if (f === 6) display = s.string();
     else if (f === 8) enclosing = s.string();
@@ -129,7 +137,7 @@ function symbolInfo(r: Reader, path: string) {
     }
   });
   if (symbol && !symbol.startsWith("local ")) {
-    syms.set(symbol, [symbol, display, kind, enclosing, clean(doc).slice(0, 200)].join("\t"));
+    syms.set(symbol, [symbol, display, kind, enclosing, clean(doc).slice(0, 200), clean(prose).slice(0, 600)].join("\t"));
     // Rows need the defining file, so the refresh can replace them per file.
     if (path) for (const [other, flags] of related) rel.push([symbol, path, other, flags].join("\t"));
   }
@@ -176,6 +184,43 @@ function rustImplLinks(path: string, pending: { range: number[]; symbol: string;
 }
 
 const defined = new Set<string>();
+
+// No indexer here sets SCIP's Import role, so import statements are found
+// in the source: a reference inside one is marked "imp" (a use, not a call).
+// The statement forms per language, matched over the whole file so that
+// multi-line imports count.
+const IMPORT_FORMS: [RegExp, RegExp][] = [
+  [/\.(m|c)?[jt]sx?$/, /^[ \t]*(?:import\b[^;]*?(?:\bfrom\s*)?["'][^"']+["']|import\s+\w+\s*=\s*require\([^)]*\)|export\s+(?:type\s+)?(?:\*|\{[^}]*\})\s*(?:as\s+\w+\s*)?from\s*["'][^"']+["'])/gm],
+  [/\.pyi?$/, /^[ \t]*(?:from\s+[\w.]+\s+import\s+(?:\([^)]*\)|[^\n]*)|import\s+[^\n]*)/gm],
+  [/\.rs$/, /^[ \t]*(?:pub(?:\([^)]*\))?\s+)?use\s+[^;]*;/gm],
+  [/\.(java|kt|scala)$/, /^[ \t]*import\s+[^;\n]*;?/gm],
+];
+
+function markImports() {
+  for (const [path, rows] of occByDoc) {
+    const form = IMPORT_FORMS.find(([ext]) => ext.test(path));
+    if (!form || rows.length === 0) continue;
+    let text: string;
+    try { text = readFileSync(join(repoRoot, path), "utf8"); } catch { continue; }
+    // Statement spans as [start line, start col, end line, end col].
+    const starts = [0];
+    for (let i = 0; i < text.length; i++) if (text[i] === "\n") starts.push(i + 1);
+    const pos = (off: number) => {
+      let lo = 0, hi = starts.length - 1;
+      while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (starts[mid] <= off) lo = mid; else hi = mid - 1; }
+      return [lo, off - starts[lo]];
+    };
+    const spans: number[][] = [];
+    for (const m of text.matchAll(form[1])) spans.push([...pos(m.index!), ...pos(m.index! + m[0].length)]);
+    if (spans.length === 0) continue;
+    const inside = (l: number, c: number) =>
+      spans.some(([sl, sc, el, ec]) => (l > sl || (l === sl && c >= sc)) && (l < el || (l === el && c < ec)));
+    for (let i = 0; i < rows.length; i++) {
+      const f = rows[i].split("\t");
+      if (f[6] === "ref" && inside(+f[2], +f[3])) { f[6] = "imp"; rows[i] = f.join("\t"); }
+    }
+  }
+}
 
 // scip-clang gives no enclosing ranges, so Swan could not say which function
 // a use sits in, nor edit a function by symbol. For each function or type
@@ -409,7 +454,8 @@ root.fields((f, _wt, r) => {
     if (roles & ROLE_DEFINITION) defined.add(symbol);
     if ((roles & ROLE_DEFINITION) && enclosing.length < 3 && symbol.startsWith("cxx ") && /(\)\.|#)$/.test(symbol))
       cDefs.push({ path, symbol, line: range[0], col: range[1] });
-    rows.push([symbol, path, ...span(range), roles & ROLE_DEFINITION ? "def" : "ref"].join("\t"));
+    const role = roles & ROLE_DEFINITION ? "def" : roles & ROLE_IMPORT ? "imp" : "ref";
+    rows.push([symbol, path, ...span(range), role].join("\t"));
     if (enclosing.length >= 3) ext.push([symbol, path, ...span(enclosing)].join("\t"));
   }
 });
@@ -417,6 +463,7 @@ root.fields((f, _wt, r) => {
 
 if (repoRoot) rustMacroUses();
 if (repoRoot) cBodies();
+if (repoRoot) markImports();
 dropReverseImplLinks();
 const occ = [...occByDoc.values()].flat();
 
