@@ -83,8 +83,40 @@ check("while the map still has the two it was built with",
   mapped.body.implementations.map((s: any) => s.name_path).sort().join(",") === "Disc,Tile", mapped.body);
 writeFileSync(lib, original);
 
-const py = await tool("get_diagnostics", { relative_path: "src/missing.py", live: true });
-check("a language without a live server says so instead of failing hard", !py.ok && /no live server/.test(py.body), py.body);
+const java = await tool("get_diagnostics", { relative_path: "src/Missing.java", live: true });
+check("a language without a live server says so instead of failing hard", !java.ok && /no live server/.test(java.body), java.body);
+
+// Switching language: pyright replaces rust-analyzer in the same serve.
+cpSync("fixtures/tiny-py", `${repo}/py`, { recursive: true });
+const pyFile = `${repo}/py/shapes/__init__.py`;
+const pyOrig = readFileSync(pyFile, "utf8");
+const pyClean = await tool("get_diagnostics", { relative_path: "py/shapes/__init__.py", live: true });
+check("pyright: the clean module has no errors",
+  pyClean.ok && pyClean.body.diagnostics.every((d: any) => d.severity !== "error"), pyClean.body);
+writeFileSync(pyFile, pyOrig + "\n\ndef broken() -> int:\n    return \"text\"\n");
+const pyBroken = await tool("get_diagnostics", { relative_path: "py/shapes/__init__.py", live: true });
+check("pyright: a str returned as int is an error on the new line",
+  pyBroken.ok && pyBroken.body.diagnostics.some((d: any) => d.severity === "error" && d.line === 33), pyBroken.body);
+console.log(`     error seen ${pyBroken.ms.toFixed(0)} ms after asking`);
+writeFileSync(pyFile, pyOrig);
+const pyFixed = await tool("get_diagnostics", { relative_path: "py/shapes/__init__.py", live: true });
+check("pyright: gone again after the undo",
+  pyFixed.ok && pyFixed.body.diagnostics.every((d: any) => d.severity !== "error"), pyFixed.body);
+
+// And the TypeScript server after pyright.
+cpSync("fixtures/tiny-ts", `${repo}/ts`, { recursive: true });
+const tsFile = `${repo}/ts/src/store.ts`;
+const tsOrig = readFileSync(tsFile, "utf8");
+const tsClean = await tool("get_diagnostics", { relative_path: "ts/src/store.ts", live: true });
+check("typescript: the clean file has no errors",
+  tsClean.ok && tsClean.body.diagnostics.every((d: any) => d.severity !== "error"), tsClean.body);
+const tsLines = tsOrig.split("\n").length;
+writeFileSync(tsFile, tsOrig + "\nexport const broken: number = \"text\";\n");
+const tsBroken = await tool("get_diagnostics", { relative_path: "ts/src/store.ts", live: true });
+check("typescript: a string assigned to a number is TS2322 on the new line",
+  tsBroken.ok && tsBroken.body.diagnostics.some((d: any) => d.code === "2322" && d.line === tsLines + 1), tsBroken.body);
+console.log(`     error seen ${tsBroken.ms.toFixed(0)} ms after asking`);
+writeFileSync(tsFile, tsOrig);
 
 proc.stdin.end();
 await proc.exited;

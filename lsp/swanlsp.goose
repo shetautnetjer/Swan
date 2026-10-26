@@ -6,7 +6,7 @@
 // with its own runtime, entered through the exported functions below.
 //
 // Questions and answers are JSON. Positions are 1-based, as in swan's tools:
-//   {"op":"diagnostics","file":"src/lib.rs"}
+//   {"op":"diagnostics","file":"src/lib.rs","settle":"check"|"publish"}
 //     -> {"ok":true,"diagnostics":[{"line":..,"col":..,"end_line":..,"end_col":..,
 //         "severity":"error","source":"rustc","code":"E0061","message":".."}]}
 //   {"op":"implementations","file":"src/lib.rs","line":12,"col":11}
@@ -50,6 +50,8 @@ var trace = false;              // SWAN_LSP_TRACE=1: every message from the serv
 var diag_text: u8[>..];
 var diag_at = dictionary<u8[..1024], i64> {};
 var diag_len = dictionary<u8[..1024], i64> {};
+var diag_seq = dictionary<u8[..1024], i64> {};  // which publish, counting from the session's start
+var publishes = 0;
 
 fn note(s: const u8[:]) { append_file(log_path, str(s, "\n")); }
 
@@ -93,17 +95,73 @@ fn take_message(timeout_ms: i64, out: u8[>..]&) -> bool {
 }
 
 // Answers a request the server makes of us, so it never waits on one.
+// A parsed JSON value written back out.
+recursive fn write_json(n: json::Node&, out: u8[>..]&) {
+    match n.val {
+        Null => out.append("null"),
+        Bool b => json::format_bool(out, b.v),
+        Int i => json::format_int(out, i.v),
+        Num x => json::format_number(out, x.v),
+        Str t => json::format_string(out, t.s),
+        Arr => {
+            out.push('[');
+            var k = 0;
+            var c = n.first;
+            while c { if k > 0 { out.push(','); } k++; write_json(c, out); c .= c.next; }
+            out.push(']');
+        },
+        Obj => {
+            out.push('{');
+            var k = 0;
+            var c = n.first;
+            while c {
+                if k > 0 { out.push(','); }
+                k++;
+                json::format_string(out, c.key);
+                out.push(':');
+                write_json(c, out);
+                c .= c.next;
+            }
+            out.push('}');
+        },
+    }
+}
+
+// A configuration section from our settings: the member named exactly that
+// ("python.analysis"), else the path its dots spell (python, analysis).
+fn section_of(settings: json::Node?, section: const u8[:]) -> json::Node? {
+    let whole = json::member(settings, section);
+    if whole { return whole; }
+    var at = settings;
+    each_split(section, '.') { part => at .= json::member(at, part); };
+    return at;
+}
+
 fn answer_server(doc_root: json::Node&, id_text: const u8[:]) {
     let method, ok = json::as_string(json::member(doc_root, "method"));
     var body: u8[>..] = [];
     format(body, "{\"jsonrpc\":\"2.0\",\"id\":", id_text, ",\"result\":");
     if ok && method == "workspace/configuration" {
-        // One answer per item asked for: our initialization options.
+        // One answer per item: the section asked for, from our settings
+        // (initialization options); the whole of them when the section is
+        // not there by name, which is how rust-analyzer asks for its own.
+        var sdoc: json::Node[>..] = [];
+        var sdec: u8[>..] = [];
+        let settings, serr = json::parse(init_options, sdoc, sdec);
         let items = json::member(json::member(doc_root, "params"), "items");
         body.push('[');
         var n = 0;
-        if items { json::each(items) { it => if n > 0 { body.push(','); } n++; body.append(init_options); }; }
+        if items {
+            json::each(items) { it =>
+                if n > 0 { body.push(','); }
+                n++;
+                let sec, s_ok = json::as_string(json::member(it, "section"));
+                let found = if s_ok { section_of(settings, sec) } else { settings };
+                if found { write_json(found, body); } else { body.append(init_options); }
+            };
+        }
         body.push(']');
+        assert(serr.len >= 0);
     } else {
         body.append("null");
     }
@@ -187,6 +245,16 @@ var opened = dictionary<u8[..1024], i64> {};
 
 // Tells the server the file's current text: opened, or changed and saved,
 // so rust-analyzer's own diagnostics and its cargo check both run.
+// The languageId for a file: the server's, except that the TypeScript
+// server also reads JavaScript and JSX, which it is told apart.
+fn language_of(file: const u8[:]) -> const u8[:] {
+    guard language_id == "typescript" else { return language_id; }
+    if ends_with(file, ".tsx") { return "typescriptreact"; }
+    if ends_with(file, ".jsx") { return "javascriptreact"; }
+    if ends_with(file, ".js") || ends_with(file, ".mjs") || ends_with(file, ".cjs") { return "javascript"; }
+    return "typescript";
+}
+
 fn sync_file(file: const u8[:]) -> bool {
     var text: u8[>..] = [];
     guard read_file(str(repo_dir, "/", file), text) else { return false; }
@@ -200,7 +268,7 @@ fn sync_file(file: const u8[:]) -> bool {
         params.append("{\"textDocument\":{\"uri\":");
         json::format_string(params, uri);
         params.append(",\"languageId\":");
-        json::format_string(params, language_id);
+        json::format_string(params, language_of(file));
         params.append(",\"version\":1,\"text\":");
         json::format_string(params, text);
         params.append("}}");
@@ -272,30 +340,36 @@ fn keep_diagnostics(p: json::Node?) {
         };
     }
     diag_text.push(']');
+    publishes++;
+    diag_seq.insert(key, publishes);
     diag_at.insert(key, start);
     diag_len.insert(key, diag_text.len - start);
 }
 
-// The diagnostics for a file as it is on disk now: the file is synced and
-// saved (which starts a cargo check), and the answer comes once that check
-// has finished and the server has been quiet for a moment.
-fn diagnostics(file: const u8[:], out: u8[>..]&) {
+// The diagnostics for a file as it is on disk now. The file is synced and
+// saved, and the answer comes once the server has had its say and been quiet
+// for a moment: with after_check (rust-analyzer), when the cargo check the
+// save started has finished, since it publishes only sets that changed;
+// otherwise (pyright, typescript) when it has published for this file.
+fn diagnostics(file: const u8[:], after_check: bool, out: u8[>..]&) {
     let before = checks_ended;
+    let before_pub = publishes;
+    let uri = uri_of(file);
+    var key: u8[..1024] = [];
+    format(key, uri);
     guard sync_file(file) else { out.append("{\"ok\":false,\"error\":\"cannot read the file\"}"); return; }
-    wait_indexed();
+    if after_check { wait_indexed(); }     // servers that publish wait for nothing else
     let deadline = clock() + 120.0;
     var settled = false;
     loop {
         let left = ((deadline - clock()) * 1000.0) as i64;
         if left <= 0 { break; }
-        let done = checks_ended > before && checking == 0;
+        let seq = diag_seq.get(key);
+        let done = if after_check { checks_ended > before && checking == 0 } else { seq && seq > before_pub };
         // Once the check is over, 300 ms with no message means the last set is in.
         let more = pump(if done { 300 } else { min(left, 1000) }) { m, method, id => true };
         if done && !more { settled = true; break; }
     }
-    let uri = uri_of(file);
-    var key: u8[..1024] = [];
-    format(key, uri);
     let at = diag_at.get(key);
     out.append("{\"ok\":true,");
     if !settled { out.append("\"settled\":false,"); }
@@ -356,7 +430,7 @@ export "swanlsp_start" fn start(repo: const u8[:], log: const u8[:], init_json: 
     repo_dir.clear(); root_uri.clear(); log_path.clear(); init_options.clear(); inbox.clear(); opened.clear();
     language_id.clear(); language_id.append(lang_id);
     gone = false; indexing_done = false; checking = 0; checks_ended = 0;
-    diag_text.clear(); diag_at.clear(); diag_len.clear();
+    diag_text.clear(); diag_at.clear(); diag_len.clear(); diag_seq.clear(); publishes = 0;
     var tv: u8[>..] = [];
     trace = env("SWAN_LSP_TRACE", tv) && tv == "1";
     format(repo_dir, repo);
@@ -405,7 +479,8 @@ export "swanlsp_ask" fn ask(question: const u8[:]) -> const u8[:] {
     // A copy of its own, so syncing the file can't pull it out from under us.
     var file: u8[>..] = [];
     file.append(file_in);
-    if o_ok && op == "diagnostics" && f_ok { diagnostics(file, answer); }
+    let settle, s_ok = json::as_string(json::member(q, "settle"));
+    if o_ok && op == "diagnostics" && f_ok { diagnostics(file, s_ok && settle == "check", answer); }
     else if o_ok && op == "implementations" && f_ok {
         let ln, l_ok = json::as_i64(json::member(q, "line"));
         let cn, c_ok = json::as_i64(json::member(q, "col"));

@@ -15,6 +15,7 @@ extern fn swan_lsp_ask(question: const u8[:], out: u8[>..]&);
 extern fn swan_lsp_stop();
 
 var live_lang: u8[..64];        // the language whose server is running; empty when none
+var live_settle: u8[..16];      // its "settle" from modules.json: check or publish
 
 // Starts the server for `lang` unless it is already running; one at a time.
 fn live_start(db: i64, lang: const u8[:], why: u8[>..]&) -> bool {
@@ -55,6 +56,9 @@ fn live_start(db: i64, lang: const u8[:], why: u8[>..]&) -> bool {
                 let log = str(dir, "/lsp-", lang, ".log");
                 started = swan_lsp_start(root, log, init, argv, env_all, if l_ok { lid } else { lang });
                 if !started { format(why, "the ", lang, " language server did not start; see ", log); }
+                let st, st_ok = json::as_string(json::member(cand, "settle"));
+                live_settle.clear();
+                format(live_settle, if st_ok { st } else { "publish" });
             }
         }
     };
@@ -86,8 +90,12 @@ fn live_ask(db: i64, rel: const u8[:], question: const u8[:], out: u8[>..]&) -> 
 fn live_diagnostics(db: i64, rel: const u8[:], out: u8[>..]&) -> bool {
     guard rel.len > 0 else { out.append("live diagnostics need relative_path (one file)"); return false; }
     var q: u8[>..] = [];
+    var why: u8[>..] = [];
+    guard live_start(db, lang_of_path(rel), why) else { out.append(why); return false; }
     q.append("{\"op\":\"diagnostics\",\"file\":");
     json::format_string(q, rel);
+    q.append(",\"settle\":");
+    json::format_string(q, live_settle);
     q.push('}');
     return live_ask(db, rel, q, out);
 }

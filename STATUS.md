@@ -120,7 +120,12 @@ as_of: 2026-10-25
   edit, live impls = SCIP impls (same 4; live points at the impl blocks,
   SCIP at the types), RA ~1.1 GB resident, stopped when serve exits.
 - Parallel indexing now also caps jobs by free memory (about 3 GB a job).
-- Limits: one live server per process; files edited elsewhere are seen by
+- Same evening: pyright and typescript-language-server (6.0.2, pinned) in the
+  same library, configured in tools/modules.json; a server that publishes
+  is waited on per file ("settle": "publish"), rust-analyzer on its check.
+  tiny-py: a pyright reportReturnType error 0.57 s after asking; tiny-ts:
+  TS2322 0.66 s. Asking about another language swaps the server.
+- Limits: one live server per process (swapped by language); files edited elsewhere are seen by
   rust-analyzer's own watcher, the asked file is always resynced.
 
 ## Next

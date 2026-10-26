@@ -6,6 +6,7 @@
     "@biomejs/biome": "2.6.3",
     "@sourcegraph/scip-python": "0.6.8",
     "@sourcegraph/scip-typescript": "0.5.2",
-    "pyright": "1.1.414"
+    "pyright": "1.1.414",
+    "typescript-language-server": "6.0.2"
   }
 }
