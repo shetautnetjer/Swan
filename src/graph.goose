@@ -38,6 +38,18 @@ fn targets(db: i64, pattern: const u8[:], rel: const u8[:], out: u8[>..]&) -> u8
     }
     out.push(']');
     swan_finalize(st);
+    // A class in Java is used through its constructors (`new Square(2)`
+    // references Square#<init>(), not Square#), so they count as the class.
+    if ids.len > 0 {
+        var sql: u8[>..] = [];
+        format_replaced(sql, """
+            SELECT c.id FROM symbols c JOIN symbols t ON t.id IN (#IDS#)
+            WHERE c.name = '<init>' AND substr(c.scip, 1, length(t.scip)) = t.scip
+            """, "#IDS#", ids);
+        let cs = prepare_or_die(db, sql);
+        while swan_step(cs, err) == 1 { format(ids, ",", swan_col_int(cs, 0)); }
+        swan_finalize(cs);
+    }
     return ids;
 }
 

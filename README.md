@@ -174,8 +174,8 @@ The bake-off made two recommendations:
   a type use or an import. A class's callees are what its own body uses
   outside its methods; ask about a method for what that method uses.
 
-- Tried with TypeScript, JavaScript (.js/.mjs/.cjs), Python and Rust
-  (`swan map` picks the indexers). Go, Java, C/C++, C# and Ruby are untried. What each tried
+- Tried with TypeScript, JavaScript (.js/.mjs/.cjs), Python, Rust and Java
+  without a build tool (`swan map` picks the indexers). Go, Java, C/C++, C# and Ruby are untried. What each tried
   indexer misses is in `docs/parity-and-languages.md`.
 - scip-typescript has no per-file mode, so every refresh reruns it over the
   whole repo (~17 s on the repo above). Swan's own part is 0.23 s.

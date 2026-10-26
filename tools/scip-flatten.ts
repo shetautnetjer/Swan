@@ -155,6 +155,23 @@ function rustImplLinks(path: string, pending: { range: number[]; symbol: string;
 
 const defined = new Set<string>();
 
+// scip-java writes method implementation links both ways (Shape#area() ->
+// Circle#area() as well as Circle#area() -> Shape#area()). The owners' own
+// link says which way is real: Circle# implements Shape#, so the link from
+// Shape's method is dropped.
+function dropReverseImplLinks() {
+  const owner = (sym: string) => sym.slice(0, sym.lastIndexOf("#") + 1);
+  const edges = rel.map((r) => r.split("\t"));
+  const has = new Set(edges.map(([a, , b, f]) => `${a}\t${b}\t${f.includes("impl")}`));
+  const typeImpl = new Set(edges.filter(([a, , , f]) => a.endsWith("#") && f.includes("impl")).map(([a, , b]) => `${a}\t${b}`));
+  const keep = edges.filter(([a, , b, f]) => {
+    if (!f.includes("impl") || a.endsWith("#") || !has.has(`${b}\t${a}\ttrue`)) return true;
+    return !typeImpl.has(`${owner(b)}\t${owner(a)}`);
+  });
+  rel.length = 0;
+  for (const e of keep) rel.push(e.join("\t"));
+}
+
 // rust-analyzer resolves little inside macro calls, and nothing inside a
 // macro nested in another (`assert!(matches!(s, Shape::Circle(_)))`,
 // `vec![Tile::new(2)]`). This pass reads each Rust file, finds macro
@@ -271,9 +288,19 @@ root.fields((f, _wt, r) => {
       let symbol = "", roles = 0;
       d.fields((of, owt, o) => {
         if (of === 1 || of === 7) {
+          // The original packed form: [line, start, end] or [start_line, start, end_line, end].
           const into = of === 1 ? range : enclosing;
           if (owt === 2) while (o.pos < o.end) into.push(o.varint());
           else into.push(o.varint());
+        } else if (of >= 8 && of <= 11) {
+          // The typed form newer producers (scip-java 0.13) write instead:
+          // 8/10 SingleLineRange {line, start, end}, 9/11 MultiLineRange
+          // {start_line, start, end_line, end}. Zero fields are left out.
+          const into = of === 8 || of === 9 ? range : enclosing;
+          const parts = of === 8 || of === 10 ? [0, 0, 0] : [0, 0, 0, 0];
+          o.fields((rf, rwt, r) => { if (rwt === 0 && rf >= 1 && rf <= parts.length) parts[rf - 1] = r.varint(); });
+          into.length = 0;
+          into.push(...parts);
         } else if (of === 2) symbol = clean(o.string());
         else if (of === 3 && owt === 0) roles = o.varint();
       });
@@ -297,6 +324,7 @@ root.fields((f, _wt, r) => {
 }
 
 if (repoRoot) rustMacroUses();
+dropReverseImplLinks();
 const occ = [...occByDoc.values()].flat();
 
 mkdirSync(outDir, { recursive: true });

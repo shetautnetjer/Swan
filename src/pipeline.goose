@@ -21,23 +21,18 @@ fn abs_path(p: const u8[:]) -> u8[>..] {
 
 // What a repo holds, found by walking it.
 struct Langs {
-    ts: bool, js: bool, py: bool, rs: bool,
-    tsconfig: bool, cargo: bool,
+    ts: bool, js: bool, py: bool, rs: bool, java: bool,
+    tsconfig: bool, cargo: bool, maven: bool, gradle: bool,
     venv: u8[..2048],           // a virtualenv inside the repo, if any
 }
 
 let SKIP_DIRS = ["node_modules", ".git", "target", ".venv", "venv", "__pycache__", ".tox",
-                 ".mypy_cache", ".pytest_cache", ".swan"];
+                 ".mypy_cache", ".pytest_cache", ".swan", "build", ".gradle"];
 
-fn detect(repo: const u8[:]) -> Langs {
-    var l = Langs { ts: false, js: false, py: false, rs: false,
-                    tsconfig: file_exists(str(repo, "/tsconfig.json")),
-                    cargo: file_exists(str(repo, "/Cargo.toml")), .. };
-    for v in [".venv", "venv"] {
-        if l.venv.len == 0 && file_exists(str(repo, "/", v, "/pyvenv.cfg")) { format(l.venv, repo, "/", v); }
-    }
-    // Breadth-first over directories; `dirs` only grows, `next` walks it.
-    var dirs: u8[>..] = [];
+// F(path, name) for each file under repo, breadth-first, skipping folders
+// that hold dependencies, caches or build output.
+fn each_file<F>(repo: const u8[:]) {
+    var dirs: u8[>..] = [];     // only grows; `next` walks it
     dirs.append(repo);
     dirs.push('\n');
     var next = 0;
@@ -56,18 +51,53 @@ fn detect(repo: const u8[:]) -> Langs {
             format(full, dir, "/", name);
             if is_dir(full) {
                 if !contains(SKIP_DIRS, name) { dirs.append(full); dirs.push('\n'); }
-            } else if ends_with(name, ".ts") || ends_with(name, ".tsx") || ends_with(name, ".mts") || ends_with(name, ".cts") {
-                l.ts = true;
-            } else if ends_with(name, ".js") || ends_with(name, ".jsx") || ends_with(name, ".mjs") || ends_with(name, ".cjs") {
-                l.js = true;
-            } else if ends_with(name, ".py") {
-                l.py = true;
-            } else if ends_with(name, ".rs") {
-                l.rs = true;
+            } else {
+                F(full[..], name);
             }
         };
     }
+}
+
+fn detect(repo: const u8[:]) -> Langs {
+    var l = Langs { ts: false, js: false, py: false, rs: false, java: false,
+                    tsconfig: file_exists(str(repo, "/tsconfig.json")),
+                    cargo: file_exists(str(repo, "/Cargo.toml")),
+                    maven: file_exists(str(repo, "/pom.xml")),
+                    gradle: file_exists(str(repo, "/build.gradle")) || file_exists(str(repo, "/build.gradle.kts")) ||
+                            file_exists(str(repo, "/settings.gradle")) || file_exists(str(repo, "/settings.gradle.kts")),
+                    .. };
+    for v in [".venv", "venv"] {
+        if l.venv.len == 0 && file_exists(str(repo, "/", v, "/pyvenv.cfg")) { format(l.venv, repo, "/", v); }
+    }
+    each_file(repo) { full, name =>
+        if ends_with(name, ".ts") || ends_with(name, ".tsx") || ends_with(name, ".mts") || ends_with(name, ".cts") {
+            l.ts = true;
+        } else if ends_with(name, ".js") || ends_with(name, ".jsx") || ends_with(name, ".mjs") || ends_with(name, ".cjs") {
+            l.js = true;
+        } else if ends_with(name, ".py") {
+            l.py = true;
+        } else if ends_with(name, ".rs") {
+            l.rs = true;
+        } else if ends_with(name, ".java") {
+            l.java = true;
+        }
+    };
     return l;
+}
+
+// The JDK: $JAVA_HOME, else the one scripts/fetch-tools.sh puts in .tools/jdk.
+fn java_home(home: const u8[:]) -> u8[>..] {
+    var jh: u8[>..] = [];
+    if env("JAVA_HOME", jh) && jh.len > 0 { return jh; }
+    jh.clear();
+    var names: u8[>..] = [];
+    let dir = str(home, "/.tools/jdk");
+    if list_dir(dir, names) {
+        each_split(names, '\n') { name =>
+            if jh.len == 0 && starts_with(name, "jdk-") { format(jh, dir, "/", name); }
+        };
+    }
+    return jh;
 }
 
 // The environment children get: a repo virtualenv first on PATH, and room
@@ -76,6 +106,11 @@ fn child_env(l: const Langs&, extra: const u8[:]) -> u8[>..] {
     var vars: u8[>..] = [];
     var path: u8[>..] = [];
     if l.venv.len > 0 { format(path, l.venv, "/bin:"); }
+    var jh: u8[>..] = [];
+    if l.java {
+        jh = java_home(swan_home());
+        if jh.len > 0 { format(path, jh, "/bin:"); }
+    }
     env("PATH", path);
     var e: u8[>..] = [];
     format(e, "PATH=", path);
@@ -83,6 +118,11 @@ fn child_env(l: const Langs&, extra: const u8[:]) -> u8[>..] {
     if l.venv.len > 0 {
         e.clear();
         format(e, "VIRTUAL_ENV=", l.venv);
+        arg(vars, e);
+    }
+    if jh.len > 0 {
+        e.clear();
+        format(e, "JAVA_HOME=", jh);
         arg(vars, e);
     }
     var heap: u8[>..] = [];
@@ -126,6 +166,7 @@ fn map_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> bo
     let bin = str(home, "/tools/node_modules/.bin/");
     let l = detect(repo);
     format(report, "languages:", if l.ts { " typescript" } else { "" }, if l.js { " javascript" } else { "" },
+           if l.java { " java" } else { "" },
            if l.py { " python" } else { "" }, if l.rs || l.cargo { " rust" } else { "" },
            if l.venv.len > 0 { str(" (venv ", l.venv, ")") } else { str("") }, "\n");
     // Edits after this moment make answers stale (src/fresh.goose).
@@ -217,6 +258,26 @@ fn map_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> bo
         var o: u8[>..] = [];
         let extra = env_entry("CARGO_TARGET_DIR", str(out, "/cargo-target"));
         if run_step("rust-analyzer scip", a, repo, child_env(l, extra), 3600000, o) == 0 { arg(scips, target); }
+        else { ok = false; }
+    }
+
+    if l.java {
+        let target = str(out, "/index-java.scip");
+        delete_file(target);
+        var a: u8[>..] = [];
+        arg(a, str(home, "/.tools/scip-java/scip-java"));
+        arg(a, "index");
+        arg(a, str("--output=", target));
+        arg(a, str("--targetroot=", out, "/java-targetroot"));
+        if !l.maven && !l.gradle {
+            // No build tool: scip-java compiles the sources itself from a config
+            // of our own, outside the repo. Without one, dependencies are unknown.
+            let cfg = str(out, "/scip-java.json");
+            write_file(cfg, "{\"dependencies\":[],\"jvm\":\"21\"}\n");
+            arg(a, str("--scip-config=", cfg));
+        }
+        var o: u8[>..] = [];
+        if run_step("scip-java", a, repo, child_env(l, ""), 3600000, o) == 0 { arg(scips, target); }
         else { ok = false; }
     }
 
@@ -357,6 +418,36 @@ fn parse_pyright(text: const u8[:], repo: const u8[:], rows: u8[>..]&) -> i64 {
     return n;
 }
 
+// javac: `path:line: error: message`, then the source line, then a caret
+// under the column.
+fn parse_javac(text: const u8[:], repo: const u8[:], rows: u8[>..]&) -> i64 {
+    let lines = split(text, '\n');
+    var n = 0;
+    for line, i in lines {
+        let j = find(line, ".java:");
+        guard j > 0 else { continue; }
+        let rest = line[j + 6..];
+        let colon = find(rest, ": ");
+        guard colon > 0 else { continue; }
+        let ln, ok = parse_int(rest[..colon]);
+        guard ok else { continue; }
+        let tail = rest[colon + 2..];
+        let sev_end = find(tail, ": ");
+        guard sev_end > 0 else { continue; }
+        let sev = tail[..sev_end];
+        guard sev == "error" || sev == "warning" else { continue; }
+        var col = 0;
+        if i + 2 < lines.len {
+            let caret = find(lines[i + 2], "^");
+            if caret >= 0 { col = caret; }
+        }
+        put_row(rows, relative_to(repo, line[..j + 5]), ln - 1, col, ln - 1, col, sev, "javac", "",
+                tail[sev_end + 2..]);
+        n++;
+    }
+    return n;
+}
+
 fn check_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> bool {
     let repo = abs_path(repo_arg);
     let out = abs_path(out_arg);
@@ -417,6 +508,32 @@ fn check_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> 
         var o: u8[>..] = [];
         run_step("pyright", a, repo, child_env(l, ""), 3600000, o);   // exit 1 when it finds errors
         format(ran, " pyright:", parse_pyright(o, repo, rows));
+    }
+    if l.java && !l.maven && !l.gradle {
+        // javac over every source, output thrown away in out-dir.
+        var files: u8[>..] = [];
+        each_file(repo) { full, name => if ends_with(name, ".java") { files.append(full); files.push('\n'); } };
+        write_file(str(out, "/javac-files.txt"), files);
+        var a: u8[>..] = [];
+        let jh = java_home(home);
+        let javac: u8[>..] = if jh.len > 0 { str(jh, "/bin/javac") } else { str("javac") };
+        arg(a, javac);
+        arg(a, "-d");
+        arg(a, str(out, "/javac-classes"));
+        arg(a, "-encoding");
+        arg(a, "UTF-8");
+        arg(a, "-proc:none");
+        arg(a, "-Xmaxerrs");
+        arg(a, "100000");
+        arg(a, str("@", out, "/javac-files.txt"));
+        var o: u8[>..] = [];
+        var e: u8[>..] = [];
+        let t0 = clock();
+        swan_run(a, repo, child_env(l, ""), 1800000, o, e);   // javac reports on stderr
+        write_stderr(str("javac: ", ((clock() - t0) * 1000.0) as i64, " ms\n"));
+        format(ran, " javac:", parse_javac(e, repo, rows));
+    } else if l.java {
+        format(ran, " javac: skipped (Maven/Gradle repo; its build tool is not run yet)");
     }
     guard ran.len > 0 else { format(report, "no checker for the languages in ", repo); return false; }
     write_file(str(out, "/diagnostics.tsv"), rows);

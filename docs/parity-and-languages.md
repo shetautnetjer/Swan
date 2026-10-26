@@ -135,6 +135,25 @@ workspace (21 .rs files), mapped together with its one Python file.**
     `CARGO_TARGET_DIR` into the output folder. Cargo still writes a
     `Cargo.lock` into a repo that has none, so map a copy of such a repo.
 
+**Java: scip-java 0.13.2 with a user-local Temurin JDK 21, on
+`fixtures/tiny-java` (no build tool).**
+- With no Maven or Gradle, `swan map` writes a `scip-java.json` outside the
+  repo, and scip-java compiles the sources itself (0.5 s). Diagnostics come
+  from `javac` (0.2 s), parsed with the column from its caret line.
+- Found and handled:
+  - scip-java writes SCIP's newer typed ranges (Occurrence fields 8-11), not
+    the packed `range`. The flattener reads both.
+  - It writes method implementation links in both directions. The reverse
+    ones are dropped, using the classes' own `implements` link.
+  - `new Square(2)` references `Square#<init>()`, not the class. Constructors
+    now count as uses of their class in references, callers and diagnostics.
+- Verified: implementations, overrides, constructor uses,
+  `replace_symbol_body` on a constructor with javac's error landing in the
+  caller, and `rename_symbol` on a method.
+- Not covered yet: Maven and Gradle repos. scip-java drives those build
+  tools itself, but neither is installed here, and `swan check` skips javac
+  for them.
+
 What Swan must change for many languages: run the right indexer per
 language (detect by files present), store a `language` column, and fix two
 TypeScript-specific spots. `kind_word` reads scip-typescript's signature

@@ -157,6 +157,9 @@ fn find_referencing_symbols(db: i64, pattern: const u8[:], rel: const u8[:], lim
             SELECT id FROM t
             UNION
             SELECT s.id FROM symbols s, t
+            WHERE s.id != t.id AND s.name = '<init>' AND substr(s.scip, 1, length(t.scip)) = t.scip
+            UNION
+            SELECT s.id FROM symbols s, t
             WHERE ?3 = 1 AND s.id != t.id AND (
                 substr(s.scip, 1, length(t.scip)) = t.scip
                 OR substr(s.scip, 1, length(t.module) + length(t.name) + 7) = t.module || 'impl#[' || t.name || ']'

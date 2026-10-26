@@ -68,5 +68,44 @@ if (run("python")) {
     inSyms.includes("report") && inSyms.includes("ShapeTests/test_square"), diag);
 }
 
+if (run("java")) {
+  // scip-java with no build tool: Swan writes its scip-java.json outside the repo.
+  const w = "data/java-check";
+  sh(["rm", "-rf", w]);
+  sh(["mkdir", "-p", w]);
+  sh(["cp", "-r", "fixtures/tiny-java", `${w}/repo`]);
+  sh(["bin/swan", "map", `${w}/repo`, `${w}/map`]);
+  sh(["bin/swan", "check", `${w}/repo`, `${w}/map`]);
+  const q = (...a: string[]) => JSON.parse(sh(["bin/swan", "query", `${w}/map/swan.db`, ...a]));
+  const mcp = (name: string, args: Record<string, unknown>) => {
+    const r = Bun.spawnSync(["bin/swan", "serve", `${w}/map/swan.db`], {
+      stdin: Buffer.from(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }) + "\n"),
+      stdout: "pipe" });
+    return JSON.parse(r.stdout.toString()).result;
+  };
+  check("java: Square and Circle implement Shape",
+    q("impls", "Shape").implementations.map((s: any) => s.name_path).sort().join(",") === "Circle,Square");
+  check("java: the area() overrides, without scip-java's reverse links",
+    q("hierarchy", "Shape/area").subtypes.map((s: any) => s.name_path).sort().join(",") === "Circle/area,Square/area");
+  const sq = q("refs", "Square")[0].references;
+  check("java: `new Square(2)` counts as a use of Square (through its constructor)",
+    sq.some((r: any) => r.in_symbol === "Shapes/main" && r.via === "Square/<init>"), sq);
+  check("java: javac finds no errors in the clean fixture", q("diagfile", ".").map_total.errors === 0);
+
+  const edit = mcp("replace_symbol_body", { name_path: "Square/<init>", relative_path: "src/main/java/shapes/Square.java",
+    body: "public Square(double side, String unit) {\n        this.side = side;\n    }" });
+  check("java: replace_symbol_body on a constructor", !edit.isError, edit);
+  sh(["bin/swan", "check", `${w}/repo`, `${w}/map`]);
+  const diag = q("diag", "Square", "src/main/java/shapes/Square.java").diagnostics;
+  check("java: javac's error lands in the caller, Shapes.main, with its column",
+    diag.some((d: any) => d.severity === "error" && d.in_symbol === "Shapes/main" && d.column > 1 && d.distance === 1), diag);
+
+  const ren = mcp("rename_symbol", { name_path: "Shapes/totalArea", relative_path: "src/main/java/shapes/Shapes.java",
+    new_name: "sumOfAreas", apply: true });
+  const renamed = await Bun.file(`${w}/repo/src/main/java/shapes/Shapes.java`).text();
+  check("java: rename_symbol rewrites the method and its call",
+    !ren.isError && renamed.includes("static double sumOfAreas(") && renamed.includes("println(sumOfAreas("), ren);
+}
+
 console.log(failures ? `${failures} check(s) failed` : "all language checks passed");
 process.exit(failures ? 1 : 0);
