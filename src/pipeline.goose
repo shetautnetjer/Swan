@@ -1301,6 +1301,7 @@ fn check_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> 
         arg(a, "--workspace");
         arg(a, "--all-targets");
         arg(a, "--message-format=json");
+        arg(a, "--keep-going");     // every crate it can check, not just up to the first that fails
         arg(a, "--quiet");
         var o: u8[>..] = [];
         let extra = env_entry("CARGO_TARGET_DIR", str(out, "/cargo-target"));
