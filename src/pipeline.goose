@@ -1022,7 +1022,10 @@ fn map_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> bo
         idx++;
     };
     // A Python piece whose run failed is not reusable: its old index file
-    // no longer matches the fingerprint recorded for it before the run.
+    // no longer matches the fingerprint recorded for it before the run. Nor
+    // are TypeScript layers on top of a chunk run that failed: forgetting
+    // the shared inputs' fingerprint makes the next map rerun the chunks.
+    if find(failed, "/index-typescript-") >= 0 { delete_file(str(out, "/typescript-shared.txt")); }
     if failed.len > 0 {
         var pieces_kept: u8[>..] = [];
         var prev_pieces: u8[>..] = [];
@@ -1258,12 +1261,17 @@ fn check_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> 
     var rows: u8[>..] = [];
     var ran: u8[>..] = [];
     // Checkers that never got to check: not started (126, 127), timed out
-    // (-2) or killed. Their silence is not a clean bill, so the diagnostics
-    // already saved are kept rather than replaced by a partial set.
+    // (-2), killed, or failed with nothing to show for it (cargo exits 101
+    // when a dependency will not resolve; a checker that found errors says
+    // which). Their silence is not a clean bill, so the diagnostics already
+    // saved are kept rather than replaced by a partial set.
     var not_run: u8[>..] = [];
-    fn did_run(name: const u8[:], code: i64) -> bool {
-        guard code < 0 || code == 126 || code == 127 || code >= 128 else { return true; }
-        format(not_run, " ", name, if code == -2 { str(" (timed out)") } else { str(" (exit ", code, ")") });
+    fn checked(name: const u8[:], code: i64, found: i64) -> bool {
+        let broke = code < 0 || code == 126 || code == 127 || code >= 128;
+        guard broke || (code != 0 && found == 0) else { return true; }
+        format(not_run, " ", name, if code == -2 { str(" (timed out)") }
+                                    else if broke { str(" (exit ", code, ")") }
+                                    else { str(" (exit ", code, " and no findings)") });
         return false;
     }
 
@@ -1278,9 +1286,9 @@ fn check_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> 
         arg(a, "-p");
         arg(a, repo);
         var o: u8[>..] = [];
-        if did_run("tsc", run_step("tsc", a, repo, child_env(l, ""), 1800000, o)) {   // exit 2 when it finds errors
-            format(ran, " tsc:", parse_tsc(o, rows));
-        }
+        let code = run_step("tsc", a, repo, child_env(l, ""), 1800000, o);   // exit 2 when it finds errors
+        let n = parse_tsc(o, rows);
+        if checked("tsc", code, n) { format(ran, " tsc:", n); }
     }
     if l.cargo {
         var a: u8[>..] = [];
@@ -1292,9 +1300,9 @@ fn check_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> 
         arg(a, "--quiet");
         var o: u8[>..] = [];
         let extra = env_entry("CARGO_TARGET_DIR", str(out, "/cargo-target"));
-        if did_run("cargo", run_step("cargo check", a, repo, child_env(l, extra), 3600000, o)) {
-            format(ran, " cargo:", parse_cargo(o, repo, rows));
-        }
+        let code = run_step("cargo check", a, repo, child_env(l, extra), 3600000, o);
+        let n = parse_cargo(o, repo, rows);
+        if checked("cargo", code, n) { format(ran, " cargo:", n); }
     }
     if l.py {
         // pyright run from the repo root reads the repo's own settings
@@ -1316,9 +1324,9 @@ fn check_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> 
         arg(a, "--pythonpath");
         arg(a, py);
         var o: u8[>..] = [];
-        if did_run("pyright", run_step("pyright", a, repo, child_env(l, ""), 3600000, o)) {   // exit 1 when it finds errors
-            format(ran, " pyright:", parse_pyright(o, repo, rows));
-        }
+        let code = run_step("pyright", a, repo, child_env(l, ""), 3600000, o);   // exit 1 when it finds errors
+        let n = parse_pyright(o, repo, rows);
+        if checked("pyright", code, n) { format(ran, " pyright:", n); }
     }
     if l.java && !l.maven && !l.gradle {
         // javac over every source, output thrown away in out-dir.
@@ -1342,7 +1350,8 @@ fn check_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> 
         let t0 = clock();
         let code = swan_run(a, repo, child_env(l, ""), 1800000, o, e);   // javac reports on stderr
         write_stderr(str("javac: ", ((clock() - t0) * 1000.0) as i64, " ms\n"));
-        if did_run("javac", code) { format(ran, " javac:", parse_javac(e, repo, rows)); }
+        let n = parse_javac(e, repo, rows);
+        if checked("javac", code, n) { format(ran, " javac:", n); }
     } else if l.java {
         format(ran, " javac: skipped (Maven/Gradle repo; its build tool is not run yet)");
     }
@@ -1366,7 +1375,8 @@ fn check_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> 
         let t0 = clock();
         let code = swan_run(a, repo, child_env(l, ""), 3600000, o, e);
         write_stderr(str("clang (via scip-clang): ", ((clock() - t0) * 1000.0) as i64, " ms\n"));
-        if did_run("clang", code) { format(ran, " clang:", parse_clang(e, repo, rows)); }
+        let n = parse_clang(e, repo, rows);
+        if checked("clang", code, n) { format(ran, " clang:", n); }
     }
     // Linters, from tools/modules.json.
     let mc = mod_ctx(repo, out, home, l);
@@ -1376,10 +1386,10 @@ fn check_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> 
         var src: u8[>..] = [];
         var par: u8[>..] = [];
         let code = run_module(home, lang, "lint", mc, child_env(l, ""), "", o, src, par);
-        if code != -100 && did_run(lang, code) {
+        if code != -100 {
             let n = if par == "github" { parse_github(o, repo, src, rows) }
                     else if par == "cargo" { parse_cargo(o, repo, rows, src) } else { 0 };
-            format(ran, " ", src, ":", n);
+            if checked(lang, code, n) { format(ran, " ", src, ":", n); }
         }
     };
     guard not_run.len == 0 else {
