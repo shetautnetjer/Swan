@@ -241,6 +241,37 @@ checks from the complete integration suite that was not rerun.
   goose-lsp v0.1.2 (output read on a thread, an `open` question).
 - Eggs measured and parked (DECISIONS.md).
 
+## 2026-10-26 (night): fixes from the Greptile review
+
+Greptile (through Composio) reviewed main at b429ce7 on a review-only PR
+(Swan#1, closed). Its 14 Swan findings, checked against the source, are in
+~/aya/sandbox/briefs/SWAN_GOOSE_GREPTILE_REVIEW_20261026.md. Fixed on
+branch fix/greptile-review:
+
+- Edits move the map by (line, column), so code after an edit on the same
+  line follows it; symbols defined inside replaced code are dropped until
+  the next refresh; a rename moves only the sites it wrote; a rename to a
+  name no language accepts (`123`, `foo-bar`) is refused.
+- `rewrite_pattern` moves the map for each cut instead of marking the file
+  fresh with old positions.
+- A Swan edit clears the file's fingerprint, so the next refresh rebuilds
+  its rows whatever SCIP says; the fingerprint also covers the symbols'
+  docs and signatures (one full refresh after upgrading).
+- `run_tests` no longer reloads freshness (it doubled the repo path and
+  then refused every edit); `update_map` reloads it (the new SCIP time).
+- `check_errors` keeps the saved diagnostics when a checker could not run
+  (missing, timed out, killed) instead of reporting a clean result.
+- `swan_run` keeps its deadline after the program closes its output.
+- TypeScript layers are used only while tsconfig, package.json and the
+  declarations are unchanged; a failed Python piece is not reused.
+- The flattener drops typeLiteral counters only in a symbol's unquoted
+  parts, so a file named typeLiteral1.ts keeps its name.
+- Tests: tests/edit_check.ts (same-line edits, a dropped method, bad
+  names, edit after run_tests) and tests/structural_check.ts (edit after a
+  rewrite that adds lines). These fail on b429ce7 and pass on the fix.
+  Not covered by a test: the check_errors, timeout, tsconfig, Python-piece,
+  typeLiteral and doc-fingerprint changes (reviewed by reading only).
+
 ## Remaining work
 
 1. Qualify real server adapters and indexers separately from the mock LSP

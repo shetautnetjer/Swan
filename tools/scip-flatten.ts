@@ -81,14 +81,19 @@ function setRepoRoot(root: string) {
   const segs = posix.resolve(root).split("/").filter(Boolean);
   absPrefix = " " + segs.map((g) => (/^[\w$+\-]+$/.test(g) ? g : "`" + g.replace(/`/g, "``") + "`")).join("/") + "/";
 }
+const cleanText = (s: string) =>
+  (absPrefix && s.includes(absPrefix) ? s.split(absPrefix).join(" ") : s).replace(/[\t\n\r]/g, " ");
+// scip-typescript numbers anonymous type literals by a counter that depends
+// on the order it walks files, so the same literal gets a different name in
+// each run. Dropping the number keeps names stable across runs and across
+// the parallel chunks swan map splits TS into. Only in a symbol's unquoted
+// parts: a file name (always `quoted` in a symbol, since it holds a dot) and
+// a document path keep theirs.
 const clean = (s: string) =>
-  (absPrefix && s.includes(absPrefix) ? s.split(absPrefix).join(" ") : s)
-    .replace(/[\t\n\r]/g, " ")
-    // scip-typescript numbers anonymous type literals by a counter that
-    // depends on the order it walks files, so the same literal gets a
-    // different name in each run. Dropping the number keeps names stable
-    // across runs and across the parallel chunks swan map splits TS into.
-    .replace(/typeLiteral\d+/g, "typeLiteral");
+  cleanText(s)
+    .split(/(`(?:[^`]|``)*`)/)
+    .map((part, i) => (i % 2 === 1 ? part : part.replace(/typeLiteral\d+/g, "typeLiteral")))
+    .join("");
 const ROLE_DEFINITION = 1;
 const ROLE_IMPORT = 2;   // the name in an import statement: a use, not a call
 
@@ -408,7 +413,7 @@ root.fields((f, _wt, r) => {
   const infos: Reader[] = [];
   const pending: { range: number[]; enclosing: number[]; symbol: string; roles: number }[] = [];
   r.fields((df, _dwt, d) => {
-    if (df === 1) path = clean(docBase ? posix.normalize(posix.join(docBase, d.string())) : d.string());
+    if (df === 1) path = cleanText(docBase ? posix.normalize(posix.join(docBase, d.string())) : d.string());
     else if (df === 3) infos.push(new Reader(d.buf, d.end).at(d.pos));
     else if (df === 2) {
       const range: number[] = [], enclosing: number[] = [];

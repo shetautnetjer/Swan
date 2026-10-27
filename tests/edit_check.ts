@@ -5,12 +5,20 @@
 //
 //   bun tests/edit_check.ts
 
-import { cpSync, readFileSync, rmSync, statSync, utimesSync } from "node:fs";
+import { cpSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { Database } from "bun:sqlite";
 
 const work = "data/edit-check";
 rmSync(work, { recursive: true, force: true });
 cpSync("fixtures/tiny-ts", `${work}/repo`, { recursive: true });
+// Two definitions on one line, and a class whose replacement drops a method.
+writeFileSync(`${work}/repo/src/oneline.ts`, `export function one() { return 1; } export function two() { return 2; }
+
+export class Pair {
+  left(): number { return 1; }
+  right(): number { return 2; }
+}
+`);
 const sh = (cmd: string[]) => {
   const r = Bun.spawnSync(cmd, { stdout: "pipe", stderr: "pipe" });
   if (r.exitCode !== 0) throw new Error(`${cmd.join(" ")}: ${r.stderr}`);
@@ -61,6 +69,9 @@ const has = await call("insert_after_symbol", {
 check("insert_after_symbol Store/get adds Store.has inside the class",
   !has.error && /get\(id: string\)[\s\S]*\n  }\n\n  has\(id: string\): boolean/.test(file("src/store.ts")), has.text);
 
+// run_tests opens the map on its own; edits afterwards must still see files as fresh.
+await call("run_tests", { relative_path: "src/store.ts" });
+
 // 3. Insert a function before makeStore. Its position must have followed edits 1 and 2.
 const empty = await call("insert_before_symbol", {
   name_path: "makeStore", relative_path: "src/store.ts",
@@ -84,6 +95,29 @@ check("rename applied: definition and re-export renamed, alias kept",
   file("src/index.ts").includes("export { formatEntry as formatItem }") && file("src/main.ts").includes("formatItem(a)"), done.text);
 const after = await call("find_symbol", { name_path_pattern: "formatEntry" });
 check("the map follows the rename", after.json?.[0]?.name_path === "formatEntry", after.text);
+
+// 4b. Names a language would not accept are refused before anything is written.
+for (const bad of ["123abc", "foo-bar"]) {
+  const r = await call("rename_symbol", { name_path: "makeStore", relative_path: "src/store.ts", new_name: bad, apply: true });
+  check(`rename to '${bad}' is refused`, r.error && r.text.includes("must be an identifier") && file("src/store.ts").includes("makeStore"), r.text);
+}
+
+// 4c. Two definitions on one line: lengthening the first moves the second's columns.
+const one = await call("replace_symbol_body", { name_path: "one", relative_path: "src/oneline.ts",
+  body: "export function one() { const x = 1; return x; }" });
+const two = await call("replace_symbol_body", { name_path: "two", relative_path: "src/oneline.ts",
+  body: "export function two() { return 22; }" });
+check("an edit after a same-line edit lands on its own symbol",
+  !one.error && !two.error && file("src/oneline.ts").startsWith("export function one() { const x = 1; return x; } export function two() { return 22; }\n"),
+  `${one.text}\n     ${two.text}\n     ${file("src/oneline.ts").split("\n")[0]}`);
+
+// 4d. Replacing a class with fewer methods: the dropped one is gone from the map.
+const pair = await call("replace_symbol_body", { name_path: "Pair", relative_path: "src/oneline.ts",
+  body: "export class Pair {\n  left(): number { return 1; }\n}" });
+const gone = await call("replace_symbol_body", { name_path: "Pair/right", relative_path: "src/oneline.ts",
+  body: "right(): number { return 3; }" });
+check("a method dropped by replacing its class can no longer be edited",
+  !pair.error && gone.error && gone.text.includes("no symbol matches") && !file("src/oneline.ts").includes("return 3"), gone.text);
 
 // 5. A file changed behind Swan's back is refused.
 const kinds = `${work}/repo/src/kinds.ts`;

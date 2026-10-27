@@ -121,6 +121,15 @@ if (external) {
     readFileSync(lib, "utf8") === before, plan.body);
   const done = await call("rewrite_pattern", { pattern: "self.$F * self.$F", rewrite: "self.$F.pow(2)", apply: true });
   check("apply writes it", done.ok && done.body.files_written === 1 && readFileSync(lib, "utf8").includes("self.side.pow(2)"), done.body);
+  // A rewrite that adds lines moves the map with it: a symbol edit after it
+  // still lands where the symbol is now, not three lines up.
+  const grow = await call("rewrite_pattern", { pattern: "3 * self.$F * self.$F",
+    rewrite: "{\n            let r = self.$F;\n            3 * r * r\n        }", apply: true });
+  const marker = await call("insert_before_symbol", { name_path: "first_is_square", relative_path: "src/lib.rs",
+    body: "pub fn marker() -> u32 {\n    7\n}" });
+  check("after a rewrite that adds lines, an edit by symbol lands at the symbol",
+    grow.ok && marker.ok && readFileSync(lib, "utf8").includes("pub fn marker() -> u32 {\n    7\n}\n\npub fn first_is_square()"),
+    { grow: grow.body, marker: marker.body });
   writeFileSync(lib, before.replace("pub side: u32", "pub side:  u32"));
   const refused = await call("rewrite_pattern", { pattern: "3 * self.$F * self.$F", rewrite: "3 * self.$F.pow(2)", apply: true });
   check("a file changed outside Swan since the map is refused", !refused.ok && /refresh first/.test(refused.body.refused ?? ""), refused.body);

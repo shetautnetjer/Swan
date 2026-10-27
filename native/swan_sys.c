@@ -143,10 +143,19 @@ int32_t swan_run(swan_slice argv_nul, swan_slice cwd, swan_slice env_nul, int64_
             else { close(fds[i].fd); fds[i].fd = -1; open_fds--; }
         }
     }
+    int status = 0, reaped = 0;
+    /* Both streams can close while the program keeps running (it redirected
+       them, or handed them to a child): the deadline still holds. */
+    while (!timed_out && deadline) {
+        pid_t w = waitpid(pid, &status, WNOHANG);
+        if (w == pid || (w < 0 && errno != EINTR)) { reaped = 1; break; }
+        if (now_ms() >= deadline) { timed_out = 1; break; }
+        struct timespec ts = {0, 20 * 1000000};
+        nanosleep(&ts, NULL);
+    }
     if (timed_out) kill(-pid, SIGKILL);
     for (int i = 0; i < 2; i++) if (fds[i].fd >= 0) close(fds[i].fd);
-    int status = 0;
-    waitpid(pid, &status, 0);
+    if (!reaped) waitpid(pid, &status, 0);
     free(argv); free(envp); free(abuf); free(ebuf);
     if (timed_out) return -2;
     if (WIFEXITED(status)) return WEXITSTATUS(status);

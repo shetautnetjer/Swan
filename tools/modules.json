@@ -44,7 +44,7 @@
   "rust": {
     "match": [".rs"],
     "lint": [
-      {"cmd": ["cargo", "clippy", "--workspace", "--all-targets", "--message-format=json", "--quiet"], "parser": "cargo", "source": "clippy", "env": ["CARGO_TARGET_DIR={out}/cargo-target"]}
+      {"cmd": ["cargo", "clippy", "--workspace", "--all-targets", "--message-format=json", "--keep-going", "--quiet"], "parser": "cargo", "source": "clippy", "env": ["CARGO_TARGET_DIR={out}/cargo-target"]}
     ],
     "format": [
       {"cmd": ["rustfmt", "--edition", "2021", "{files}"]}

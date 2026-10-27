@@ -65,5 +65,19 @@ check("cargo check's error lands in the caller of Tile::new (the test fn tiles, 
   rsDiag.diagnostics.some((d: any) => d.severity === "error" && d.in_symbol === "tiles" && d.distance === 1 && !d.stale),
   rsDiag.diagnostics);
 
+// A checker that fails without checking (cargo exits 101 when a dependency
+// will not resolve) leaves the saved errors as they were.
+const toml = `${rs}/repo/Cargo.toml`;
+const tomlText = await Bun.file(toml).text();
+await Bun.write(toml, tomlText + (tomlText.includes("[dependencies]") ? "" : "\n[dependencies]\n") +
+  "missing-dep = { path = \"../does-not-exist\" }\n");
+const broken = Bun.spawnSync(["bin/swan", "check", `${rs}/repo`, `${rs}/map`], { stdout: "pipe", stderr: "pipe" });
+await Bun.write(toml, tomlText);
+const kept = JSON.parse(sh(["bin/swan", "query", `${rs}/map/swan.db`, "diag", "Tile/new", "src/lib.rs"]));
+check("a cargo that fails without checking keeps the saved errors and says so",
+  broken.stdout.toString().includes("could not check") &&
+  kept.diagnostics.some((d: any) => d.severity === "error" && d.in_symbol === "tiles"),
+  broken.stdout.toString() + broken.stderr.toString().slice(-300));
+
 console.log(failures ? `${failures} check(s) failed` : "all diagnostics checks passed");
 process.exit(failures ? 1 : 0);

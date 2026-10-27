@@ -153,6 +153,7 @@ fn call_tool(db: i64, name: const u8[:], args: json::Node?, out: u8[>..]&) -> bo
         guard root.len > 0 && dir.len > 0 else { out.append("the map does not record its repo; rebuild it with swan map"); return false; }
         var report: u8[>..] = [];
         let ok = if name == "update_map" { map_main(root, dir, report) } else { check_main(root, dir, report) };
+        if name == "update_map" { load_freshness(db); }     // the map has a new SCIP time
         json::format_string(out, report);
         return ok;
     }

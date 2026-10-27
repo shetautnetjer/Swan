@@ -133,13 +133,19 @@ fn index_main(dir: const u8[:], db_path: const u8[:], root: const u8[:], refresh
                                     doc: if f.len > 5 { f[5] } else { f[0][0..0] }, kind: kind });
     };
 
-    // Each file's fingerprint: its extent and occurrence rows, in order.
+    // Each file's fingerprint: its extent and occurrence rows, in order, and
+    // what symbols.tsv says of the symbols it defines (an edited doc comment
+    // or signature can leave every row as it was).
     var hashes = dictionary<const u8[:], u64> {};
     var rows = dictionary<const u8[:], i64> {};
     each_split(text[b..d], '\n') { line =>
         guard line.len > 0;
         let f = split(line, '\t');
         hashes.update(f[1], 0) { h => h = hash_combine(h, hash(line)); };
+        if f.len == 7 && f[6] == "def" {
+            let m = sigs.get(f[0]);
+            if m { hashes.update(f[1], 0) { h => h = hash_combine(h, hash(str(m.kind, "\t", m.sig, "\t", m.doc))); }; }
+        }
         rows.update(f[1], 0) { n => n += 1; };
     };
 
