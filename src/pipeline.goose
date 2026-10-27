@@ -1261,13 +1261,17 @@ fn check_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> 
     var rows: u8[>..] = [];
     var ran: u8[>..] = [];
     // Checkers that never got to check: not started (126, 127), timed out
-    // (-2), killed, or failed with nothing to show for it (cargo exits 101
-    // when a dependency will not resolve; a checker that found errors says
-    // which). Their silence is not a clean bill, so the diagnostics already
-    // saved are kept rather than replaced by a partial set.
+    // (-2), killed, or failed with nothing to show for it (a checker that
+    // found errors says which). Cargo says itself whether the build ran to
+    // its end ("build-finished"); one that stopped early (a dependency that
+    // will not resolve, a build script that failed) checked only part of
+    // the code, whatever it printed. Their silence is not a clean bill, so
+    // the diagnostics already saved are kept rather than replaced by a
+    // partial set.
     var not_run: u8[>..] = [];
-    fn checked(name: const u8[:], code: i64, found: i64) -> bool {
-        let broke = code < 0 || code == 126 || code == 127 || code >= 128;
+    fn cargo_finished(output: const u8[:]) -> bool { return find(output, "\"reason\":\"build-finished\"") >= 0; }
+    fn checked(name: const u8[:], code: i64, found: i64, finished: bool = true) -> bool {
+        let broke = code < 0 || code == 126 || code == 127 || code >= 128 || (code != 0 && !finished);
         guard broke || (code != 0 && found == 0) else { return true; }
         format(not_run, " ", name, if code == -2 { str(" (timed out)") }
                                     else if broke { str(" (exit ", code, ")") }
@@ -1302,7 +1306,7 @@ fn check_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> 
         let extra = env_entry("CARGO_TARGET_DIR", str(out, "/cargo-target"));
         let code = run_step("cargo check", a, repo, child_env(l, extra), 3600000, o);
         let n = parse_cargo(o, repo, rows);
-        if checked("cargo", code, n) { format(ran, " cargo:", n); }
+        if checked("cargo", code, n, cargo_finished(o)) { format(ran, " cargo:", n); }
     }
     if l.py {
         // pyright run from the repo root reads the repo's own settings
@@ -1389,7 +1393,7 @@ fn check_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> 
         if code != -100 {
             let n = if par == "github" { parse_github(o, repo, src, rows) }
                     else if par == "cargo" { parse_cargo(o, repo, rows, src) } else { 0 };
-            if checked(lang, code, n) { format(ran, " ", src, ":", n); }
+            if checked(lang, code, n, par != "cargo" || cargo_finished(o)) { format(ran, " ", src, ":", n); }
         }
     };
     guard not_run.len == 0 else {
