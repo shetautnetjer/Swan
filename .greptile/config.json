@@ -1,0 +1,37 @@
+{
+  "autoReview": ["open"],
+  "effort": "base",
+  "strictness": 2,
+  "commentTypes": ["logic", "syntax"],
+  "fixWithAI": true,
+  "ignorePatterns": "fixtures/**\nlsp/**\ntools/package-lock.json",
+  "context": {
+    "repos": ["shetautnetjer/goose-sqlite", "shetautnetjer/goose-treesitter", "shetautnetjer/goose-lsp"]
+  },
+  "rules": [
+    {
+      "id": "fresh-after-edit",
+      "rule": "Any path that writes a source file and marks it fresh (mark_edited) must also bring its stored rows in line with the new text: shift positions for every symbol in the file, nested ones included, and invalidate files.hash so a later refresh cannot skip it.",
+      "scope": ["src/**"],
+      "severity": "high"
+    },
+    {
+      "id": "freshness-state-reload",
+      "rule": "Freshness state (fresh_root, fresh_scip_time) must be reset before it is reloaded, and every entry point that refreshes the map must reload it in the running server.",
+      "scope": ["src/**"],
+      "severity": "high"
+    },
+    {
+      "id": "checker-failure-keeps-diagnostics",
+      "rule": "When an external checker or indexer fails to start or exits with an error, keep the previous diagnostics and stamps; only replace them after a successful run.",
+      "scope": ["src/**"],
+      "severity": "medium"
+    },
+    {
+      "id": "native-timeouts",
+      "rule": "Child-process helpers in native/ must enforce their timeout on every wait, including after the child closes its output pipes.",
+      "scope": ["native/**"],
+      "severity": "medium"
+    }
+  ]
+}
