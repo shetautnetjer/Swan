@@ -111,7 +111,7 @@ const occByDoc = new Map<string, string[]>();
 const rustDocs: { path: string; taken: Set<string> }[] = [];
 // C, C++ and CUDA definitions without an enclosing range (scip-clang writes
 // none), whose spans cBodies() works out from the source.
-const cDefs: { path: string; symbol: string; line: number; col: number }[] = [];
+const cDefs: { path: string; symbol: string; line: number; col: number; cs: boolean }[] = [];
 const ext: string[] = [];
 const rel: string[] = [];
 const syms = new Map<string, string>();
@@ -227,13 +227,15 @@ function markImports() {
   }
 }
 
-// scip-clang gives no enclosing ranges, so Swan could not say which function
+// scip-clang and scip-dotnet give no enclosing ranges, so Swan could not say which function
 // a use sits in, nor edit a function by symbol. For each function or type
 // definition, this finds its body in the source: from the name, the first
 // '{' before any ';' (a ';' first means a declaration, which has no body),
 // to its matching '}', skipping comments, strings and character literals.
 // The span starts at the definition's line, where its return type or
-// keyword sits.
+// keyword sits. C# adds expression bodies (`int Round() => Strike();`,
+// which end at their ';') and its own strings: verbatim @"..." (no escapes,
+// "" for a quote, may span lines) and raw """...""" (N quotes, no escapes).
 function cBodies() {
   const texts = new Map<string, string[]>();
   for (const d of cDefs) {
@@ -243,16 +245,36 @@ function cBodies() {
       texts.set(d.path, lines);
     }
     let l = d.line, c = d.col, depth = 0, started = false, done = false;
-    let inStr = "", inBlock = false;
+    let inStr = "", inBlock = false, verbatim = false, arrow = false, parens = 0;
     scan: while (l < lines.length) {
       const line = lines[l];
       while (c < line.length) {
         const ch = line[c], two = line.slice(c, c + 2);
         if (inBlock) { if (two === "*/") { inBlock = false; c += 2; continue; } c++; continue; }
-        if (inStr) { if (ch === "\\") { c += 2; continue; } if (ch === inStr) inStr = ""; c++; continue; }
+        if (inStr) {
+          if (inStr.length > 1) { if (line.startsWith(inStr, c)) { c += inStr.length; inStr = ""; } else c++; continue; }
+          if (verbatim) { if (two === '""') { c += 2; continue; } if (ch === '"') inStr = ""; c++; continue; }
+          if (ch === "\\") { c += 2; continue; } if (ch === inStr) inStr = ""; c++; continue;
+        }
         if (two === "//") break;
         if (two === "/*") { inBlock = true; c += 2; continue; }
-        if (ch === '"' || ch === "'") { inStr = ch; c++; continue; }
+        const at = d.cs && ch === '"' && /@\$?$|\$@$/.test(line.slice(Math.max(0, c - 2), c));
+        if (d.cs && ch === '"' && !at && line.startsWith('"""', c)) {
+          let n = 3; while (line[c + n] === '"') n++;
+          inStr = '"'.repeat(n); c += n; continue;
+        }
+        if (ch === '"' || ch === "'") { verbatim = at; inStr = ch; c++; continue; }
+        // `=>` starts an expression body only outside brackets: a lambda in a
+        // constructor initializer (`: base(() => Make())`) does not.
+        if (d.cs && !started && !arrow && parens === 0 && two === "=>") { arrow = true; c += 2; continue; }
+        if (d.cs && !started && !arrow) { if (ch === "(" || ch === "[") parens++; else if (ch === ")" || ch === "]") parens--; }
+        if (arrow) {
+          // An expression body: its ';' at bracket depth 0 ends it.
+          if ("({[".includes(ch)) depth++;
+          else if (")}]".includes(ch)) depth--;
+          else if (ch === ";" && depth === 0) { done = true; break scan; }
+          c++; continue;
+        }
         if (!started && ch === ";") break scan;
         if (ch === "{") { depth++; started = true; }
         else if (ch === "}" && started && --depth === 0) { done = true; break scan; }
@@ -444,6 +466,9 @@ root.fields((f, _wt, r) => {
   // A document for the run's target itself has an empty path (it is the root).
   if (!path && docBase) path = posix.normalize(docBase);
   if (seenDocs.has(path)) { dupDocs++; return; }
+  // MSBuild's obj/ folders hold generated code (scip-dotnet indexes it after
+  // its restore); Swan skips them when walking a repo, so the map does too.
+  if (/(^|\/)obj\//.test(path)) return;
   seenDocs.add(path);
   docs++;
   for (const info of infos) symbolInfo(info, path);
@@ -457,8 +482,9 @@ root.fields((f, _wt, r) => {
   for (const { range, enclosing, symbol, roles } of pending) {
     if (!symbol || symbol.startsWith("local ")) continue;
     if (roles & ROLE_DEFINITION) defined.add(symbol);
-    if ((roles & ROLE_DEFINITION) && enclosing.length < 3 && symbol.startsWith("cxx ") && /(\)\.|#)$/.test(symbol))
-      cDefs.push({ path, symbol, line: range[0], col: range[1] });
+    if ((roles & ROLE_DEFINITION) && enclosing.length < 3 && (symbol.startsWith("cxx ") || symbol.startsWith("scip-dotnet ")) &&
+        /(\)\.|#)$/.test(symbol))
+      cDefs.push({ path, symbol, line: range[0], col: range[1], cs: symbol.startsWith("scip-dotnet ") });
     const role = roles & ROLE_DEFINITION ? "def" : roles & ROLE_IMPORT ? "imp" : "ref";
     rows.push([symbol, path, ...span(range), role].join("\t"));
     if (enclosing.length >= 3) ext.push([symbol, path, ...span(enclosing)].join("\t"));

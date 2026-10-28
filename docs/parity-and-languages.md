@@ -25,7 +25,7 @@ The JetBrains back end adds refactoring tools that LSP lacks.
 | `find_declaration` | `find_symbol` by name and `get_symbol_at` by file/position | index-dependent; not a complete declaration/definition distinction |
 | `find_implementations` | `find_implementations` (classes, subclasses, method overrides, any depth) | done |
 | JetBrains `type_hierarchy` | `get_type_hierarchy` (supertypes and subtypes) | done |
-| `get_diagnostics_for_file` / `_for_symbol` | `get_diagnostics` over stored checks/lints, plus optional live language-server requests | configured live adapters for Python (with Blender's stubs), TS/JS, Rust, Kotlin, C/C++ (clangd), Lua (lua-language-server) and GLSL/HLSL/WGSL (shader-validator); see diagnostics.md |
+| `get_diagnostics_for_file` / `_for_symbol` | `get_diagnostics` over stored checks/lints, plus optional live language-server requests | configured live adapters for Python (with Blender's stubs), TS/JS, Rust, Kotlin, C/C++ (clangd), C# (csharp-ls), Lua (lua-language-server) and GLSL/HLSL/WGSL (shader-validator); see diagnostics.md |
 | JetBrains `list_inspections` / `run_inspections` | missing | missing |
 | (no Serena equivalent) | `get_callers` impact radius, `get_callees`, `index_info` | Swan only |
 
@@ -68,7 +68,7 @@ start with scheme and package manager, so languages cannot collide.
 | Go | scip-go (now `scip-code/scip-go`) | active; pushed 2026-10-22 | defs, refs, implementations (Go interfaces), module symbols | needs `go` and the module cache |
 | Rust | rust-analyzer's built-in `rust-analyzer scip` | rust-analyzer is very active | defs, refs, types, crate symbols | macro-heavy code resolves partly; slow on big workspaces |
 | C / C++ | scip-clang (Sourcegraph) | active; pushed 2026-10-24 | defs, refs, headers | needs `compile_commands.json`; whatever the build system hides stays hidden |
-| C# | scip-dotnet (Sourcegraph) | active; pushed 2026-10-25 | defs, refs, NuGet symbols | needs a buildable solution and the .NET SDK |
+| C# | scip-dotnet (Sourcegraph) | in use (0.2.14, .NET SDK 10.0.402 under .tools) | defs, refs, implementations, callers (Swan finds method bodies itself; scip-dotnet gives none); obj/ files left out | needs a .sln or .csproj at the repo root; runs `dotnet restore`, which writes obj/ |
 | Ruby | scip-ruby (Sourcegraph, built on Sorbet) | active but small (22 stars) | defs, refs | quality depends on Sorbet types; untyped Ruby resolves less |
 | PHP and others | no maintained Sourcegraph indexer found | n/a | n/a | fall back to tree-sitter (names only) |
 

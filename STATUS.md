@@ -1,6 +1,6 @@
 # Swan status
 
-as_of: 2026-10-26
+as_of: 2026-10-27
 
 This is a chronological development log. Earlier "not done" statements,
 private-repo timings and "all tests pass" entries describe their original
@@ -286,6 +286,30 @@ branch fix/greptile-review:
   nothing on a clean file (lua-language-server): 4 s instead of 120 s.
 - Lua, shaders, GDScript, C# and PHP have no SCIP indexer here yet: a repo
   of only those maps to an empty map, searched and checked live.
+
+## 2026-10-27: C#, wave 2
+
+- The .NET SDK 10.0.402, csharp-ls 0.28.0 and scip-dotnet 0.2.14 live in
+  .tools (pinned in fetch-tools.sh; dotnet's homes and NuGet's cache too).
+- Full map for C#: `swan map` runs scip-dotnet when a .sln, .slnx or
+  .csproj is at the repo root. scip-dotnet gives no body ranges, so the
+  flattener finds method bodies by braces, as for C++; without that,
+  callers come back empty (checked by removing it). Generated obj/ files are
+  left out of the map, and obj/ is skipped like build/. fixtures/tiny-cs
+  maps in about 1.6 s; scip-dotnet's `dotnet restore` writes obj/ into the
+  repo, as a build would.
+- Live C# errors through csharp-ls: the deliberate error came back in about
+  0.5 s; the first, clean check takes about 2.5 s while it loads the project.
+- tests/game_live_check.ts covers both; the full suite passes.
+
+- Review follow-up: the body finder handles C# `=>` methods and verbatim and
+  raw strings. Tools that run a repo's own build files (scip-java with Maven
+  or Gradle, rust-analyzer scip, cargo check and clippy, the Rust, Kotlin
+  and C# servers, scip-dotnet) now wait for `swan trust <repo>`
+  (Mani's decision, 2026-10-28); `scripts/test.sh` sets SWAN_TRUST_BUILD=1
+  for the fixtures, and game_live_check checks the untrusted path too.
+  Existing maps of Rust, Gradle, Maven or C# repos need one `swan trust`
+  each before their next map.
 
 ## Remaining work
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Fetches the pinned Goose compiler, rust-analyzer, clangd, lua-language-server,
-# the shader language server, Blender's Python stubs, a JDK, scip-java,
+# the shader language server, Blender's Python stubs, the .NET SDK with
+# csharp-ls and scip-dotnet, a JDK, scip-java,
 # scip-clang, clang's headers and CUDA headers into .tools/ and the
 # SCIP indexers for TypeScript and Python, and pyright, into tools/node_modules. Nothing is
 # installed system-wide.
@@ -150,6 +151,24 @@ if [ ! -x .tools/shader-ls/bin/shader-language-server ]; then
   chmod +x .tools/shader-ls/bin/shader-language-server
 fi
 [ -d .tools/blender-stubs/bpy-stubs ] || uv pip install -q --target .tools/blender-stubs "fake-bpy-module-5.0==20260730"
+# C# (Unity scripts, Godot C#, .NET): the .NET SDK, csharp-ls for live errors
+# and scip-dotnet for the full map, as dotnet tools. Their homes and NuGet's
+# package cache stay under .tools too.
+if [ ! -x .tools/dotnet/dotnet ]; then
+  mkdir -p .tools/dotnet
+  curl -fsSL -o .tools/dotnet/sdk.tgz https://builds.dotnet.microsoft.com/dotnet/Sdk/10.0.402/dotnet-sdk-10.0.402-linux-x64.tar.gz
+  echo "1904a98dda2db34ba78ba3c4fb1b224455329af91c341d83547843c1839e112b04ae699ee92fa2449a8f62249196a938723078c0c60b9f65c88539d5687729c2  .tools/dotnet/sdk.tgz" | sha512sum -c -
+  tar -xzf .tools/dotnet/sdk.tgz -C .tools/dotnet
+  rm .tools/dotnet/sdk.tgz
+fi
+dotnet_tool() {   # name version
+  [ -x ".tools/dotnet-tools/$1" ] && return 0
+  DOTNET_ROOT=$PWD/.tools/dotnet DOTNET_CLI_HOME=$PWD/.tools/dotnet-home NUGET_PACKAGES=$PWD/.tools/nuget \
+    DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1 \
+    .tools/dotnet/dotnet tool install "$1" --version "$2" --tool-path .tools/dotnet-tools
+}
+dotnet_tool csharp-ls 0.28.0
+dotnet_tool scip-dotnet 0.2.14
 (cd tools && npm install --no-fund --no-audit --silent)
 # The lsp/ submodule (goose-lsp), if the clone was not recursive.
 git submodule update --init lsp

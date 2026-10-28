@@ -11,7 +11,8 @@ import sqlite;
 // What the placeholders in modules.json stand for.
 // compdb: the folder whose compile_commands.json built the map's C and C++
 // (the repo's own, at its root or in build/, else the one swan map writes).
-struct ModCtx { repo: u8[..2048], out: u8[..2048], home: u8[..2048], python: u8[..2048], compdb: u8[..2048] }
+struct ModCtx { repo: u8[..2048], out: u8[..2048], home: u8[..2048], python: u8[..2048], compdb: u8[..2048],
+                trusted: bool }   // the repo may run its own build files (see build_trusted)
 
 fn mod_ctx(repo: const u8[:], out: const u8[:], home: const u8[:], l: const Langs&) -> ModCtx {
     var c = ModCtx { .. };
@@ -22,6 +23,7 @@ fn mod_ctx(repo: const u8[:], out: const u8[:], home: const u8[:], l: const Lang
     if file_exists(str(repo, "/compile_commands.json")) { format(c.compdb, repo); }
     else if file_exists(str(repo, "/build/compile_commands.json")) { format(c.compdb, repo, "/build"); }
     else { format(c.compdb, out); }
+    c.trusted = build_trusted(repo, out);
     return c;
 }
 
@@ -72,7 +74,7 @@ fn build_cmd(cand: json::Node?, c: const ModCtx&, items: const u8[:], argv: u8[>
 
 // Whether a candidate's conditions hold in this repo.
 fn cand_applies(cand: json::Node?, c: const ModCtx&, env_base: const u8[:]) -> bool {
-    var ok = true;
+    var ok = !runs_repo_code(cand) || c.trusted;
     let files = json::member(cand, "when_file");
     if files {
         var found = false;
@@ -94,6 +96,13 @@ fn cand_applies(cand: json::Node?, c: const ModCtx&, env_base: const u8[:]) -> b
         if swan_run(argv, c.repo, env_base, 60000, o, er) != 0 { ok = false; }
     }
     return ok;
+}
+
+// A candidate marked "runs_repo_code" runs the repo's own build files
+// (cargo's build scripts, Gradle, MSBuild), so it waits for `swan trust`.
+fn runs_repo_code(cand: json::Node?) -> bool {
+    let v, ok = json::as_bool(json::member(cand, "runs_repo_code"));
+    return ok && v;
 }
 
 // Runs the first applicable candidate of `kind` for `lang`. Its stdout and
@@ -187,6 +196,7 @@ fn lang_of_path(p: const u8[:]) -> const u8[:] {
     if ends_with(p, ".kt") || ends_with(p, ".kts") { return "kotlin"; }
     if ends_with(p, ".c") || ends_with(p, ".cc") || ends_with(p, ".cpp") || ends_with(p, ".cxx") || ends_with(p, ".h") ||
        ends_with(p, ".hpp") || ends_with(p, ".hh") || ends_with(p, ".hxx") || ends_with(p, ".cu") || ends_with(p, ".cuh") { return "cpp"; }
+    if ends_with(p, ".cs") { return "csharp"; }
     if ends_with(p, ".lua") { return "lua"; }
     if ends_with(p, ".glsl") || ends_with(p, ".vert") || ends_with(p, ".frag") || ends_with(p, ".comp") ||
        ends_with(p, ".geom") || ends_with(p, ".tesc") || ends_with(p, ".tese") { return "glsl"; }

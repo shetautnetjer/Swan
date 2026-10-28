@@ -27,10 +27,10 @@ Android projects), C, C++ and CUDA, plus, for game and 3D work, C# (Unity,
 Godot), Lua, GDScript (Godot), Blender Python and the GLSL, HLSL and WGSL
 shading languages. Every one gets pattern search. Live errors come from a
 real language server for Python (Blender scripts included), TypeScript and
-JavaScript, Rust, Kotlin, C and C++, Lua and the three shading languages.
+JavaScript, Rust, Kotlin, C and C++, C#, Lua and the three shading languages.
 "Who calls this" and the rest of the full map need an indexer, which exists
-for TypeScript/JavaScript, Python, Rust, Java, Kotlin, C, C++ and CUDA (C#
-and PHP are planned). How deep each one goes depends on the tools installed
+for TypeScript/JavaScript, Python, Rust, Java, Kotlin, C, C++, CUDA and C#
+(PHP is planned). How deep each one goes depends on the tools installed
 for it; see [parity and languages](docs/parity-and-languages.md).
 
 **Keeping up with edits:** after a one-line edit, re-mapping a 2,361-file
@@ -278,8 +278,20 @@ for a user who needs only one language. See DECISIONS.md.
 
 - Tried with TypeScript, JavaScript (.js/.mjs/.cjs), Python, Rust, Java
   without a build tool, Kotlin through Gradle, and a host-side CUDA fixture
-  without nvcc (`swan map` picks the indexers). Go, general C/C++ projects,
-  C# and Ruby are unqualified here. The CUDA fallback does not check device
+  without nvcc, and a small C# project with a .csproj (`swan map` picks the
+  indexers). Go, general C/C++ projects, large C# solutions and Ruby are
+  unqualified here. For C#, the map runs `dotnet restore`, which writes the
+  project's obj/ folders as a build would.
+- Some tools run the repo's own build files, and a repo can run any code
+  that way: scip-java with Maven or Gradle, rust-analyzer and cargo (build
+  scripts, proc macros), the Kotlin server (Gradle) and the C# map and
+  server (MSBuild through `dotnet restore`). They wait until you trust the
+  repo once: `swan trust <repo>` (kept in Swan's data/trusted-repos). Until then `swan map` and
+  `swan check` say what they skipped and how to trust it, and a live
+  question to those servers answers the same. The MCP server cannot trust
+  a repo by itself. Test runners (`run_tests`) run the repo's code by
+  design and are not held back.
+- The CUDA fallback does not check device
   compilation. What each tried
   indexer misses is in `docs/parity-and-languages.md`.
 - scip-typescript has no per-file mode, so every refresh reruns it over the
