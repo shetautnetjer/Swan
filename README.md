@@ -281,7 +281,12 @@ for a user who needs only one language. See DECISIONS.md.
   without nvcc, and a small C# project with a .csproj (`swan map` picks the
   indexers). Go, general C/C++ projects, large C# solutions and Ruby are
   unqualified here. For C#, the map runs `dotnet restore`, which writes the
-  project's obj/ folders as a build would. The CUDA fallback does not check device
+  project's obj/ folders as a build would.
+- Some tools run the repo's own build files: scip-java runs Maven or
+  Gradle for Java, the Kotlin and Rust language servers run Gradle and
+  Cargo build scripts, and the C# map runs MSBuild through `dotnet restore`.
+  A repo can run its own code that way, so only map repos you trust.
+- The CUDA fallback does not check device
   compilation. What each tried
   indexer misses is in `docs/parity-and-languages.md`.
 - scip-typescript has no per-file mode, so every refresh reruns it over the
