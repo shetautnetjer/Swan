@@ -15,3 +15,4 @@ bun tests/split_check.ts
 bun tests/live_check.ts
 bun tests/structural_check.ts
 bun tests/kotlin_live_check.ts
+bun tests/game_live_check.ts

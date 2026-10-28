@@ -23,8 +23,15 @@ engine underneath.
 | Edit or rename a function by name, safely | `replace_symbol_body`, `rename_symbol` | refused if the file changed under it |
 
 Languages: TypeScript and JavaScript, Python, Rust, Java, Kotlin (including
-Android projects), C, C++ and CUDA. How deep each one goes depends on the
-tools installed for it; see [parity and languages](docs/parity-and-languages.md).
+Android projects), C, C++ and CUDA, plus, for game and 3D work, C# (Unity,
+Godot), Lua, GDScript (Godot), Blender Python and the GLSL, HLSL and WGSL
+shading languages. Every one gets pattern search. Live errors come from a
+real language server for Python (Blender scripts included), TypeScript and
+JavaScript, Rust, Kotlin, C and C++, Lua and the three shading languages.
+"Who calls this" and the rest of the full map need an indexer, which exists
+for TypeScript/JavaScript, Python, Rust, Java, Kotlin, C, C++ and CUDA (C#
+and PHP are planned). How deep each one goes depends on the tools installed
+for it; see [parity and languages](docs/parity-and-languages.md).
 
 **Keeping up with edits:** after a one-line edit, re-mapping a 2,361-file
 TypeScript project takes about 2 s (it used to take 8 to 10 s), and nothing

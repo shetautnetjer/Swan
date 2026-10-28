@@ -17,6 +17,7 @@ extern fn golsp_stop();
 
 var live_lang: u8[..64];        // the language whose server is running; empty when none
 var live_settle: u8[..16];      // its "settle" from modules.json: check or publish
+var live_quiet: i64 = 0;        // its "quiet_ms": silence that means a file has nothing to report
 
 // Starts the server for `lang` unless it is already running; one at a time.
 fn live_start(db: i64, lang: const u8[:], why: u8[>..]&) -> bool {
@@ -60,6 +61,8 @@ fn live_start(db: i64, lang: const u8[:], why: u8[>..]&) -> bool {
                 let st, st_ok = json::as_string(json::member(cand, "settle"));
                 live_settle.clear();
                 format(live_settle, if st_ok { st } else { "publish" });
+                let qm, qm_ok = json::as_i64(json::member(cand, "quiet_ms"));
+                live_quiet = if qm_ok { qm } else { 0 };
             }
         }
     };
@@ -97,6 +100,7 @@ fn live_diagnostics(db: i64, rel: const u8[:], out: u8[>..]&) -> bool {
     json::format_string(q, rel);
     q.append(",\"settle\":");
     json::format_string(q, live_settle);
+    if live_quiet > 0 { format(q, ",\"quiet_ms\":", live_quiet); }
     q.push('}');
     return live_ask(db, rel, q, out);
 }

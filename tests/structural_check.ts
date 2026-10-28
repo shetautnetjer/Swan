@@ -6,7 +6,7 @@
 //
 // Also checks rewrite_pattern's plan, refusal and apply on a scratch copy.
 
-import { cpSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 
 const sh = (cmd: string[], cwd?: string) => {
   const r = Bun.spawnSync(cmd, { stdout: "pipe", stderr: "pipe", cwd });
@@ -34,6 +34,16 @@ const CASES: Case[] = [
   { lang: "java", sg: "java", pattern: "new $C($$$A)", covers: "Java object creation" },
   { lang: "c", sg: "c", pattern: "printf($$$A)", covers: "C calls" },
   { lang: "kotlin", sg: "kotlin", pattern: "$X.area()", covers: "Kotlin method calls" },
+  { lang: "csharp", sg: "csharp", pattern: "Debug.Log($X)", covers: "C# (Unity) calls" },
+  { lang: "csharp", sg: "csharp", pattern: "new Vector3($$$A)", covers: "C# object creation" },
+  { lang: "lua", sg: "lua", pattern: "$O:hit($D)", covers: "Lua method calls" },
+  { lang: "lua", sg: "lua", pattern: "function $F($$$A) $$$B end", covers: "a whole Lua function" },
+  { lang: "php", sg: "php", pattern: "array_slice($$$A)", covers: "PHP calls" },
+  { lang: "php", sg: "php", pattern: "echo $X;", covers: "PHP statements with PHP variables around" },
+  { lang: "glsl", sg: "", pattern: "texture($S, $UV)", covers: "GLSL sampling", expect: ["lit.frag:7:17"] },
+  { lang: "hlsl", sg: "", pattern: "$T.Sample($S, $UV)", covers: "HLSL sampling", expect: ["lit.hlsl:6:19"] },
+  { lang: "wgsl", sg: "", pattern: "textureSample($T, $S, $UV)", covers: "WGSL sampling", expect: ["lit.wgsl:6:16"] },
+  { lang: "gdscript", sg: "", pattern: "print($$$A)", covers: "GDScript calls", expect: ["player.gd:13:2"] },
   { lang: "kotlin", sg: "kotlin", pattern: "fun $F($$$P): $T = $E", covers: "expression-bodied functions" },
   { lang: "kotlin", sg: "kotlin", pattern: "$X!!", covers: "non-null assertions" },
   { lang: "kotlin", sg: "kotlin", pattern: "class $C($$$P) : $S { $$$B }", covers: "a class body the grammar parses as another kind" },
@@ -48,7 +58,8 @@ const check = (what: string, ok: boolean, detail: unknown = "") => {
 };
 
 const EXT: Record<string, RegExp> = {
-  typescript: /\.(ts|mts|cts)$/, kotlin: /\.kts?$/, python: /\.pyi?$/, rust: /\.rs$/, java: /\.java$/, c: /\.[ch]$/, cuda: /\.(cu|cuh)$/,
+  typescript: /\.(ts|mts|cts)$/, kotlin: /\.kts?$/, csharp: /\.cs$/, lua: /\.lua$/, php: /\.php$/,
+  glsl: /\.(glsl|vert|frag|comp)$/, hlsl: /\.(hlsl|hlsli|fx)$/, wgsl: /\.wgsl$/, gdscript: /\.gd$/, python: /\.pyi?$/, rust: /\.rs$/, java: /\.java$/, c: /\.[ch]$/, cuda: /\.(cu|cuh)$/,
 };
 
 function compare(db: string, root: string, rel: string, label: string) {
@@ -59,7 +70,8 @@ function compare(db: string, root: string, rel: string, label: string) {
     const ours = new Set<string>(body.matches.filter((m: any) => EXT[c.lang].test(m.relative_path))
       .map((m: any) => `${m.relative_path}:${m.line}:${m.column}`));
     if (c.expect) {
-      if (ours.size === 0 && label !== "tiny-cuda") continue;   // no such files here
+      // Checked only where its files are (the fixture it was written for).
+      if (!c.expect.every((e) => existsSync(`${root}/${e.split(":")[0]}`))) continue;
       check(`${label} ${c.lang} ${c.pattern} (${c.covers}): ${ours.size}, by hand`,
         [...ours].sort().join(",") === c.expect.join(","), [...ours]);
       continue;
@@ -85,7 +97,8 @@ if (external) {
   compare(external, info.root, process.argv[3] ?? "", "repo");
 } else {
   for (const [fx, map] of [["tiny-ts", "data/tiny-ts"], ["tiny-py", "data/struct/py"], ["tiny-rs", "data/struct/rs"],
-                           ["tiny-java", "data/struct/java"], ["tiny-cuda", "data/struct/cuda"], ["tiny-kt", "data/struct/kt"]]) {
+                           ["tiny-java", "data/struct/java"], ["tiny-cuda", "data/struct/cuda"], ["tiny-kt", "data/struct/kt"],
+                           ["tiny-lua", "data/struct/lua"], ["tiny-shaders", "data/struct/shaders"], ["tiny-game", "data/struct/game"]]) {
     if (fx !== "tiny-ts") {
       // Kotlin's map runs a Gradle build, which writes into the repo: map a copy.
       const src = fx === "tiny-kt" ? `${map}-repo` : `fixtures/${fx}`;
@@ -133,6 +146,35 @@ if (external) {
   writeFileSync(lib, before.replace("pub side: u32", "pub side:  u32"));
   const refused = await call("rewrite_pattern", { pattern: "3 * self.$F * self.$F", rewrite: "3 * self.$F.pow(2)", apply: true });
   check("a file changed outside Swan since the map is refused", !refused.ok && /refresh first/.test(refused.body.refused ?? ""), refused.body);
+  // Search-only languages (Lua here) have no rows: a second rewrite of the
+  // same file must still be Swan's own edit, not an outside change.
+  rmSync("data/struct/rw-lua", { recursive: true, force: true });
+  cpSync("fixtures/tiny-lua", "data/struct/rw-lua/repo", { recursive: true });
+  sh(["bin/swan", "map", "data/struct/rw-lua/repo", "data/struct/rw-lua/out"]);
+  const lua = Bun.spawn(["bin/swan", "serve", "data/struct/rw-lua/out/swan.db"], { stdin: "pipe", stdout: "pipe" });
+  const lreader = lua.stdout.getReader();
+  let lbuf = "";
+  const lcall = async (name: string, args: any) => {
+    lua.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: ++id, method: "tools/call", params: { name, arguments: args } }) + "\n");
+    while (!lbuf.includes("\n")) { const { value } = await lreader.read(); lbuf += new TextDecoder().decode(value); }
+    const line = lbuf.slice(0, lbuf.indexOf("\n")); lbuf = lbuf.slice(lbuf.indexOf("\n") + 1);
+    const r = JSON.parse(line).result;
+    return { ok: !r.isError, body: JSON.parse(r.content[0].text) };
+  };
+  const once = await lcall("rewrite_pattern", { pattern: "print($X)", rewrite: "log_line($X)", apply: true });
+  const twice = await lcall("rewrite_pattern", { pattern: "log_line($X)", rewrite: "print($X)", apply: true });
+  check("a Lua file can be rewritten twice in a row", once.ok && twice.ok && twice.body.applied === true &&
+    readFileSync("data/struct/rw-lua/repo/game.lua", "utf8") === readFileSync("fixtures/tiny-lua/game.lua", "utf8"), { once: once.body, twice: twice.body });
+  lua.stdin.end();
+  await lua.exited;
+
+  // A repo of only geometry and effect shaders still maps.
+  rmSync("data/struct/geom", { recursive: true, force: true });
+  cpSync("fixtures/tiny-shaders/lit.frag", "data/struct/geom/repo/only.geom");
+  writeFileSync("data/struct/geom/repo/only.fx", "float4 main() : SV_Target { return 1; }\n");
+  const gm = sh(["bin/swan", "map", "data/struct/geom/repo", "data/struct/geom/out"]);
+  check("a repo of .geom and .fx shaders maps", gm.code === 0, gm.out + gm.err);
+
   const bad = await call("search_pattern", { pattern: "fn (((", language: "rust" });
   check("a pattern that does not parse says so", bad.body.pattern_does_not_parse_in?.length === 1, bad.body);
   proc.stdin.end();

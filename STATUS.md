@@ -272,6 +272,21 @@ branch fix/greptile-review:
   Not covered by a test: the check_errors, timeout, tsconfig, Python-piece,
   typeLiteral and doc-fingerprint changes (reviewed by reading only).
 
+## 2026-10-27: game and 3D languages, wave 1
+
+- Pattern search for Lua, GLSL, HLSL, WGSL, GDScript, C# and PHP (goose-treesitter,
+  107 package checks); the ast-grep ledger agrees on C#, Lua and PHP, and
+  the shader and GDScript cases are checked by hand.
+- Live errors through real servers, each in .tools and pinned in
+  fetch-tools.sh: clangd 23.1.0 (C, C++), lua-language-server 3.19.2,
+  shader-validator's server 1.6.2 (GLSL, HLSL, WGSL), and pyright with
+  Blender 5.0 stubs (fake-bpy-module-5.0 20260730). tests/game_live_check.ts:
+  each deliberate error came back in 0.3 to 0.6 s.
+- goose-lsp answers after `quiet_ms` of silence for servers that publish
+  nothing on a clean file (lua-language-server): 4 s instead of 120 s.
+- Lua, shaders, GDScript, C# and PHP have no SCIP indexer here yet: a repo
+  of only those maps to an empty map, searched and checked live.
+
 ## Remaining work
 
 1. Qualify real server adapters and indexers separately from the mock LSP

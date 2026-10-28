@@ -9,7 +9,9 @@ import json;
 import sqlite;
 
 // What the placeholders in modules.json stand for.
-struct ModCtx { repo: u8[..2048], out: u8[..2048], home: u8[..2048], python: u8[..2048] }
+// compdb: the folder whose compile_commands.json built the map's C and C++
+// (the repo's own, at its root or in build/, else the one swan map writes).
+struct ModCtx { repo: u8[..2048], out: u8[..2048], home: u8[..2048], python: u8[..2048], compdb: u8[..2048] }
 
 fn mod_ctx(repo: const u8[:], out: const u8[:], home: const u8[:], l: const Langs&) -> ModCtx {
     var c = ModCtx { .. };
@@ -17,6 +19,9 @@ fn mod_ctx(repo: const u8[:], out: const u8[:], home: const u8[:], l: const Lang
     format(c.out, out);
     format(c.home, home);
     format(c.python, python_of(l));
+    if file_exists(str(repo, "/compile_commands.json")) { format(c.compdb, repo); }
+    else if file_exists(str(repo, "/build/compile_commands.json")) { format(c.compdb, repo, "/build"); }
+    else { format(c.compdb, out); }
     return c;
 }
 
@@ -29,7 +34,9 @@ fn expand(s: const u8[:], c: const ModCtx&, into: u8[>..]&) {
     format_replaced(a, b, "{tools}", str(c.home, "/.tools"));
     b.clear();
     format_replaced(b, a, "{bin}", str(c.home, "/tools/node_modules/.bin"));
-    format_replaced(into, b, "{python}", c.python);
+    a.clear();
+    format_replaced(a, b, "{compdb}", c.compdb);
+    format_replaced(into, a, "{python}", c.python);
 }
 
 // Builds a candidate's argv (NUL-separated) and environment entries, with
@@ -178,6 +185,13 @@ fn lang_of_path(p: const u8[:]) -> const u8[:] {
     if ends_with(p, ".py") || ends_with(p, ".pyi") { return "python"; }
     if ends_with(p, ".rs") { return "rust"; }
     if ends_with(p, ".kt") || ends_with(p, ".kts") { return "kotlin"; }
+    if ends_with(p, ".c") || ends_with(p, ".cc") || ends_with(p, ".cpp") || ends_with(p, ".cxx") || ends_with(p, ".h") ||
+       ends_with(p, ".hpp") || ends_with(p, ".hh") || ends_with(p, ".hxx") || ends_with(p, ".cu") || ends_with(p, ".cuh") { return "cpp"; }
+    if ends_with(p, ".lua") { return "lua"; }
+    if ends_with(p, ".glsl") || ends_with(p, ".vert") || ends_with(p, ".frag") || ends_with(p, ".comp") ||
+       ends_with(p, ".geom") || ends_with(p, ".tesc") || ends_with(p, ".tese") { return "glsl"; }
+    if ends_with(p, ".hlsl") || ends_with(p, ".hlsli") || ends_with(p, ".fx") { return "hlsl"; }
+    if ends_with(p, ".wgsl") { return "wgsl"; }
     if ends_with(p, ".ts") || ends_with(p, ".tsx") || ends_with(p, ".mts") || ends_with(p, ".cts") ||
        ends_with(p, ".js") || ends_with(p, ".jsx") || ends_with(p, ".mjs") || ends_with(p, ".cjs") { return "typescript"; }
     return "";

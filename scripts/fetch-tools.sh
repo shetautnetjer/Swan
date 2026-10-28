@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Fetches the pinned Goose compiler, rust-analyzer, a JDK, scip-java,
+# Fetches the pinned Goose compiler, rust-analyzer, clangd, lua-language-server,
+# the shader language server, Blender's Python stubs, a JDK, scip-java,
 # scip-clang, clang's headers and CUDA headers into .tools/ and the
 # SCIP indexers for TypeScript and Python, and pyright, into tools/node_modules. Nothing is
 # installed system-wide.
@@ -119,6 +120,36 @@ fi
 # its daemons quit after 10 idle minutes and keep to 2 GB.
 mkdir -p .tools/gradle-home
 [ -f .tools/gradle-home/gradle.properties ] || printf 'org.gradle.daemon.idletimeout=600000\norg.gradle.jvmargs=-Xmx2g\n' > .tools/gradle-home/gradle.properties
+# Language servers for game and 3D code (live errors): clangd for C and C++,
+# lua-language-server, and shader-validator's server for GLSL, HLSL and WGSL;
+# plus Blender's Python stubs (fake-bpy-module) so pyright knows bpy.
+fetch_zip() {   # dir url sha256 kind
+  [ -e ".tools/$1/.done" ] && return 0
+  mkdir -p ".tools/$1"
+  curl -fsSL -o ".tools/$1/dl" "$2"
+  echo "$3  .tools/$1/dl" | sha256sum -c -
+  case "$4" in
+    zip) unzip -q -o ".tools/$1/dl" -d ".tools/$1" ;;
+    tgz) tar -xzf ".tools/$1/dl" -C ".tools/$1" ;;
+  esac
+  rm ".tools/$1/dl"
+  touch ".tools/$1/.done"
+}
+fetch_zip clangd https://github.com/clangd/clangd/releases/download/23.1.0/clangd-linux-23.1.0.zip \
+  e53b1a96196095faedb7642cf64964f7fb9ad4a0c1f00dd2c172a3d9dcbafdfd zip
+fetch_zip lua-ls https://github.com/LuaLS/lua-language-server/releases/download/3.19.2/lua-language-server-3.19.2-linux-x64.tar.gz \
+  93ad326b10f6c00911dd8c450fa098332dbd8f9f45d1052f5636a2d54479b947 tgz
+if [ ! -x .tools/shader-ls/bin/shader-language-server ]; then
+  mkdir -p .tools/shader-ls/bin
+  curl -fsSL -o .tools/shader-ls/s.vsix https://github.com/antaalt/shader-validator/releases/download/v1.6.0/shader-validator-linux-x64.vsix
+  echo "0ff5679108593b81055911f2b90a7b65cdd354e11792feb422d5daa42377a74f  .tools/shader-ls/s.vsix" | sha256sum -c -
+  unzip -q -o .tools/shader-ls/s.vsix -d .tools/shader-ls/vsix
+  cp .tools/shader-ls/vsix/extension/bin/linux-x64/* .tools/shader-ls/bin/
+  cp .tools/shader-ls/vsix/extension/LICENSE* .tools/shader-ls/ 2>/dev/null || true
+  rm -rf .tools/shader-ls/vsix .tools/shader-ls/s.vsix
+  chmod +x .tools/shader-ls/bin/shader-language-server
+fi
+[ -d .tools/blender-stubs/bpy-stubs ] || uv pip install -q --target .tools/blender-stubs "fake-bpy-module-5.0==20260730"
 (cd tools && npm install --no-fund --no-audit --silent)
 # The lsp/ submodule (goose-lsp), if the clone was not recursive.
 git submodule update --init lsp
