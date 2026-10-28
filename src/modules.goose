@@ -178,6 +178,13 @@ fn lang_of_path(p: const u8[:]) -> const u8[:] {
     if ends_with(p, ".py") || ends_with(p, ".pyi") { return "python"; }
     if ends_with(p, ".rs") { return "rust"; }
     if ends_with(p, ".kt") || ends_with(p, ".kts") { return "kotlin"; }
+    if ends_with(p, ".c") || ends_with(p, ".cc") || ends_with(p, ".cpp") || ends_with(p, ".cxx") || ends_with(p, ".h") ||
+       ends_with(p, ".hpp") || ends_with(p, ".hh") || ends_with(p, ".hxx") || ends_with(p, ".cu") || ends_with(p, ".cuh") { return "cpp"; }
+    if ends_with(p, ".lua") { return "lua"; }
+    if ends_with(p, ".glsl") || ends_with(p, ".vert") || ends_with(p, ".frag") || ends_with(p, ".comp") ||
+       ends_with(p, ".geom") || ends_with(p, ".tesc") || ends_with(p, ".tese") { return "glsl"; }
+    if ends_with(p, ".hlsl") || ends_with(p, ".hlsli") || ends_with(p, ".fx") { return "hlsl"; }
+    if ends_with(p, ".wgsl") { return "wgsl"; }
     if ends_with(p, ".ts") || ends_with(p, ".tsx") || ends_with(p, ".mts") || ends_with(p, ".cts") ||
        ends_with(p, ".js") || ends_with(p, ".jsx") || ends_with(p, ".mjs") || ends_with(p, ".cjs") { return "typescript"; }
     return "";

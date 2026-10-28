@@ -25,7 +25,7 @@ The JetBrains back end adds refactoring tools that LSP lacks.
 | `find_declaration` | `find_symbol` by name and `get_symbol_at` by file/position | index-dependent; not a complete declaration/definition distinction |
 | `find_implementations` | `find_implementations` (classes, subclasses, method overrides, any depth) | done |
 | JetBrains `type_hierarchy` | `get_type_hierarchy` (supertypes and subtypes) | done |
-| `get_diagnostics_for_file` / `_for_symbol` | `get_diagnostics` over stored checks/lints, plus optional live language-server requests | configured live adapters for Python, TS/JS, Rust and Kotlin; see diagnostics.md |
+| `get_diagnostics_for_file` / `_for_symbol` | `get_diagnostics` over stored checks/lints, plus optional live language-server requests | configured live adapters for Python (with Blender's stubs), TS/JS, Rust, Kotlin, C/C++ (clangd), Lua (lua-language-server) and GLSL/HLSL/WGSL (shader-validator); see diagnostics.md |
 | JetBrains `list_inspections` / `run_inspections` | missing | missing |
 | (no Serena equivalent) | `get_callers` impact radius, `get_callees`, `index_info` | Swan only |
 

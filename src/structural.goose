@@ -11,7 +11,8 @@ import json;
 import treesitter;
 import sqlite;
 
-let STRUCT_LANGS = ["typescript", "tsx", "javascript", "python", "rust", "java", "c", "cpp", "cuda", "kotlin"];
+let STRUCT_LANGS = ["typescript", "tsx", "javascript", "python", "rust", "java", "c", "cpp", "cuda", "kotlin",
+                    "lua", "glsl", "hlsl", "wgsl", "gdscript", "csharp", "php"];
 
 // The repo's files under rel with a grammar (of `lang`, if given), relative
 // to the repo, one per line.

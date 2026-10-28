@@ -6,7 +6,7 @@
 //
 // Also checks rewrite_pattern's plan, refusal and apply on a scratch copy.
 
-import { cpSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 
 const sh = (cmd: string[], cwd?: string) => {
   const r = Bun.spawnSync(cmd, { stdout: "pipe", stderr: "pipe", cwd });
@@ -34,6 +34,16 @@ const CASES: Case[] = [
   { lang: "java", sg: "java", pattern: "new $C($$$A)", covers: "Java object creation" },
   { lang: "c", sg: "c", pattern: "printf($$$A)", covers: "C calls" },
   { lang: "kotlin", sg: "kotlin", pattern: "$X.area()", covers: "Kotlin method calls" },
+  { lang: "csharp", sg: "csharp", pattern: "Debug.Log($X)", covers: "C# (Unity) calls" },
+  { lang: "csharp", sg: "csharp", pattern: "new Vector3($$$A)", covers: "C# object creation" },
+  { lang: "lua", sg: "lua", pattern: "$O:hit($D)", covers: "Lua method calls" },
+  { lang: "lua", sg: "lua", pattern: "function $F($$$A) $$$B end", covers: "a whole Lua function" },
+  { lang: "php", sg: "php", pattern: "array_slice($$$A)", covers: "PHP calls" },
+  { lang: "php", sg: "php", pattern: "echo $X;", covers: "PHP statements with PHP variables around" },
+  { lang: "glsl", sg: "", pattern: "texture($S, $UV)", covers: "GLSL sampling", expect: ["lit.frag:7:17"] },
+  { lang: "hlsl", sg: "", pattern: "$T.Sample($S, $UV)", covers: "HLSL sampling", expect: ["lit.hlsl:6:19"] },
+  { lang: "wgsl", sg: "", pattern: "textureSample($T, $S, $UV)", covers: "WGSL sampling", expect: ["lit.wgsl:6:16"] },
+  { lang: "gdscript", sg: "", pattern: "print($$$A)", covers: "GDScript calls", expect: ["player.gd:13:2"] },
   { lang: "kotlin", sg: "kotlin", pattern: "fun $F($$$P): $T = $E", covers: "expression-bodied functions" },
   { lang: "kotlin", sg: "kotlin", pattern: "$X!!", covers: "non-null assertions" },
   { lang: "kotlin", sg: "kotlin", pattern: "class $C($$$P) : $S { $$$B }", covers: "a class body the grammar parses as another kind" },
@@ -48,7 +58,8 @@ const check = (what: string, ok: boolean, detail: unknown = "") => {
 };
 
 const EXT: Record<string, RegExp> = {
-  typescript: /\.(ts|mts|cts)$/, kotlin: /\.kts?$/, python: /\.pyi?$/, rust: /\.rs$/, java: /\.java$/, c: /\.[ch]$/, cuda: /\.(cu|cuh)$/,
+  typescript: /\.(ts|mts|cts)$/, kotlin: /\.kts?$/, csharp: /\.cs$/, lua: /\.lua$/, php: /\.php$/,
+  glsl: /\.(glsl|vert|frag|comp)$/, hlsl: /\.(hlsl|hlsli|fx)$/, wgsl: /\.wgsl$/, gdscript: /\.gd$/, python: /\.pyi?$/, rust: /\.rs$/, java: /\.java$/, c: /\.[ch]$/, cuda: /\.(cu|cuh)$/,
 };
 
 function compare(db: string, root: string, rel: string, label: string) {
@@ -59,7 +70,8 @@ function compare(db: string, root: string, rel: string, label: string) {
     const ours = new Set<string>(body.matches.filter((m: any) => EXT[c.lang].test(m.relative_path))
       .map((m: any) => `${m.relative_path}:${m.line}:${m.column}`));
     if (c.expect) {
-      if (ours.size === 0 && label !== "tiny-cuda") continue;   // no such files here
+      // Checked only where its files are (the fixture it was written for).
+      if (!c.expect.every((e) => existsSync(`${root}/${e.split(":")[0]}`))) continue;
       check(`${label} ${c.lang} ${c.pattern} (${c.covers}): ${ours.size}, by hand`,
         [...ours].sort().join(",") === c.expect.join(","), [...ours]);
       continue;
@@ -85,7 +97,8 @@ if (external) {
   compare(external, info.root, process.argv[3] ?? "", "repo");
 } else {
   for (const [fx, map] of [["tiny-ts", "data/tiny-ts"], ["tiny-py", "data/struct/py"], ["tiny-rs", "data/struct/rs"],
-                           ["tiny-java", "data/struct/java"], ["tiny-cuda", "data/struct/cuda"], ["tiny-kt", "data/struct/kt"]]) {
+                           ["tiny-java", "data/struct/java"], ["tiny-cuda", "data/struct/cuda"], ["tiny-kt", "data/struct/kt"],
+                           ["tiny-lua", "data/struct/lua"], ["tiny-shaders", "data/struct/shaders"], ["tiny-game", "data/struct/game"]]) {
     if (fx !== "tiny-ts") {
       // Kotlin's map runs a Gradle build, which writes into the repo: map a copy.
       const src = fx === "tiny-kt" ? `${map}-repo` : `fixtures/${fx}`;

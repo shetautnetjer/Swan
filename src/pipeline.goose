@@ -12,6 +12,7 @@ import os;
 import json;
 import dictionary;
 import sqlite;
+import treesitter;
 
 extern fn swan_realpath(path: const u8[:], out: u8[>..]&) -> bool;
 
@@ -25,6 +26,7 @@ fn abs_path(p: const u8[:]) -> u8[>..] {
 struct Langs {
     ts: bool, js: bool, py: bool, rs: bool, java: bool, c: bool, cuda: bool,
     kt: bool,                   // Kotlin: tree-sitter only for now, no SCIP indexer runs
+    other: u8[..256],           // languages with no indexer here, only search and live errors: "lua glsl ..."
     tsconfig: bool, cargo: bool, maven: bool, gradle: bool,
     venv: u8[..2048],           // a virtualenv inside the repo, if any
 }
@@ -85,6 +87,16 @@ fn detect(repo: const u8[:]) -> Langs {
             l.java = true;
         } else if ends_with(name, ".kt") || ends_with(name, ".kts") {
             l.kt = true;
+        } else if ends_with(name, ".lua") || ends_with(name, ".gd") || ends_with(name, ".cs") || ends_with(name, ".php") ||
+                  ends_with(name, ".wgsl") || ends_with(name, ".hlsl") || ends_with(name, ".hlsli") || ends_with(name, ".glsl") ||
+                  ends_with(name, ".vert") || ends_with(name, ".frag") || ends_with(name, ".comp") {
+            // No SCIP indexer runs for these (yet): they are searched by
+            // structure and checked by their language servers.
+            let lang = treesitter::language_of_path(name);
+            if lang.len > 0 && find(l.other, lang) < 0 && l.other.len + lang.len + 1 < 256 {
+                if l.other.len > 0 { l.other.push(' '); }
+                l.other.append(lang);
+            }
         } else if ends_with(name, ".cu") || ends_with(name, ".cuh") {
             l.cuda = true;
         } else if is_c_source(name) || ends_with(name, ".h") || ends_with(name, ".hpp") || ends_with(name, ".hh") {
@@ -509,7 +521,7 @@ fn map_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> bo
     let l = detect(repo);
     format(report, "languages:", if l.ts { " typescript" } else { "" }, if l.js { " javascript" } else { "" },
            if l.java { " java" } else { "" }, if l.c { " c/c++" } else { "" }, if l.cuda { " cuda" } else { "" },
-           if l.py { " python" } else { "" }, if l.rs || l.cargo { " rust" } else { "" }, if l.kt { " kotlin" } else { "" },
+           if l.py { " python" } else { "" }, if l.rs || l.cargo { " rust" } else { "" }, if l.kt { " kotlin" } else { "" }, if l.other.len > 0 { str(" ", l.other) } else { str("") },
            if l.venv.len > 0 { str(" (venv ", l.venv, ")") } else { str("") }, "\n");
     // A map from an older Swan is rebuilt from scratch, indexers included:
     // reusing their output would skip what the new schema needs.
@@ -956,12 +968,14 @@ fn map_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> bo
                                       ["compile_commands.json", "build/compile_commands.json"]));
     }
 
-    if jobs.len == 0 && l.kt {
-        // Nothing to index, but Kotlin can still be searched by structure:
-        // an empty map records the repo for search_pattern and the rest.
+    if jobs.len == 0 && (l.kt || l.other.len > 0) {
+        // Nothing to index, but the code can still be searched by structure
+        // and checked live: an empty map records the repo for search_pattern
+        // and the rest.
         for t in ["symbols.tsv", "extents.tsv", "relationships.tsv", "occurrences.tsv"] { write_file(str(out, "/", t), ""); }
         index_main(out, str(out, "/swan.db"), repo, false, report);
-        format(report, "\nkotlin: no SCIP indexer runs yet; search_pattern and rewrite_pattern work on .kt files");
+        format(report, "\n", if l.kt { "kotlin " } else { "" }, l.other,
+               ": no SCIP indexer for these; search_pattern, rewrite_pattern and live diagnostics work on them");
         format(report, "\nswan map: ", ((clock() - t_start) * 1000.0) as i64, " ms in all");
         return true;
     }

@@ -18,8 +18,12 @@ Apache-2.0) as an installed tool; it is not part of this repository.
 Structural search comes through the goose-treesitter package
 (https://github.com/shetautnetjer/goose-treesitter), which compiles tree-sitter
 and its grammars for TypeScript/TSX, JavaScript, Python, Rust, Java, Kotlin,
-C, C++ and CUDA, all MIT; none of their code is in this repository. The live
+C, C++, CUDA, C#, PHP, Lua, GDScript, GLSL and HLSL (MIT) and WGSL (MIT); none of their code is in this repository. The live
 language-server client is the goose-lsp package (lsp/, a submodule). Structural search follows ast-grep's
 pattern syntax and matching rules (https://ast-grep.github.io, MIT); no
 ast-grep code is used. The live adapters drive rust-analyzer, pyright and
-typescript-language-server and JetBrains' Kotlin language server as installed tools.
+typescript-language-server, JetBrains' Kotlin language server, clangd
+(Apache-2.0 with LLVM exceptions), lua-language-server (MIT) and
+shader-validator's shader-language-server (MIT) as installed tools, fetched
+from their makers; pyright reads Blender's Python stubs from
+fake-bpy-module (MIT).
