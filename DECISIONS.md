@@ -131,7 +131,9 @@ layouts are not detected yet.
 A repo's build files can run any code (cargo build scripts and proc macros,
 Gradle and Maven, MSBuild through `dotnet restore`). After Codex's review of
 the C# PR, Mani chose to have every tool that runs them wait until a person
-trusts the repo: `swan trust <repo> <out-dir>` writes <out-dir>/trusted.
+trusts the repo: `swan trust <repo>` adds the repo to Swan's own data/trusted-repos
+(first kept in the map folder; moved out after Greptile showed a map folder
+inside the checkout could ship its own record).
 Candidates in tools/modules.json carry `runs_repo_code`; the map and check
 pipelines gate their own jobs the same way and report what they skipped.
 SWAN_TRUST_BUILD=1 trusts every repo (tests, CI). The MCP server has no

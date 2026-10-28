@@ -49,3 +49,18 @@ public static class Tricks
         return dir + "}" + """raw " } """;
     }
 }
+
+public class Spawner
+{
+    public Spawner(System.Func<int> make) { }
+}
+
+public class Boss : Spawner
+{
+    // A lambda in the constructor initializer is not an expression body.
+    public Boss() : base(() => 1)
+    {
+        Combat.Strike(new Crate(), 2);
+        Combat.Strike(new Player(), 3);
+    }
+}

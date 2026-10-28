@@ -305,7 +305,7 @@ branch fix/greptile-review:
 - Review follow-up: the body finder handles C# `=>` methods and verbatim and
   raw strings. Tools that run a repo's own build files (scip-java with Maven
   or Gradle, rust-analyzer scip, cargo check and clippy, the Rust, Kotlin
-  and C# servers, scip-dotnet) now wait for `swan trust <repo> <out-dir>`
+  and C# servers, scip-dotnet) now wait for `swan trust <repo>`
   (Mani's decision, 2026-10-28); `scripts/test.sh` sets SWAN_TRUST_BUILD=1
   for the fixtures, and game_live_check checks the untrusted path too.
   Existing maps of Rust, Gradle, Maven or C# repos need one `swan trust`

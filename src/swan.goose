@@ -26,7 +26,7 @@ fn usage() {
     write_stderr("""
         usage: swan map <repo> <out-dir>        index every language in the repo (or refresh)
                swan check <repo> <out-dir>      run compilers and linters into the map
-               swan trust <repo> <out-dir>      let map, check and live answers run the repo's build files
+               swan trust <repo>                let map, check and live answers run the repo's build files
                swan format <repo> <out-dir> <file>...
                swan test <repo> <out-dir> <name_path|file> [relative_path]
                swan index <flattened-dir> <db> [repo-root]
@@ -97,9 +97,9 @@ fn main() {
         let ok = map_main(a[2], a[3], report);
         print(report);
         if !ok { exit(1); }
-    } else if a[1] == "trust" && a.len == 4 {
+    } else if a[1] == "trust" && a.len == 3 {
         var report: u8[>..] = [];
-        let ok = trust_main(a[2], a[3], report);
+        let ok = trust_main(a[2], report);
         print(report);
         if !ok { exit(1); }
     } else if a[1] == "check" && a.len == 4 {

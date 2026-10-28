@@ -286,7 +286,7 @@ for a user who needs only one language. See DECISIONS.md.
   that way: scip-java with Maven or Gradle, rust-analyzer and cargo (build
   scripts, proc macros), the Kotlin server (Gradle) and the C# map and
   server (MSBuild through `dotnet restore`). They wait until you trust the
-  repo once: `swan trust <repo> <out-dir>`. Until then `swan map` and
+  repo once: `swan trust <repo>` (kept in Swan's data/trusted-repos). Until then `swan map` and
   `swan check` say what they skipped and how to trust it, and a live
   question to those servers answers the same. The MCP server cannot trust
   a repo by itself. Test runners (`run_tests`) run the repo's code by

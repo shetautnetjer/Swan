@@ -245,7 +245,7 @@ function cBodies() {
       texts.set(d.path, lines);
     }
     let l = d.line, c = d.col, depth = 0, started = false, done = false;
-    let inStr = "", inBlock = false, verbatim = false, arrow = false;
+    let inStr = "", inBlock = false, verbatim = false, arrow = false, parens = 0;
     scan: while (l < lines.length) {
       const line = lines[l];
       while (c < line.length) {
@@ -264,7 +264,10 @@ function cBodies() {
           inStr = '"'.repeat(n); c += n; continue;
         }
         if (ch === '"' || ch === "'") { verbatim = at; inStr = ch; c++; continue; }
-        if (d.cs && !started && !arrow && two === "=>") { arrow = true; c += 2; continue; }
+        // `=>` starts an expression body only outside brackets: a lambda in a
+        // constructor initializer (`: base(() => Make())`) does not.
+        if (d.cs && !started && !arrow && parens === 0 && two === "=>") { arrow = true; c += 2; continue; }
+        if (d.cs && !started && !arrow) { if (ch === "(" || ch === "[") parens++; else if (ch === ")" || ch === "]") parens--; }
         if (arrow) {
           // An expression body: its ';' at bracket depth 0 ends it.
           if ("({[".includes(ch)) depth++;
