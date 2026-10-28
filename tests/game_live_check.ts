@@ -90,8 +90,12 @@ if (have("dotnet-tools/csharp-ls") && have("dotnet-tools/scip-dotnet")) {
   const q = (...a: string[]) => JSON.parse(Bun.spawnSync(["bin/swan", "query", db, ...a]).stdout.toString());
   const impls = q("impls", "IDamageable").implementations.map((s: any) => s.name_path).sort();
   check("C# map: Player and Crate implement IDamageable", JSON.stringify(impls) === '["Crate","Player"]', impls);
-  const callers = q("callers", "Strike").callers.map((s: any) => s.name_path);
-  check("C# map: Arena/Round calls Combat/Strike", JSON.stringify(callers) === '["Arena/Round"]', callers);
+  const callers = q("callers", "Strike").callers.map((s: any) => s.name_path).sort();
+  check("C# map: Arena/Round and the expression-bodied Tricks/Finish call Combat/Strike",
+    JSON.stringify(callers) === '["Arena/Round","Tricks/Finish"]', callers);
+  const save = q("overview", "src/Shapes.cs").find((s: any) => s.name_path === "Tricks/SavePath");
+  check("C# map: a verbatim string ending in \\ and strings holding braces leave the body whole",
+    JSON.stringify(save?.body_lines) === "[46,50]", save);
   const refs = q("refs", "Strike")[0].references.map((r: any) => r.relative_path).sort();
   check("C# map: the top-level call in Program.cs is a reference", refs.includes("src/Program.cs"), refs);
   const files = readFileSync("data/game-live/tiny-cs/out/occurrences.tsv", "utf8").split("\n").map((l) => l.split("\t")[1]);

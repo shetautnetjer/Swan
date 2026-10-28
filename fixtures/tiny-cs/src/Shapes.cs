@@ -36,3 +36,16 @@ public class Arena
         return Combat.Strike(hero, 1);
     }
 }
+
+public static class Tricks
+{
+    // An expression body: its call to Strike belongs to Finish.
+    public static int Finish(Crate box) => Combat.Strike(box, 99);
+
+    // A verbatim string ending in a backslash, then a string holding a brace.
+    public static string SavePath()
+    {
+        var dir = @"C:\saves\";
+        return dir + "}" + """raw " } """;
+    }
+}
