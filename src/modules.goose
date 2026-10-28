@@ -9,7 +9,9 @@ import json;
 import sqlite;
 
 // What the placeholders in modules.json stand for.
-struct ModCtx { repo: u8[..2048], out: u8[..2048], home: u8[..2048], python: u8[..2048] }
+// compdb: the folder whose compile_commands.json built the map's C and C++
+// (the repo's own, at its root or in build/, else the one swan map writes).
+struct ModCtx { repo: u8[..2048], out: u8[..2048], home: u8[..2048], python: u8[..2048], compdb: u8[..2048] }
 
 fn mod_ctx(repo: const u8[:], out: const u8[:], home: const u8[:], l: const Langs&) -> ModCtx {
     var c = ModCtx { .. };
@@ -17,6 +19,9 @@ fn mod_ctx(repo: const u8[:], out: const u8[:], home: const u8[:], l: const Lang
     format(c.out, out);
     format(c.home, home);
     format(c.python, python_of(l));
+    if file_exists(str(repo, "/compile_commands.json")) { format(c.compdb, repo); }
+    else if file_exists(str(repo, "/build/compile_commands.json")) { format(c.compdb, repo, "/build"); }
+    else { format(c.compdb, out); }
     return c;
 }
 
@@ -29,7 +34,9 @@ fn expand(s: const u8[:], c: const ModCtx&, into: u8[>..]&) {
     format_replaced(a, b, "{tools}", str(c.home, "/.tools"));
     b.clear();
     format_replaced(b, a, "{bin}", str(c.home, "/tools/node_modules/.bin"));
-    format_replaced(into, b, "{python}", c.python);
+    a.clear();
+    format_replaced(a, b, "{compdb}", c.compdb);
+    format_replaced(into, a, "{python}", c.python);
 }
 
 // Builds a candidate's argv (NUL-separated) and environment entries, with

@@ -87,20 +87,20 @@ fn detect(repo: const u8[:]) -> Langs {
             l.java = true;
         } else if ends_with(name, ".kt") || ends_with(name, ".kts") {
             l.kt = true;
-        } else if ends_with(name, ".lua") || ends_with(name, ".gd") || ends_with(name, ".cs") || ends_with(name, ".php") ||
-                  ends_with(name, ".wgsl") || ends_with(name, ".hlsl") || ends_with(name, ".hlsli") || ends_with(name, ".glsl") ||
-                  ends_with(name, ".vert") || ends_with(name, ".frag") || ends_with(name, ".comp") {
-            // No SCIP indexer runs for these (yet): they are searched by
-            // structure and checked by their language servers.
-            let lang = treesitter::language_of_path(name);
-            if lang.len > 0 && find(l.other, lang) < 0 && l.other.len + lang.len + 1 < 256 {
-                if l.other.len > 0 { l.other.push(' '); }
-                l.other.append(lang);
-            }
         } else if ends_with(name, ".cu") || ends_with(name, ".cuh") {
             l.cuda = true;
         } else if is_c_source(name) || ends_with(name, ".h") || ends_with(name, ".hpp") || ends_with(name, ".hh") {
             l.c = true;
+        } else if treesitter::language_of_path(name).len > 0 {
+            // Any other language with a grammar here (Lua, the shaders,
+            // GDScript, C#, PHP): no SCIP indexer runs for these (yet); they
+            // are searched by structure and checked by their language servers.
+            let lang = treesitter::language_of_path(name);
+            let indexed = contains(["typescript", "tsx", "javascript", "python", "rust", "java", "kotlin", "c", "cpp", "cuda"], lang);
+            if !indexed && find(l.other, lang) < 0 && l.other.len + lang.len + 1 < 256 {
+                if l.other.len > 0 { l.other.push(' '); }
+                l.other.append(lang);
+            }
         }
     };
     return l;

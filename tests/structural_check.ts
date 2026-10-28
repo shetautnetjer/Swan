@@ -146,6 +146,35 @@ if (external) {
   writeFileSync(lib, before.replace("pub side: u32", "pub side:  u32"));
   const refused = await call("rewrite_pattern", { pattern: "3 * self.$F * self.$F", rewrite: "3 * self.$F.pow(2)", apply: true });
   check("a file changed outside Swan since the map is refused", !refused.ok && /refresh first/.test(refused.body.refused ?? ""), refused.body);
+  // Search-only languages (Lua here) have no rows: a second rewrite of the
+  // same file must still be Swan's own edit, not an outside change.
+  rmSync("data/struct/rw-lua", { recursive: true, force: true });
+  cpSync("fixtures/tiny-lua", "data/struct/rw-lua/repo", { recursive: true });
+  sh(["bin/swan", "map", "data/struct/rw-lua/repo", "data/struct/rw-lua/out"]);
+  const lua = Bun.spawn(["bin/swan", "serve", "data/struct/rw-lua/out/swan.db"], { stdin: "pipe", stdout: "pipe" });
+  const lreader = lua.stdout.getReader();
+  let lbuf = "";
+  const lcall = async (name: string, args: any) => {
+    lua.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: ++id, method: "tools/call", params: { name, arguments: args } }) + "\n");
+    while (!lbuf.includes("\n")) { const { value } = await lreader.read(); lbuf += new TextDecoder().decode(value); }
+    const line = lbuf.slice(0, lbuf.indexOf("\n")); lbuf = lbuf.slice(lbuf.indexOf("\n") + 1);
+    const r = JSON.parse(line).result;
+    return { ok: !r.isError, body: JSON.parse(r.content[0].text) };
+  };
+  const once = await lcall("rewrite_pattern", { pattern: "print($X)", rewrite: "log_line($X)", apply: true });
+  const twice = await lcall("rewrite_pattern", { pattern: "log_line($X)", rewrite: "print($X)", apply: true });
+  check("a Lua file can be rewritten twice in a row", once.ok && twice.ok && twice.body.applied === true &&
+    readFileSync("data/struct/rw-lua/repo/game.lua", "utf8") === readFileSync("fixtures/tiny-lua/game.lua", "utf8"), { once: once.body, twice: twice.body });
+  lua.stdin.end();
+  await lua.exited;
+
+  // A repo of only geometry and effect shaders still maps.
+  rmSync("data/struct/geom", { recursive: true, force: true });
+  cpSync("fixtures/tiny-shaders/lit.frag", "data/struct/geom/repo/only.geom");
+  writeFileSync("data/struct/geom/repo/only.fx", "float4 main() : SV_Target { return 1; }\n");
+  const gm = sh(["bin/swan", "map", "data/struct/geom/repo", "data/struct/geom/out"]);
+  check("a repo of .geom and .fx shaders maps", gm.code === 0, gm.out + gm.err);
+
   const bad = await call("search_pattern", { pattern: "fn (((", language: "rust" });
   check("a pattern that does not parse says so", bad.body.pattern_does_not_parse_in?.length === 1, bad.body);
   proc.stdin.end();

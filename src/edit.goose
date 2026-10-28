@@ -187,8 +187,13 @@ fn end_of(line: i64, col: i64, inserted: const u8[:]) -> i64, i64 {
 // Records the mtime Swan left on a file it edited, so the file still reads
 // as fresh, and clears its fingerprint: the rows were changed here, not by
 // a SCIP run, so the next refresh must rebuild them whatever SCIP says.
+// A file with no rows (a language Swan only searches, Lua say) gets a files
+// row here, so its next edit is not mistaken for an outside change.
 fn mark_edited(db: i64, file: const u8[:], path: const u8[:]) {
-    let st = prepare_or_die(db, "UPDATE files SET edited_mtime = ?2, hash = '' WHERE file = ?1");
+    let st = prepare_or_die(db, """
+        INSERT INTO files (file, hash, rows, edited_mtime) VALUES (?1, '', 0, ?2)
+        ON CONFLICT(file) DO UPDATE SET edited_mtime = excluded.edited_mtime, hash = ''
+        """);
     sqlite::bind_text(st, 1, file);
     sqlite::bind_int(st, 2, swan_mtime_ns(path));
     step_done(st);
