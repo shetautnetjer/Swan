@@ -246,6 +246,39 @@ fn has_clang(path: const u8[:]) -> bool {
 }
 
 // One more environment entry, for child_env's `extra`.
+// Some indexers and checkers run the repo's own build files: cargo's build
+// scripts and proc macros, Maven and Gradle, MSBuild through `dotnet
+// restore`. A repo can run any code that way, so they wait until a person
+// says the repo is trusted: `swan trust <repo> <out-dir>` writes the repo's
+// path into <out-dir>/trusted (SWAN_TRUST_BUILD=1 trusts every repo, for
+// tests and CI). Nothing in the MCP server writes it.
+fn build_trusted(repo: const u8[:], out: const u8[:]) -> bool {
+    var all: u8[>..] = [];
+    if env("SWAN_TRUST_BUILD", all) && all == "1" { return true; }
+    var saved: u8[>..] = [];
+    guard read_file(str(out, "/trusted"), saved) else { return false; }
+    return trim(saved) == repo;
+}
+
+fn trust_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> bool {
+    let repo = abs_path(repo_arg);
+    var mk: u8[>..] = [];
+    arg(mk, "mkdir");
+    arg(mk, "-p");
+    arg(mk, out_arg);
+    var ignored: u8[>..] = [];
+    run_step("mkdir", mk, "", "", 10000, ignored);
+    let out = abs_path(out_arg);
+    guard write_file(str(out, "/trusted"), str(repo, "\n")) else { format(report, "could not write ", out, "/trusted"); return false; }
+    format(report, "trusted ", repo, ": swan map, swan check and live answers may now run its build files (Cargo, Maven, Gradle, MSBuild)");
+    return true;
+}
+
+fn untrusted_note(skipped: const u8[:], repo: const u8[:], out: const u8[:]) -> u8[>..] {
+    return str("not run:", skipped, " (each runs the repo's own build files, which can run any code); ",
+               "if you trust this repo: swan trust ", repo, " ", out);
+}
+
 fn env_entry(k: const u8[:], v: const u8[:]) -> u8[>..] {
     var e: u8[>..] = [];
     format(e, k, "=", v);
@@ -542,6 +575,8 @@ fn map_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> bo
     let home = swan_home();
     let bin = str(home, "/tools/node_modules/.bin/");
     let l = detect(repo);
+    let trusted = build_trusted(repo, out);
+    var skipped: u8[>..] = [];     // indexers that wait for `swan trust`
     format(report, "languages:", if l.ts { " typescript" } else { "" }, if l.js { " javascript" } else { "" },
            if l.java { " java" } else { "" }, if l.c { " c/c++" } else { "" }, if l.cuda { " cuda" } else { "" },
            if l.py { " python" } else { "" }, if l.rs || l.cargo { " rust" } else { "" }, if l.kt { " kotlin" } else { "" }, if l.other.len > 0 { str(" ", l.other) } else { str("") },
@@ -921,7 +956,9 @@ fn map_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> bo
         }
     }
 
-    if l.cargo {
+    if l.cargo && !trusted {
+        skipped.append(" rust-analyzer scip (Rust: cargo build scripts, proc macros)");
+    } else if l.cargo {
         let target = str(out, "/index-rust.scip");
         var a: u8[>..] = [];
         arg(a, str(home, "/.tools/rust-analyzer/rust-analyzer"));
@@ -935,7 +972,9 @@ fn map_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> bo
 
     // scip-java indexes Java, and Kotlin built with Gradle (its compiler
     // plugin follows the current Kotlin, 2.4 as of scip-java 0.13.2).
-    if l.java || (l.kt && l.gradle) {
+    if (l.java || (l.kt && l.gradle)) && (l.maven || l.gradle) && !trusted {
+        skipped.append(if l.gradle { " scip-java (Gradle)" } else { " scip-java (Maven)" });
+    } else if l.java || (l.kt && l.gradle) {
         let target = str(out, "/index-java.scip");
         var a: u8[>..] = [];
         arg(a, str(home, "/.tools/scip-java/scip-java"));
@@ -977,7 +1016,10 @@ fn map_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> bo
     // the repo's root, with Swan's .NET SDK. It runs `dotnet restore`, which
     // writes the repo's obj/ folders, as a build would.
     let scip_dotnet = str(home, "/.tools/dotnet-tools/scip-dotnet");
-    if find(l.other, "csharp") >= 0 && file_exists(scip_dotnet) && has_dotnet_project(repo) {
+    let cs_map = find(l.other, "csharp") >= 0 && file_exists(scip_dotnet) && has_dotnet_project(repo);
+    if cs_map && !trusted {
+        skipped.append(" scip-dotnet (C#: MSBuild through dotnet restore)");
+    } else if cs_map {
         let target = str(out, "/index-csharp.scip");
         var a: u8[>..] = [];
         arg(a, scip_dotnet);
@@ -1008,14 +1050,17 @@ fn map_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> bo
                                       ["compile_commands.json", "build/compile_commands.json"]));
     }
 
-    if jobs.len == 0 && (l.kt || l.other.len > 0) {
+    if skipped.len > 0 { format(report, untrusted_note(skipped, repo, out), "\n"); }
+    if jobs.len == 0 && (l.kt || l.other.len > 0 || skipped.len > 0) {
         // Nothing to index, but the code can still be searched by structure
         // and checked live: an empty map records the repo for search_pattern
         // and the rest.
         for t in ["symbols.tsv", "extents.tsv", "relationships.tsv", "occurrences.tsv"] { write_file(str(out, "/", t), ""); }
         index_main(out, str(out, "/swan.db"), repo, false, report);
-        format(report, "\n", if l.kt { "kotlin " } else { "" }, l.other,
-               ": no SCIP indexer for these; search_pattern, rewrite_pattern and live diagnostics work on them");
+        if l.kt || l.other.len > 0 {
+            format(report, "\n", if l.kt { "kotlin " } else { "" }, l.other,
+                   ": no SCIP indexer ran for these; search_pattern and rewrite_pattern work on them, and live diagnostics where their server is set up");
+        }
         format(report, "\nswan map: ", ((clock() - t_start) * 1000.0) as i64, " ms in all");
         return true;
     }
@@ -1314,6 +1359,8 @@ fn check_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> 
     let l = detect(repo);
     var rows: u8[>..] = [];
     var ran: u8[>..] = [];
+    let trusted = build_trusted(repo, out);
+    var skipped: u8[>..] = [];
     // Checkers that never got to check: not started (126, 127), timed out
     // (-2), killed, or failed with nothing to show for it (a checker that
     // found errors says which). Cargo says itself whether the build ran to
@@ -1348,7 +1395,9 @@ fn check_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> 
         let n = parse_tsc(o, rows);
         if checked("tsc", code, n) { format(ran, " tsc:", n); }
     }
-    if l.cargo {
+    if l.cargo && !trusted {
+        skipped.append(" cargo check and clippy (Rust build scripts, proc macros)");
+    } else if l.cargo {
         var a: u8[>..] = [];
         arg(a, "cargo");
         arg(a, "check");
@@ -1455,6 +1504,7 @@ fn check_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> 
         format(report, "could not check:", not_run, "; the saved diagnostics are unchanged", if ran.len > 0 { str(" (ran", ran, ")") } else { str("") });
         return false;
     }
+    if skipped.len > 0 { format(report, untrusted_note(skipped, repo, out), "\n"); }
     guard ran.len > 0 else { format(report, "no checker for the languages in ", repo); return false; }
     write_file(str(out, "/diagnostics.tsv"), rows);
     format(report, "checked", ran, "\n");

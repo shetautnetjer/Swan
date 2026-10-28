@@ -125,3 +125,15 @@ Roslyn wrappers of our own. scip-dotnet needs `dotnet restore`, which
 writes the repo's obj/ folders; that is accepted as build output (the map
 leaves obj/ out). It needs a solution or project at the repo root; deeper
 layouts are not detected yet.
+
+## 2026-10-28 — Build-running tools wait for `swan trust`
+
+A repo's build files can run any code (cargo build scripts and proc macros,
+Gradle and Maven, MSBuild through `dotnet restore`). After Codex's review of
+the C# PR, Mani chose to have every tool that runs them wait until a person
+trusts the repo: `swan trust <repo> <out-dir>` writes <out-dir>/trusted.
+Candidates in tools/modules.json carry `runs_repo_code`; the map and check
+pipelines gate their own jobs the same way and report what they skipped.
+SWAN_TRUST_BUILD=1 trusts every repo (tests, CI). The MCP server has no
+trust tool, so a repo's contents cannot get an agent to trust it. Test
+runners stay ungated: running tests is an explicit request to run the code.

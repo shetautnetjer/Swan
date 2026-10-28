@@ -5,7 +5,7 @@
 // a deliberate error, checked again, and put back. For C#, the full map from
 // scip-dotnet is checked too.
 //
-//   bun tests/game_live_check.ts
+//   SWAN_TRUST_BUILD=1 bun tests/game_live_check.ts   (scripts/test.sh sets it)
 
 import { cpSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 
@@ -101,6 +101,29 @@ if (have("dotnet-tools/csharp-ls") && have("dotnet-tools/scip-dotnet")) {
   const files = readFileSync("data/game-live/tiny-cs/out/occurrences.tsv", "utf8").split("\n").map((l) => l.split("\t")[1]);
   check("C# map: no generated obj/ files", !files.some((f) => f?.startsWith("obj/")), [...new Set(files)]);
 } else console.log("skipped C#: no .tools/dotnet-tools (csharp-ls, scip-dotnet)");
+if (have("dotnet-tools/csharp-ls") && have("dotnet-tools/scip-dotnet")) {
+  // Untrusted, nothing runs the repo's build files: the map says how to trust
+  // it, the live server waits, dotnet restore writes no obj/; then
+  // `swan trust` lets both run.
+  const dir = "data/game-live/untrusted-cs";
+  rmSync(dir, { recursive: true, force: true });
+  cpSync("fixtures/tiny-cs", `${dir}/repo`, { recursive: true });
+  const env = { ...process.env };
+  delete env.SWAN_TRUST_BUILD;
+  const run = (...a: string[]) => Bun.spawnSync(["bin/swan", ...a], { env, stdout: "pipe", stderr: "pipe" });
+  const m = run("map", `${dir}/repo`, `${dir}/out`).stdout.toString();
+  check("untrusted C#: the map skips scip-dotnet and says how to trust the repo",
+    m.includes("not run: scip-dotnet") && m.includes("swan trust "), m);
+  check("untrusted C#: dotnet restore did not run (no obj/)", !existsSync(`${dir}/repo/obj`));
+  const serve = (input: string) => Bun.spawnSync(["bin/swan", "serve", `${dir}/out/swan.db`], { env, stdin: new TextEncoder().encode(input), stdout: "pipe" }).stdout.toString();
+  const ask = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "get_diagnostics", arguments: { relative_path: "src/Program.cs", live: true } } }) + "\n";
+  const live = serve(ask);
+  check("untrusted C#: the live server waits for swan trust", live.includes("swan trust "), live.slice(0, 600));
+  run("trust", `${dir}/repo`, `${dir}/out`);
+  const m2 = run("map", `${dir}/repo`, `${dir}/out`).stdout.toString();
+  const callers = JSON.parse(run("query", `${dir}/out/swan.db`, "callers", "Strike").stdout.toString()).callers.length;
+  check("trusted C#: after swan trust the map runs scip-dotnet", !m2.includes("not run:") && callers === 2, m2);
+}
 if (have("blender-stubs")) {
   await session("tiny-blender", [{ file: "addon.py", label: "Blender Python", edit: (s) => s.replace("obj.name = prefix + obj.name", "obj.name = 3"),
     want: (d) => d.some((x: any) => x.line === 16) }]);

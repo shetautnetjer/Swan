@@ -1,5 +1,5 @@
 {
-  "_about": "Per-language tools Swan runs after edits: linters (into get_diagnostics; they must not write into the repo, so their caches are off), formatters (format_file) and test runners (run_tests), which act on the repo by design. Each kind is a list of candidates; the first whose conditions hold is used. when_file: one of these exists in the repo. when_cmd: this command exits 0. Placeholders: {repo}, {python} (the repo's virtualenv, else python3), {tools} (Swan's .tools), {bin} (Swan's tools/node_modules/.bin), {out} (the map folder), {compdb} (the folder of the compile_commands.json that built the map: the repo's own, else the map folder's), {files} and {tests} (one argument each; a candidate needing them is skipped when there are none). parser: how output becomes diagnostics (github: ::error file=..,line=..,col=..::message; cargo: cargo's JSON lines). lsp: a language server swan serve keeps running for live answers (get_diagnostics and find_implementations with live): language_id for didOpen, init the settings as a JSON string (placeholders expanded; sent as initializationOptions and as the answer to workspace/configuration, by section), settle: check (wait for the check a save starts: rust-analyzer) or publish (wait for the file's next published set); quiet_ms: for a server that publishes nothing for a clean file (lua-language-server), how long a silence means no problems.",
+  "_about": "Per-language tools Swan runs after edits: linters (into get_diagnostics; they must not write into the repo, so their caches are off), formatters (format_file) and test runners (run_tests), which act on the repo by design. Each kind is a list of candidates; the first whose conditions hold is used. when_file: one of these exists in the repo. when_cmd: this command exits 0. Placeholders: {repo}, {python} (the repo's virtualenv, else python3), {tools} (Swan's .tools), {bin} (Swan's tools/node_modules/.bin), {out} (the map folder), {compdb} (the folder of the compile_commands.json that built the map: the repo's own, else the map folder's), {files} and {tests} (one argument each; a candidate needing them is skipped when there are none). parser: how output becomes diagnostics (github: ::error file=..,line=..,col=..::message; cargo: cargo's JSON lines). lsp: a language server swan serve keeps running for live answers (get_diagnostics and find_implementations with live): language_id for didOpen, init the settings as a JSON string (placeholders expanded; sent as initializationOptions and as the answer to workspace/configuration, by section), settle: check (wait for the check a save starts: rust-analyzer) or publish (wait for the file's next published set); runs_repo_code: the candidate runs the repo's own build files (cargo build scripts, Gradle, MSBuild), so it is used only once the repo is trusted (swan trust <repo> <out-dir>, or SWAN_TRUST_BUILD=1); test runners run the repo's code by design and are not marked. quiet_ms: for a server that publishes nothing for a clean file (lua-language-server), how long a silence means no problems.",
   "python": {
     "match": [".py", ".pyi"],
     "lint": [
@@ -37,7 +37,7 @@
     "match": [".kt", ".kts"],
     "lsp": [
       {"cmd": ["{tools}/kotlin-lsp/kotlin-server-263.7084.0/bin/intellij-server", "--stdio", "--system-path", "{out}/kotlin-lsp"],
-       "language_id": "kotlin", "settle": "publish", "init": "{}",
+       "language_id": "kotlin", "settle": "publish", "init": "{}", "runs_repo_code": true,
        "env": ["GRADLE_USER_HOME={tools}/gradle-home"]}
     ]
   },
@@ -45,7 +45,7 @@
     "match": [".cs"],
     "lsp": [
       {"cmd": ["{tools}/dotnet-tools/csharp-ls"],
-       "language_id": "csharp", "settle": "publish", "init": "{}",
+       "language_id": "csharp", "settle": "publish", "init": "{}", "runs_repo_code": true,
        "env": ["DOTNET_ROOT={tools}/dotnet", "DOTNET_CLI_HOME={tools}/dotnet-home", "NUGET_PACKAGES={tools}/nuget",
                "DOTNET_CLI_TELEMETRY_OPTOUT=1", "DOTNET_NOLOGO=1"]}
     ]
@@ -85,7 +85,7 @@
   "rust": {
     "match": [".rs"],
     "lint": [
-      {"cmd": ["cargo", "clippy", "--workspace", "--all-targets", "--message-format=json", "--keep-going", "--quiet"], "parser": "cargo", "source": "clippy", "env": ["CARGO_TARGET_DIR={out}/cargo-target"]}
+      {"cmd": ["cargo", "clippy", "--workspace", "--all-targets", "--message-format=json", "--keep-going", "--quiet"], "parser": "cargo", "source": "clippy", "runs_repo_code": true, "env": ["CARGO_TARGET_DIR={out}/cargo-target"]}
     ],
     "format": [
       {"cmd": ["rustfmt", "--edition", "2021", "{files}"]}
@@ -94,7 +94,7 @@
       {"cmd": ["cargo", "test", "--quiet"], "env": ["CARGO_TARGET_DIR={out}/cargo-target"]}
     ],
     "lsp": [
-      {"cmd": ["{tools}/rust-analyzer/rust-analyzer"], "language_id": "rust",
+      {"cmd": ["{tools}/rust-analyzer/rust-analyzer"], "language_id": "rust", "runs_repo_code": true,
        "init": "{\"cargo\":{\"targetDir\":\"{out}/ra-target\"},\"checkOnSave\":true,\"check\":{\"command\":\"check\"}}", "settle": "check",
        "env": ["CARGO_TARGET_DIR={out}/ra-target"]}
     ]

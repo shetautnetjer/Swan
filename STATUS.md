@@ -302,6 +302,15 @@ branch fix/greptile-review:
   0.5 s; the first, clean check takes about 2.5 s while it loads the project.
 - tests/game_live_check.ts covers both; the full suite passes.
 
+- Review follow-up: the body finder handles C# `=>` methods and verbatim and
+  raw strings. Tools that run a repo's own build files (scip-java with Maven
+  or Gradle, rust-analyzer scip, cargo check and clippy, the Rust, Kotlin
+  and C# servers, scip-dotnet) now wait for `swan trust <repo> <out-dir>`
+  (Mani's decision, 2026-10-28); `scripts/test.sh` sets SWAN_TRUST_BUILD=1
+  for the fixtures, and game_live_check checks the untrusted path too.
+  Existing maps of Rust, Gradle, Maven or C# repos need one `swan trust`
+  each before their next map.
+
 ## Remaining work
 
 1. Qualify real server adapters and indexers separately from the mock LSP

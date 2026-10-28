@@ -3,6 +3,9 @@
 # and checks that a refresh after edits equals a fresh build.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# The fixtures are ours: let indexers and servers run their build files
+# (tests/game_live_check.ts also checks what happens without this).
+export SWAN_TRUST_BUILD=1
 scripts/build.sh >/dev/null
 scripts/index-repo.sh fixtures/tiny-ts data/tiny-ts >/dev/null
 bun tests/mcp_smoke.ts bin/swan data/tiny-ts/swan.db

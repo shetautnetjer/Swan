@@ -282,10 +282,15 @@ for a user who needs only one language. See DECISIONS.md.
   indexers). Go, general C/C++ projects, large C# solutions and Ruby are
   unqualified here. For C#, the map runs `dotnet restore`, which writes the
   project's obj/ folders as a build would.
-- Some tools run the repo's own build files: scip-java runs Maven or
-  Gradle for Java, the Kotlin and Rust language servers run Gradle and
-  Cargo build scripts, and the C# map runs MSBuild through `dotnet restore`.
-  A repo can run its own code that way, so only map repos you trust.
+- Some tools run the repo's own build files, and a repo can run any code
+  that way: scip-java with Maven or Gradle, rust-analyzer and cargo (build
+  scripts, proc macros), the Kotlin server (Gradle) and the C# map and
+  server (MSBuild through `dotnet restore`). They wait until you trust the
+  repo once: `swan trust <repo> <out-dir>`. Until then `swan map` and
+  `swan check` say what they skipped and how to trust it, and a live
+  question to those servers answers the same. The MCP server cannot trust
+  a repo by itself. Test runners (`run_tests`) run the repo's code by
+  design and are not held back.
 - The CUDA fallback does not check device
   compilation. What each tried
   indexer misses is in `docs/parity-and-languages.md`.

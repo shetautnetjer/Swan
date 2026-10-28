@@ -66,7 +66,12 @@ fn live_start(db: i64, lang: const u8[:], why: u8[>..]&) -> bool {
             }
         }
     };
-    if !tried { format(why, "no live server for ", lang, " applies here"); }
+    if !tried {
+        var waits = false;
+        json::each(list) { cand => if runs_repo_code(cand) && !c.trusted { waits = true; } };
+        if waits { why.append(untrusted_note(str(" the ", lang, " language server"), root, dir)); }
+        else { format(why, "no live server for ", lang, " applies here"); }
+    }
     if started { format(live_lang, lang); }
     return started;
 }
