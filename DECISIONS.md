@@ -116,3 +116,12 @@ SCIP or live language servers. Historical comparisons are not fresh evidence.
 Do not introduce a registry or new package manager. Splitting tree-sitter
 grammars or changing the standalone LSP/runtime boundary would alter build
 and API assumptions and needs a separate design review (docs/packages.md).
+
+## 2026-10-27 — C# through scip-dotnet and csharp-ls
+
+Use Sourcegraph's scip-dotnet for the C# map and csharp-ls for live errors,
+both as dotnet tools under .tools with Swan's own .NET SDK, rather than
+Roslyn wrappers of our own. scip-dotnet needs `dotnet restore`, which
+writes the repo's obj/ folders; that is accepted as build output (the map
+leaves obj/ out). It needs a solution or project at the repo root; deeper
+layouts are not detected yet.

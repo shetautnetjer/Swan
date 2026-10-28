@@ -32,7 +32,7 @@ struct Langs {
 }
 
 let SKIP_DIRS = ["node_modules", ".git", "target", ".venv", "venv", "__pycache__", ".tox",
-                 ".mypy_cache", ".pytest_cache", ".swan", "build", ".gradle"];
+                 ".mypy_cache", ".pytest_cache", ".swan", "build", ".gradle", "obj"];
 
 // F(path, name) for each file under repo, breadth-first, skipping folders
 // that hold dependencies, caches or build output.
@@ -177,6 +177,27 @@ fn java_home(home: const u8[:]) -> u8[>..] {
 
 // The environment children get: a repo virtualenv first on PATH, and room
 // for scip-python and pyright on big repos.
+// Whether the repo's root holds a solution or project file for scip-dotnet.
+fn has_dotnet_project(repo: const u8[:]) -> bool {
+    var names: u8[>..] = [];
+    guard list_dir(repo, names) else { return false; }
+    var yes = false;
+    each_split(names, '\n') { n => if ends_with(n, ".sln") || ends_with(n, ".slnx") || ends_with(n, ".csproj") { yes = true; } };
+    return yes;
+}
+
+// Swan's .NET SDK and its homes, so nothing lands in ~/.dotnet or ~/.nuget.
+fn dotnet_env(home: const u8[:]) -> u8[>..] {
+    var e: u8[>..] = [];
+    let t = str(home, "/.tools");
+    e.append(env_entry("DOTNET_ROOT", str(t, "/dotnet")));
+    e.append(env_entry("DOTNET_CLI_HOME", str(t, "/dotnet-home")));
+    e.append(env_entry("NUGET_PACKAGES", str(t, "/nuget")));
+    e.append(env_entry("DOTNET_CLI_TELEMETRY_OPTOUT", "1"));
+    e.append(env_entry("DOTNET_NOLOGO", "1"));
+    return e;
+}
+
 fn child_env(l: const Langs&, extra: const u8[:]) -> u8[>..] {
     var vars: u8[>..] = [];
     var path: u8[>..] = [];
@@ -193,6 +214,8 @@ fn child_env(l: const Langs&, extra: const u8[:]) -> u8[>..] {
         // .tools/llvm has those headers and a stand-in that answers.
         format(path, swan_home(), "/.tools/llvm/bin:");
     }
+    // scip-dotnet runs `dotnet restore` by name.
+    if find(l.other, "csharp") >= 0 { format(path, swan_home(), "/.tools/dotnet:"); }
     path.append(p0);
     var e: u8[>..] = [];
     format(e, "PATH=", path);
@@ -948,6 +971,23 @@ fn map_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> bo
         add_lang_job("scip-java", target, a, child_env(l, genv),
                      lang_fingerprint(repo, [".java", ".kt", ".kts"], ["pom.xml", "build.gradle", "build.gradle.kts",
                                                                        "settings.gradle", "settings.gradle.kts"]));
+    }
+
+    // C# (Unity, Godot C#, .NET): scip-dotnet over the solution or project at
+    // the repo's root, with Swan's .NET SDK. It runs `dotnet restore`, which
+    // writes the repo's obj/ folders, as a build would.
+    let scip_dotnet = str(home, "/.tools/dotnet-tools/scip-dotnet");
+    if find(l.other, "csharp") >= 0 && file_exists(scip_dotnet) && has_dotnet_project(repo) {
+        let target = str(out, "/index-csharp.scip");
+        var a: u8[>..] = [];
+        arg(a, scip_dotnet);
+        arg(a, "index");
+        arg(a, "--working-directory");
+        arg(a, repo);
+        arg(a, "--output");
+        arg(a, target);
+        add_lang_job("scip-dotnet", target, a, child_env(l, dotnet_env(home)),
+                     lang_fingerprint(repo, [".cs", ".csproj", ".sln", ".slnx", ".props", ".targets"], ["global.json", "NuGet.config"]));
     }
 
     if l.c || l.cuda {

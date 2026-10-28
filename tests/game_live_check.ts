@@ -1,8 +1,9 @@
 // Live errors from the language servers added for game and 3D code: Lua
 // (lua-language-server), the GLSL, HLSL and WGSL shaders (shader-validator's
-// server), C++ (clangd) and Blender Python (pyright with Blender's stubs).
-// Each fixture is mapped from a copy, checked clean, given a deliberate
-// error, checked again, and put back.
+// server), C++ (clangd), C# (csharp-ls) and Blender Python (pyright with
+// Blender's stubs). Each fixture is mapped from a copy, checked clean, given
+// a deliberate error, checked again, and put back. For C#, the full map from
+// scip-dotnet is checked too.
 //
 //   bun tests/game_live_check.ts
 
@@ -80,6 +81,22 @@ if (have("clangd")) {
       ["main.cpp", "score.cpp", "bonus.cpp"].map((f) => ({ directory: `${process.cwd()}/${repo}/src`, file: f,
         arguments: ["clang++", "-DSCORE_BONUS=5", "-c", f] })))));
 } else console.log("skipped C++: no .tools/clangd");
+if (have("dotnet-tools/csharp-ls") && have("dotnet-tools/scip-dotnet")) {
+  await session("tiny-cs", [{ file: "src/Program.cs", label: "C#", edit: (s) => s.replace("Combat.Strike(hero, 10)", "Combat.Strike(hero)"),
+    want: (d) => d.some((x: any) => x.line === 4) }]);
+  // The full map from scip-dotnet: implementations of an interface and
+  // callers of a method, with no obj/ files in it.
+  const db = "data/game-live/tiny-cs/out/swan.db";
+  const q = (...a: string[]) => JSON.parse(Bun.spawnSync(["bin/swan", "query", db, ...a]).stdout.toString());
+  const impls = q("impls", "IDamageable").implementations.map((s: any) => s.name_path).sort();
+  check("C# map: Player and Crate implement IDamageable", JSON.stringify(impls) === '["Crate","Player"]', impls);
+  const callers = q("callers", "Strike").callers.map((s: any) => s.name_path);
+  check("C# map: Arena/Round calls Combat/Strike", JSON.stringify(callers) === '["Arena/Round"]', callers);
+  const refs = q("refs", "Strike")[0].references.map((r: any) => r.relative_path).sort();
+  check("C# map: the top-level call in Program.cs is a reference", refs.includes("src/Program.cs"), refs);
+  const files = readFileSync("data/game-live/tiny-cs/out/occurrences.tsv", "utf8").split("\n").map((l) => l.split("\t")[1]);
+  check("C# map: no generated obj/ files", !files.some((f) => f?.startsWith("obj/")), [...new Set(files)]);
+} else console.log("skipped C#: no .tools/dotnet-tools (csharp-ls, scip-dotnet)");
 if (have("blender-stubs")) {
   await session("tiny-blender", [{ file: "addon.py", label: "Blender Python", edit: (s) => s.replace("obj.name = prefix + obj.name", "obj.name = 3"),
     want: (d) => d.some((x: any) => x.line === 16) }]);

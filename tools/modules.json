@@ -41,6 +41,15 @@
        "env": ["GRADLE_USER_HOME={tools}/gradle-home"]}
     ]
   },
+  "csharp": {
+    "match": [".cs"],
+    "lsp": [
+      {"cmd": ["{tools}/dotnet-tools/csharp-ls"],
+       "language_id": "csharp", "settle": "publish", "init": "{}",
+       "env": ["DOTNET_ROOT={tools}/dotnet", "DOTNET_CLI_HOME={tools}/dotnet-home", "NUGET_PACKAGES={tools}/nuget",
+               "DOTNET_CLI_TELEMETRY_OPTOUT=1", "DOTNET_NOLOGO=1"]}
+    ]
+  },
   "cpp": {
     "match": [".c", ".cc", ".cpp", ".cxx", ".h", ".hpp", ".hh", ".hxx", ".cu", ".cuh"],
     "lsp": [

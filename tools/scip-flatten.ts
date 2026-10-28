@@ -227,7 +227,7 @@ function markImports() {
   }
 }
 
-// scip-clang gives no enclosing ranges, so Swan could not say which function
+// scip-clang and scip-dotnet give no enclosing ranges, so Swan could not say which function
 // a use sits in, nor edit a function by symbol. For each function or type
 // definition, this finds its body in the source: from the name, the first
 // '{' before any ';' (a ';' first means a declaration, which has no body),
@@ -444,6 +444,9 @@ root.fields((f, _wt, r) => {
   // A document for the run's target itself has an empty path (it is the root).
   if (!path && docBase) path = posix.normalize(docBase);
   if (seenDocs.has(path)) { dupDocs++; return; }
+  // MSBuild's obj/ folders hold generated code (scip-dotnet indexes it after
+  // its restore); Swan skips them when walking a repo, so the map does too.
+  if (/(^|\/)obj\//.test(path)) return;
   seenDocs.add(path);
   docs++;
   for (const info of infos) symbolInfo(info, path);
@@ -457,7 +460,8 @@ root.fields((f, _wt, r) => {
   for (const { range, enclosing, symbol, roles } of pending) {
     if (!symbol || symbol.startsWith("local ")) continue;
     if (roles & ROLE_DEFINITION) defined.add(symbol);
-    if ((roles & ROLE_DEFINITION) && enclosing.length < 3 && symbol.startsWith("cxx ") && /(\)\.|#)$/.test(symbol))
+    if ((roles & ROLE_DEFINITION) && enclosing.length < 3 && (symbol.startsWith("cxx ") || symbol.startsWith("scip-dotnet ")) &&
+        /(\)\.|#)$/.test(symbol))
       cDefs.push({ path, symbol, line: range[0], col: range[1] });
     const role = roles & ROLE_DEFINITION ? "def" : roles & ROLE_IMPORT ? "imp" : "ref";
     rows.push([symbol, path, ...span(range), role].join("\t"));

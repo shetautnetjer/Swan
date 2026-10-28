@@ -187,6 +187,7 @@ fn lang_of_path(p: const u8[:]) -> const u8[:] {
     if ends_with(p, ".kt") || ends_with(p, ".kts") { return "kotlin"; }
     if ends_with(p, ".c") || ends_with(p, ".cc") || ends_with(p, ".cpp") || ends_with(p, ".cxx") || ends_with(p, ".h") ||
        ends_with(p, ".hpp") || ends_with(p, ".hh") || ends_with(p, ".hxx") || ends_with(p, ".cu") || ends_with(p, ".cuh") { return "cpp"; }
+    if ends_with(p, ".cs") { return "csharp"; }
     if ends_with(p, ".lua") { return "lua"; }
     if ends_with(p, ".glsl") || ends_with(p, ".vert") || ends_with(p, ".frag") || ends_with(p, ".comp") ||
        ends_with(p, ".geom") || ends_with(p, ".tesc") || ends_with(p, ".tese") { return "glsl"; }
