@@ -1,0 +1,27 @@
+{
+  "enabled": true,
+  "strategy_options": {
+    "checkpoint_remote": {
+      "provider": "github",
+      "repo": "shetautnetjer/swan-checkpoints"
+    }
+  },
+  "telemetry": false,
+  "checkpoints": {
+    "primary": {
+      "type": "git-refs"
+    }
+  },
+  "redaction": {
+    "betterleaks": {
+      "enabled": true
+    },
+    "goredact": {
+      "enabled": true
+    },
+    "pii": {
+      "enabled": true,
+      "address": true
+    }
+  }
+}
