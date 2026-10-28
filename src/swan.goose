@@ -19,7 +19,7 @@ import .pipeline;
 import .modules;
 import .live;
 import .structural;
-import treesitter from "shetautnetjer/goose-treesitter@0a898812664d531628c2abd9dd5514c1c0e0c3a7";   // tree-sitter and its grammars, built once and cached
+import treesitter from "shetautnetjer/goose-treesitter@v0.1.4";   // tree-sitter and its grammars, built once and cached
 import sqlite from "shetautnetjer/goose-sqlite@v0.1.2";   // SQLite, built once and cached
 
 fn usage() {
