@@ -171,6 +171,27 @@ mkdirSync(join(dataRoot, "nometa"));
 const viaDamaged = await tool("find_symbol", { name_path_pattern: "Store/add", repo: "fixtures/tiny-ts" });
 check("damaged and meta-less maps under the data root don't stop selecting a healthy repo",
   Array.isArray(viaDamaged) && viaDamaged.length === 1, viaDamaged);
+// Building over an old-schema map in the repo's own dir rebuilds it (map_main deletes an old map
+// before indexing), instead of refreshing into a schema mismatch that would abort the server.
+const rebuildWork = mkdtempSync(join(tmpdir(), "swan-rebuild-"));
+const rebuildRepo = join(rebuildWork, "rebuildme");
+mkdirSync(join(rebuildRepo, "src"), { recursive: true });
+writeFileSync(join(rebuildRepo, "src", "r.ts"), "export function rebuilt(): number { return 3; }\n");
+writeFileSync(join(rebuildRepo, "tsconfig.json"), '{"compilerOptions":{"strict":true},"include":["src"]}\n');
+mkdirSync(join(dataRoot, "rebuildme"));
+{
+  const { Database } = await import("bun:sqlite");
+  const db = new Database(join(dataRoot, "rebuildme", "swan.db"));
+  db.run("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT)");
+  db.run("INSERT INTO meta VALUES ('root', ?), ('schema_version', '1')", [realpathSync(rebuildRepo)]);
+  db.close();
+}
+const rebuilt = await call("use_repo", { path: rebuildRepo });
+check("use_repo over an old-schema map in the repo's own dir rebuilds it and stays up",
+  rebuilt.isError === false && JSON.parse(rebuilt.text).built === true, rebuilt);
+const rsym = await tool("find_symbol", { name_path_pattern: "rebuilt" });
+check("the rebuilt map answers", Array.isArray(rsym) && rsym.length === 1, rsym);
+await tool("use_repo", { path: "fixtures/tiny-ts" });
 const alive = await tool("index_info", {});
 check("the server still answers after meeting an old-schema map", alive && typeof alive === "object", alive);
 
