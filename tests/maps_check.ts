@@ -8,7 +8,7 @@
 // Needs SWAN_TRUST_BUILD=1 (scripts/test.sh sets it): the tiny-rs map's
 // indexer runs the repo's build files.
 
-import { mkdtempSync, realpathSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -128,6 +128,17 @@ const missing = await call("use_repo", { path: "fixtures/no-such-dir" });
 check("use_repo on a missing path errors", missing.isError === true && missing.text.includes("no such path"), missing);
 const aFile = await call("use_repo", { path: "fixtures/tiny-ts/src/store.ts" });
 check("use_repo on a file errors", aFile.isError === true && aFile.text.includes("not a directory"), aFile);
+
+// The build:false hint names a collision-safe dir: a second repo with an already-mapped basename
+// must not be pointed at that repo's map dir.
+const twinRoot = mkdtempSync(join(tmpdir(), "swan-twin-"));
+const twin = join(twinRoot, "tiny-ts");
+mkdirSync(twin);
+writeFileSync(join(twin, "x.ts"), "export const x = 1;\n");
+const twinHint = await call("use_repo", { path: twin, build: false });
+check("build:false for a same-basename repo suggests a dir other than the existing map's",
+  twinHint.isError === true && twinHint.text.includes("swan map ") &&
+  !twinHint.text.includes(` ${join(dataRoot, "tiny-ts")}'`), twinHint);
 
 // Without build, an unmapped repo is an error naming the command to run.
 const noBuild = await call("use_repo", { path: "fixtures/tiny-py", build: false });

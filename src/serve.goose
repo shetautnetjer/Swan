@@ -159,7 +159,10 @@ fn stale_count(db: i64) -> i64 {
 // `path` (its own root, or the nearest mapped root above it), building the
 // map first when asked. The answer JSON goes to out; the reason a switch
 // was refused goes there as text.
-fn repo_switch(path: const u8[:], build: bool, out: u8[>..]&) -> bool {
+// `summary`: write use_repo's answer (counts and the freshness scan). A tool's
+// implicit `repo` switch passes false: its own answer replaces this one, and
+// the freshness scan stats every mapped file.
+fn repo_switch(path: const u8[:], build: bool, summary: bool, out: u8[>..]&) -> bool {
     guard path.len > 0 else { out.append("path is required"); return false; }
     var abs: u8[>..] = [];
     guard swan_realpath(path, abs) else { format(out, "no such path: ", path); return false; }
@@ -169,8 +172,10 @@ fn repo_switch(path: const u8[:], build: bool, out: u8[>..]&) -> bool {
     var built_report: u8[>..] = [];
     if db_path.len == 0 {
         guard build else {
-            format(out, "no map for ", abs, ": run 'swan map ", abs, " ", serve_maps, "/",
-                   abs[rfind(abs, "/") + 1..], "' or call use_repo without build:false");
+            // The same collision-safe dir an automatic build would use, so following
+            // the hint never overwrites another repo's map of the same basename.
+            format(out, "no map for ", abs, ": run 'swan map ", abs, " ", map_dir_for(abs),
+                   "' or call use_repo without build:false");
             return false;
         }
         let dir = map_dir_for(abs);
@@ -191,6 +196,7 @@ fn repo_switch(path: const u8[:], build: bool, out: u8[>..]&) -> bool {
         format(serve_map, db_path);
         serve_warm = true;
     }
+    guard summary else { return true; }
     var root: u8[>..] = [];
     var syms: u8[>..] = [];
     var files: u8[>..] = [];
@@ -410,13 +416,12 @@ fn serve_loop() {
             if tool_name == "use_repo" {
                 var p: u8[>..] = [];
                 p.append(arg_text(targs, "path"));
-                ok = repo_switch(p, arg_bool_default(targs, "build", true), payload);
+                ok = repo_switch(p, arg_bool_default(targs, "build", true), true, payload);
             } else {
                 var rp: u8[>..] = [];
                 rp.append(arg_text(targs, "repo"));
                 if rp.len > 0 {
-                    ok = repo_switch(rp, true, payload);
-                    if ok { payload.clear(); }      // the tool's own answer follows, not use_repo's
+                    ok = repo_switch(rp, true, false, payload);     // no summary: the tool's own answer follows
                 }
                 if ok && serve_db == 0 {
                     if tool_name == "index_info" { list_maps(payload); }
