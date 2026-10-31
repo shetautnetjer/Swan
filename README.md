@@ -143,9 +143,13 @@ only that whole path. Lines and columns in answers are 1-based.
 | `rewrite_pattern` | `pattern`, `rewrite`, `language?`, `relative_path?`, `apply?` | structural rewrite: plans by default; `apply` writes it, refused for files changed since the map |
 | `find_unused_symbols` | `relative_path?`, `include_tests?`, `max_results?` | functions, classes, methods, types and variables nothing references or implements: removal candidates, not proof |
 | `index_info` | none | repo root, build time, counts, and the files changed since the SCIP run |
+| `use_repo` | `path`, `build?` | choose the repo the tools answer about, building its map the first time; `path` is the repo's root or a path inside it |
 
 Every answer about a file that changed after the SCIP run carries
 `"stale": true`, so an agent knows to reread it or refresh the map.
+
+Every tool also takes an optional `repo` (a path): it switches to that
+repo's map before answering, as `use_repo` would, and the choice persists.
 
 ## Use
 
@@ -159,7 +163,8 @@ bin/swan check <repo> data/<name>               # tsc / cargo check / pyright ->
 scripts/index-repo.sh <ts-repo> data/<name>     # index.scip, TSV rows, swan.db
 scripts/refresh-repo.sh <ts-repo> data/<name>   # after edits: rerun SCIP, rewrite only changed files
 scripts/diagnose-repo.sh <ts-repo> data/<name>  # tsc / cargo check, loaded into the map
-bin/swan serve data/<name>/swan.db              # MCP over stdio
+bin/swan serve data/<name>/swan.db              # MCP over stdio, one map
+bin/swan serve --maps data                      # or one server for every map under a data root
 bin/swan query data/<name>/swan.db refs getBackend   # the same answers on the command line
 scripts/test.sh                                 # build, map the fixture, drive the MCP end to end, check refresh
 ```
@@ -175,6 +180,21 @@ An MCP client entry looks like:
 ```json
 { "command": "/path/to/swan/bin/swan", "args": ["serve", "/path/to/swan/data/<name>/swan.db"] }
 ```
+
+or, to let one registered server answer about any repo:
+
+```json
+{ "command": "/path/to/swan/bin/swan", "args": ["serve", "--maps", "/path/to/swan/data"] }
+```
+
+In that mode the server starts with no repo selected: `use_repo` with a
+repo's path (or a path inside it) finds its map under the data root —
+`<data>/<name>/swan.db`, matched by the `root` recorded in the map — builds
+it with `swan map`'s rules when there is none (trust holds included), and
+switches to it. Passing `repo` on any other tool's call switches the same
+way, so an agent can keep one server and move between codebases. `index_info`
+with nothing selected lists the known maps. `swan serve` alone is the same
+with `<swan-home>/data` as the root.
 
 ## First numbers (2026-10-25, Linux x64, gcc 15.2)
 

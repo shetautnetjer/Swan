@@ -311,6 +311,26 @@ branch fix/greptile-review:
   Existing maps of Rust, Gradle, Maven or C# repos need one `swan trust`
   each before their next map.
 
+## 2026-10-31: one server answers about any repo
+
+- `swan serve --maps <data-root>` (bare `swan serve` uses `<swan-home>/data`)
+  starts with no repo selected; `swan serve <db>` is unchanged.
+- New tool `use_repo` (`path`, `build?`): finds the map for a repo path or a
+  path inside it by matching the `root` each `<data-root>/*/swan.db` records
+  (DECISIONS.md), builds it with `swan map`'s rules when there is none —
+  trust holds reported as `skipped` — closes the old map, stops the live
+  server, opens the new one, and warms lazily on the next call. Returns
+  `root`, `map`, `symbols`, `files`, `built`, `stale_file_count`, `skipped`
+  and the timed map `report`.
+- Every tool takes `repo`: a switch for that call (and after) on top of the
+  same machinery. With nothing selected the tools say to call `use_repo` or
+  pass `repo`, and `index_info` lists the known maps.
+- tests/maps_check.ts drives `swan serve --maps` over stdio: the guidance
+  error, building and switching between tiny-ts and tiny-rs, a per-call
+  `repo`, an inside-the-repo path, missing path and `build:false` refusals,
+  and `swan serve <db>` unchanged. Both mutation checks run: no-switch
+  fails the tiny-rs checks, exact-match-only fails the inside-path check.
+
 ## Remaining work
 
 1. Qualify real server adapters and indexers separately from the mock LSP
