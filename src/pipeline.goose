@@ -289,6 +289,12 @@ fn untrusted_note(skipped: const u8[:], repo: const u8[:]) -> u8[>..] {
                "if you trust this repo: swan trust ", repo);
 }
 
+var map_held: u8[..1024];      // build-running indexers the last map_main left out for `swan trust`
+
+// The same list the map report carries as "not run: ..."; "" when the last
+// map held nothing back. swan serve reports it as use_repo's `skipped`.
+fn map_held_indexers() -> const u8[:] { return trim(map_held[..]); }
+
 fn env_entry(k: const u8[:], v: const u8[:]) -> u8[>..] {
     var e: u8[>..] = [];
     format(e, k, "=", v);
@@ -574,6 +580,7 @@ fn dependents_of_changes(out: const u8[:], stamps: const u8[:], prev: const u8[:
 
 fn map_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> bool {
     let t_start = clock();
+    map_held.clear();
     let repo = abs_path(repo_arg);
     var mk: u8[>..] = [];
     arg(mk, "mkdir");
@@ -584,8 +591,11 @@ fn map_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> bo
     let out = abs_path(out_arg);
     let home = swan_home();
     let bin = str(home, "/tools/node_modules/.bin/");
-    let l = detect(repo);
+    var l = detect(repo);
     let trusted = build_trusted(repo, out);
+    // A virtualenv inside the repo is the repo's own code (its python, its pip, its PATH):
+    // use it only once the repo is trusted, like any other build-running step.
+    if !trusted { l.venv.clear(); }
     var skipped: u8[>..] = [];     // indexers that wait for `swan trust`
     format(report, "languages:", if l.ts { " typescript" } else { "" }, if l.js { " javascript" } else { "" },
            if l.java { " java" } else { "" }, if l.c { " c/c++" } else { "" }, if l.cuda { " cuda" } else { "" },
@@ -1064,6 +1074,7 @@ fn map_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> bo
     }
 
     if skipped.len > 0 { format(report, untrusted_note(skipped, repo), "\n"); }
+    map_held.append(trim(skipped[..]));
     if jobs.len == 0 && (l.kt || l.other.len > 0 || skipped.len > 0) {
         // Nothing to index, but the code can still be searched by structure
         // and checked live: an empty map records the repo for search_pattern
@@ -1369,10 +1380,11 @@ fn check_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> 
     guard file_exists(db) else { format(report, "no map at ", db, "; run swan map first"); return false; }
     let home = swan_home();
     let bin = str(home, "/tools/node_modules/.bin/");
-    let l = detect(repo);
+    var l = detect(repo);
     var rows: u8[>..] = [];
     var ran: u8[>..] = [];
     let trusted = build_trusted(repo, out);
+    if !trusted { l.venv.clear(); }     // the repo's virtualenv is its own code (see map_main)
     var skipped: u8[>..] = [];
     // Checkers that never got to check: not started (126, 127), timed out
     // (-2), killed, or failed with nothing to show for it (a checker that

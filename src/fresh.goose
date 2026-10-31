@@ -33,6 +33,15 @@ fn load_freshness(db: i64) {
     fresh_edited = prepare_or_die(db, "SELECT edited_mtime FROM files WHERE file = ?1");
 }
 
+// Lets go of the freshness state before its db closes: the prepared
+// statement belongs to that connection. swan serve calls this when it
+// switches repos.
+fn drop_freshness() {
+    fresh_root.clear();
+    fresh_scip_time = 0;
+    if fresh_edited != 0 { sqlite::finalize(fresh_edited); fresh_edited = 0; }
+}
+
 // The mtime Swan left on a file it edited, or -1.
 fn edited_mtime(file: const u8[:]) -> i64 {
     guard fresh_edited != 0 else { return -1; }

@@ -76,6 +76,29 @@ if (existsSync(".tools/dotnet-tools/scip-dotnet") && existsSync(".tools/dotnet-t
   check("untrusted Rust: the saved cargo diagnostics are kept", after.includes("a saved cargo error"), after.slice(0, 600));
 }
 
+// A virtualenv inside an untrusted repo is the repo's own code: its python must not run, and it
+// must not be put on PATH for indexers. The planted interpreter leaves a marker if anything runs it.
+{
+  const dir = "data/trust-check/venv";
+  rmSync(dir, { recursive: true, force: true });
+  cpSync("fixtures/tiny-py", `${dir}/repo`, { recursive: true });
+  const repo = resolve(`${dir}/repo`), out = `${dir}/out`;
+  const marker = resolve(`${dir}/venv-python-ran`);
+  mkdirSync(`${dir}/repo/.venv/bin`, { recursive: true });
+  writeFileSync(`${dir}/repo/.venv/pyvenv.cfg`, "home = /usr/bin\n");
+  const fake = `#!/bin/sh\necho ran >> ${marker}\nexec python3 "$@"\n`;
+  for (const n of ["python", "python3", "pip"]) writeFileSync(`${dir}/repo/.venv/bin/${n}`, fake, { mode: 0o755 });
+  const m = run(untrusted, "map", repo, out);
+  check("untrusted repo: mapping never runs its virtualenv's python, pip or PATH entries",
+    !existsSync(marker), (m.stdout.toString() + m.stderr.toString()).slice(0, 600));
+  check("untrusted repo: the map is still built (python indexed with the system interpreter)",
+    existsSync(`${out}/swan.db`), m.stdout.toString().slice(0, 400));
+  run(untrusted, "check", repo, out);
+  check("untrusted repo: swan check never runs its virtualenv either", !existsSync(marker));
+  const t = run(trustedEnv, "map", repo, out);
+  check("trusted repo: its virtualenv is used", existsSync(marker), t.stdout.toString().slice(0, 400));
+}
+
 // Leave Swan's trust list as it was.
 if (before === null) rmSync(trustFile, { force: true }); else writeFileSync(trustFile, before);
 console.log(failures ? `${failures} check(s) failed` : "all trust checks passed");

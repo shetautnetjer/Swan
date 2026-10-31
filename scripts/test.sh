@@ -9,6 +9,7 @@ export SWAN_TRUST_BUILD=1
 scripts/build.sh >/dev/null
 scripts/index-repo.sh fixtures/tiny-ts data/tiny-ts >/dev/null
 bun tests/mcp_smoke.ts bin/swan data/tiny-ts/swan.db
+bun tests/maps_check.ts
 tests/refresh_check.sh
 bun tests/edit_check.ts
 bun tests/rust_check.ts

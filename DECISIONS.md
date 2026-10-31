@@ -126,6 +126,21 @@ writes the repo's obj/ folders; that is accepted as build output (the map
 leaves obj/ out). It needs a solution or project at the repo root; deeper
 layouts are not detected yet.
 
+## 2026-10-31 — The map folder is the registry; no registry file
+
+`swan serve --maps <data-root>` finds a repo's map by scanning
+`<data-root>/*/swan.db` and matching the `root` each map records in its own
+meta, rather than keeping a name→repo index of our own. The maps are already
+the source of truth: a registry file could only disagree with them (a moved
+repo, a deleted map, a renamed folder), and every disagreement would be a
+bug the scan cannot have. A path inside a mapped repo resolves to the
+nearest recorded root above it, so an agent asking about
+`repo/src/deep/file` lands on the right map without knowing where the root
+is. New maps are named for the repo's basename, with a short path hash
+appended when the name is another repo's, which keeps `data/` readable as a
+list of projects. Cost: one sqlite open per map per `use_repo` — nothing
+next to a map build.
+
 ## 2026-10-28 — Build-running tools wait for `swan trust`
 
 A repo's build files can run any code (cargo build scripts and proc macros,
