@@ -113,6 +113,16 @@ const inner = await tool("use_repo", { path: "fixtures/tiny-ts/src" });
 check("use_repo of a path inside a mapped repo finds the repo's map",
   inner.root === tinyTs && inner.built === false && inner.map === join(dataRoot, "tiny-ts", "swan.db"), inner);
 
+// Reselecting the map that is already open is a no-op (no reopen, no live-server restart),
+// even after several switches.
+const againTs = await tool("use_repo", { path: "fixtures/tiny-ts" });
+check("use_repo of the already-selected repo does not reopen the map", againTs.switched === false, againTs);
+await tool("use_repo", { path: "fixtures/tiny-rs" });
+const toTs = await tool("use_repo", { path: "fixtures/tiny-ts" });
+check("a real switch reports switched", toTs.switched === true, toTs);
+const sameTs = await tool("use_repo", { path: "fixtures/tiny-ts/src" });
+check("after several switches, reselecting the current repo is still a no-op", sameTs.switched === false, sameTs);
+
 // use_repo refuses what is not there, and a file is not a repo.
 const missing = await call("use_repo", { path: "fixtures/no-such-dir" });
 check("use_repo on a missing path errors", missing.isError === true && missing.text.includes("no such path"), missing);

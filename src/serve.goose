@@ -182,10 +182,12 @@ fn repo_switch(path: const u8[:], build: bool, out: u8[>..]&) -> bool {
         }
         built = true;
     }
-    if db_path != serve_map {       // a switch: live server off, old map closed, new one open
+    let switched = db_path != serve_map;
+    if switched {       // a switch: live server off, old map closed, new one open
         live_stop();
         if serve_db != 0 { close_db(serve_db); }
         serve_db = open_db(db_path);
+        serve_map.clear();      // format appends: without this the stored path grows and never matches
         format(serve_map, db_path);
         serve_warm = true;
     }
@@ -207,6 +209,8 @@ fn repo_switch(path: const u8[:], build: bool, out: u8[>..]&) -> bool {
     json::format_int(out, if ok2 { nf } else { 0 });
     out.append(",\"built\":");
     json::format_bool(out, built);
+    out.append(",\"switched\":");
+    json::format_bool(out, switched);
     out.append(",\"stale_file_count\":");
     json::format_int(out, stale_count(serve_db));
     out.append(",\"skipped\":");
