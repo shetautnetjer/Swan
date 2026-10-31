@@ -591,8 +591,11 @@ fn map_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> bo
     let out = abs_path(out_arg);
     let home = swan_home();
     let bin = str(home, "/tools/node_modules/.bin/");
-    let l = detect(repo);
+    var l = detect(repo);
     let trusted = build_trusted(repo, out);
+    // A virtualenv inside the repo is the repo's own code (its python, its pip, its PATH):
+    // use it only once the repo is trusted, like any other build-running step.
+    if !trusted { l.venv.clear(); }
     var skipped: u8[>..] = [];     // indexers that wait for `swan trust`
     format(report, "languages:", if l.ts { " typescript" } else { "" }, if l.js { " javascript" } else { "" },
            if l.java { " java" } else { "" }, if l.c { " c/c++" } else { "" }, if l.cuda { " cuda" } else { "" },
@@ -1377,10 +1380,11 @@ fn check_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> 
     guard file_exists(db) else { format(report, "no map at ", db, "; run swan map first"); return false; }
     let home = swan_home();
     let bin = str(home, "/tools/node_modules/.bin/");
-    let l = detect(repo);
+    var l = detect(repo);
     var rows: u8[>..] = [];
     var ran: u8[>..] = [];
     let trusted = build_trusted(repo, out);
+    if !trusted { l.venv.clear(); }     // the repo's virtualenv is its own code (see map_main)
     var skipped: u8[>..] = [];
     // Checkers that never got to check: not started (126, 127), timed out
     // (-2), killed, or failed with nothing to show for it (a checker that

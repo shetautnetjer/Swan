@@ -140,6 +140,40 @@ check("build:false for a same-basename repo suggests a dir other than the existi
   twinHint.isError === true && twinHint.text.includes("swan map ") &&
   !twinHint.text.includes(` ${join(dataRoot, "tiny-ts")}'`), twinHint);
 
+// An old-schema map is never opened (opening it would abort the server); the repo counts as unmapped.
+const oldRoot = mkdtempSync(join(tmpdir(), "swan-old-"));
+const oldRepo = join(oldRoot, "oldrepo");
+mkdirSync(oldRepo);
+writeFileSync(join(oldRepo, "y.ts"), "export const y = 2;\n");
+const oldMapDir = join(dataRoot, "oldrepo");
+mkdirSync(oldMapDir);
+{
+  const { Database } = await import("bun:sqlite");
+  const db = new Database(join(oldMapDir, "swan.db"));
+  db.run("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT)");
+  db.run("INSERT INTO meta VALUES ('root', ?), ('schema_version', '1')", [realpathSync(oldRepo)]);
+  db.close();
+}
+const oldHint = await call("use_repo", { path: oldRepo, build: false });
+check("an old-schema map is skipped, not opened (server stays up, repo counts as unmapped)",
+  oldHint.isError === true && oldHint.text.includes("no map for"), oldHint);
+// A damaged swan.db (not SQLite at all) and one with no meta table must not stop the server
+// or hide the healthy maps.
+mkdirSync(join(dataRoot, "junk"));
+writeFileSync(join(dataRoot, "junk", "swan.db"), "this is not a sqlite database\n");
+mkdirSync(join(dataRoot, "nometa"));
+{
+  const { Database } = await import("bun:sqlite");
+  const db = new Database(join(dataRoot, "nometa", "swan.db"));
+  db.run("CREATE TABLE other (x INTEGER)");
+  db.close();
+}
+const viaDamaged = await tool("find_symbol", { name_path_pattern: "Store/add", repo: "fixtures/tiny-ts" });
+check("damaged and meta-less maps under the data root don't stop selecting a healthy repo",
+  Array.isArray(viaDamaged) && viaDamaged.length === 1, viaDamaged);
+const alive = await tool("index_info", {});
+check("the server still answers after meeting an old-schema map", alive && typeof alive === "object", alive);
+
 // Without build, an unmapped repo is an error naming the command to run.
 const noBuild = await call("use_repo", { path: "fixtures/tiny-py", build: false });
 check("use_repo with build:false names the swan map command",

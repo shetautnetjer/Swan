@@ -214,7 +214,8 @@ fn format_main(repo_arg: const u8[:], out_arg: const u8[:], files: const u8[:], 
     let repo = abs_path(repo_arg);
     let out = abs_path(out_arg);
     let home = swan_home();
-    let l = detect(repo);
+    var l = detect(repo);
+    if !build_trusted(repo, out) { l.venv.clear(); }    // the repo's virtualenv is its own code
     let c = mod_ctx(repo, out, home, l);
     var ok = true;
     for lang in ["python", "typescript", "rust"] {
@@ -302,7 +303,8 @@ fn test_main(repo_arg: const u8[:], out_arg: const u8[:], target: const u8[:], r
     each_split(tests, '\n') { t => if t.len > 0 && find(uniq, str(t, "\n")) < 0 { uniq.append(t); uniq.push('\n'); } };
     guard uniq.len > 0 else { format(report, "no test reaches ", target, " (looked ", depth, " calls out)"); return true; }
     format(report, "tests that reach ", target, ":\n", uniq);
-    let l = detect(repo);
+    var l = detect(repo);
+    if !build_trusted(repo, out) { l.venv.clear(); }    // the repo's virtualenv is its own code
     let c = mod_ctx(repo, out, home, l);
     var all_ok = true;
     for lang in ["python", "typescript", "rust"] {

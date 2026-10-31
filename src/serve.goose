@@ -59,15 +59,37 @@ var serve_map: u8[..4096];      // serve_db's file, so reselecting the same map 
 var serve_maps: u8[..4096];     // the registry root: a repo's map is <serve_maps>/<name>/swan.db
 var serve_warm = false;         // live_warm the new map on the next call: a switch itself stays fast
 
-// One known map's identity, read from its meta.
+// A meta value from a map that may be damaged or foreign: unlike meta_value
+// (prepare_or_die), a missing meta table or a corrupt file returns false, so
+// one bad swan.db under the data root can't stop the server.
+fn meta_try(h: i64, key: const u8[:], out: u8[>..]&) -> bool {
+    var err: u8[>..] = [];
+    let st = sqlite::prepare(h, "SELECT value FROM meta WHERE key = ?1", err);
+    guard st != 0 else { return false; }
+    sqlite::bind_text(st, 1, key);
+    if sqlite::step(st, err) == 1 { sqlite::col_text(st, 0, out); }
+    sqlite::finalize(st);
+    return true;
+}
+
+// One known map's identity, read from its meta; false for a map that can't be read.
 fn map_meta(db_path: const u8[:], root: u8[>..]&, symbols: u8[>..]&) -> bool {
     var err: u8[>..] = [];
     let h = sqlite::open(db_path, err);
     guard h != 0 else { return false; }
-    meta_value(h, "root", root);
-    meta_value(h, "symbols", symbols);
+    let ok = meta_try(h, "root", root) && meta_try(h, "symbols", symbols);
     sqlite::close(h);
-    return true;
+    return ok && root.len > 0;
+}
+
+fn map_schema_current(db_path: const u8[:]) -> bool {
+    var err: u8[>..] = [];
+    let h = sqlite::open(db_path, err);
+    guard h != 0 else { return false; }
+    var v: u8[>..] = [];
+    let ok = meta_try(h, "schema_version", v);
+    sqlite::close(h);
+    return ok && v == str(SCHEMA_VERSION);
 }
 
 // The map covering `abs`: its own root, or the nearest root above it, among
@@ -83,6 +105,9 @@ fn find_map(abs: const u8[:]) -> u8[>..] {
         guard file_exists(dbf);
         var root: u8[>..] = [];
         var ignored: u8[>..] = [];
+        // A map from an older Swan, or a damaged/foreign swan.db, can't be opened by this one
+        // (open_db would abort the server); skip it.
+        guard map_schema_current(dbf);
         guard map_meta(dbf, root, ignored);
         let inside = root.len > 0 && root.len > best &&
                      (abs == root || (starts_with(abs, root) && abs.len > root.len && abs[root.len] == '/'));
