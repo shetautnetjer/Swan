@@ -17,7 +17,9 @@ const dataRoot = realpathSync(process.argv[3] ?? mkdtempSync(join(tmpdir(), "swa
 const tinyTs = realpathSync("fixtures/tiny-ts");
 const tinyRs = realpathSync("fixtures/tiny-rs");
 
-const proc = Bun.spawn([bin, "serve", "--maps", dataRoot], { stdin: "pipe", stdout: "pipe", stderr: "inherit" });
+// The fixtures are ours: let their indexers run build files (rust needs it), as scripts/test.sh does.
+// Without this a bare run holds tiny-rs's indexer and the switch check has nothing to find.
+const proc = Bun.spawn([bin, "serve", "--maps", dataRoot], { stdin: "pipe", stdout: "pipe", stderr: "inherit", env: { ...process.env, SWAN_TRUST_BUILD: "1" } });
 const reader = proc.stdout.getReader();
 const dec = new TextDecoder();
 let buffered = "";
