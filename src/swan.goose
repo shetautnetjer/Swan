@@ -2,7 +2,7 @@
 //   swan index <flattened-dir> <db> [repo-root]     a new map
 //   swan refresh <flattened-dir> <db> [repo-root]   rewrite only the files whose rows changed
 //   swan query <db> symbol|refs|uses|at|overview|callers|callees|impls|hierarchy|unused|info|diag|diagfile|pattern <arg> [relative_path]
-//   swan serve <db>            MCP over stdio
+//   swan serve [<db> | --maps <data-root>]   MCP over stdio
 import std;
 import os;
 import .db;
@@ -33,7 +33,7 @@ fn usage() {
                swan refresh <flattened-dir> <db> [repo-root]
                swan diagnostics <dir-with-diagnostics.tsv> <db>
                swan query <db> symbol|refs|uses|at|overview|callers|callees|impls|hierarchy|unused|info|diag|diagfile|pattern <arg> [relative_path]
-               swan serve <db>
+               swan serve [<db> | --maps <data-root>]
 
         """);
     exit(2);
@@ -53,6 +53,13 @@ fn open_db(path: const u8[:]) -> i64 {
     let db = open_map(path);
     load_freshness(db);
     return db;
+}
+
+// The other end of open_db: the freshness statement belongs to this
+// connection, so it is finalized before the handle.
+fn close_db(db: i64) {
+    drop_freshness();
+    sqlite::close(db);
 }
 
 fn main() {
@@ -125,5 +132,8 @@ fn main() {
         print(report);
     } else if a[1] == "serve" && a.len == 3 {
         serve_main(a[2]);
+    } else if a[1] == "serve" && (a.len == 2 || (a.len == 4 && a[2] == "--maps")) {
+        let maps_root: u8[>..] = if a.len == 4 { a[3] } else { str(swan_home(), "/data") };
+        serve_any(maps_root);
     } else { usage(); }
 }
