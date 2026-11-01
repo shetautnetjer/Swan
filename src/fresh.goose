@@ -84,7 +84,9 @@ fn new_files(db: i64, out: u8[>..]&) -> i64 {
     var endings: u8[>..] = [];      // "\n.ts\n.py\n"
     endings.push('\n');
     var err: u8[>..] = [];
-    let all = prepare_or_die(db, "SELECT file FROM files");
+    // Only files with rows: mark_edited (src/edit.goose) adds an empty row
+    // for any file Swan edits or formats, which must not add its ending.
+    let all = prepare_or_die(db, "SELECT file FROM files WHERE rows > 0");
     while sqlite::step(all, err) == 1 {
         var f: u8[>..] = [];
         sqlite::col_text(all, 0, f);

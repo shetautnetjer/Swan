@@ -257,4 +257,15 @@ int64_t swan_file_size(swan_slice path) {
     return stat(buf, &st) == 0 ? (int64_t)st.st_size : -1;
 }
 
+/* True when the path itself is a symbolic link (lstat: not followed). Goose's
+   os.is_dir follows links, so a walk needs this to stay inside the repo. */
+bool swan_is_symlink(swan_slice path) {
+    char buf[4096];
+    if (path.len <= 0 || path.len >= (int64_t)sizeof buf) return false;
+    memcpy(buf, path.data, (size_t)path.len);
+    buf[path.len] = 0;
+    struct stat st;
+    return lstat(buf, &st) == 0 && S_ISLNK(st.st_mode);
+}
+
 int32_t swan_cpu_count(void) { long n = sysconf(_SC_NPROCESSORS_ONLN); return n > 0 ? (int32_t)n : 1; }

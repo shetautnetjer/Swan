@@ -34,8 +34,13 @@ struct Langs {
 let SKIP_DIRS = ["node_modules", ".git", "target", ".venv", "venv", "__pycache__", ".tox",
                  ".mypy_cache", ".pytest_cache", ".swan", "build", ".gradle", "obj"];
 
+extern fn swan_is_symlink(path: const u8[:]) -> bool;
+
 // F(path, name) for each file under repo, breadth-first, skipping folders
-// that hold dependencies, caches or build output.
+// that hold dependencies, caches or build output. A symlinked folder is not
+// entered: it could lead out of the repo or loop back into it (a link to "."
+// listed one file 41 times), and a target inside the repo is walked under
+// its own path anyway.
 fn each_file<F>(repo: const u8[:]) {
     var dirs: u8[>..] = [];     // only grows; `next` walks it
     dirs.append(repo);
@@ -55,7 +60,7 @@ fn each_file<F>(repo: const u8[:]) {
             var full: u8[>..] = [];
             format(full, dir, "/", name);
             if is_dir(full) {
-                if !contains(SKIP_DIRS, name) { dirs.append(full); dirs.push('\n'); }
+                if !contains(SKIP_DIRS, name) && !swan_is_symlink(full) { dirs.append(full); dirs.push('\n'); }
             } else {
                 F(full[..], name);
             }

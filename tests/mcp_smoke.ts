@@ -132,28 +132,43 @@ check("an edited file's answers say stale, others don't",
   staleInfo.stale_files.join(",") === "src/report.ts");
 
 // A file added after the build: the map has no answers for it, so index_info
-// lists it as stale and counts it as new. A new file in a language the map
-// holds no files of (Lua), and one in a folder `swan map` skips
-// (node_modules), are left out. All three are removed again.
-const { writeFileSync, rmSync, mkdirSync } = await import("node:fs");
+// lists it as stale and counts it as new. Left out: a new file in a language
+// the map holds no files of (Lua), one in a folder `swan map` skips
+// (node_modules), one behind a symlinked folder that leads out of the repo,
+// anything reached again through a link back to ".", and a new .json whose
+// ending is in the map only through the empty row an edit leaves
+// (mark_edited, rows = 0). Everything is removed again.
+const { writeFileSync, rmSync, mkdirSync, mkdtempSync, symlinkSync } = await import("node:fs");
+const { Database } = await import("bun:sqlite");
+const outside = mkdtempSync(`${(await import("node:os")).tmpdir()}/swan-outside-`);
 const addedFiles = { "fixtures/tiny-ts/src/added.ts": "export const added = 1;\n",
                      "fixtures/tiny-ts/src/added.lua": "x = 1\n",
-                     "fixtures/tiny-ts/node_modules/dep/index.ts": "export const dep = 1;\n" };
+                     "fixtures/tiny-ts/src/added.json": "{}\n",
+                     "fixtures/tiny-ts/node_modules/dep/index.ts": "export const dep = 1;\n",
+                     [`${outside}/secret.ts`]: "export const secret = 1;\n" };
+const mapDb = new Database(db);
 let addedInfo: any;
 try {
   mkdirSync("fixtures/tiny-ts/node_modules/dep", { recursive: true });
   for (const [f, text] of Object.entries(addedFiles)) writeFileSync(f, text);
+  symlinkSync(outside, "fixtures/tiny-ts/src/escape");
+  symlinkSync(".", "fixtures/tiny-ts/src/loop");
+  mapDb.run("INSERT INTO files (file, hash, rows, edited_mtime) VALUES ('tsconfig.json', '', 0, 0)");
   addedInfo = await tool("index_info", {});
 } finally {
-  rmSync("fixtures/tiny-ts/src/added.ts", { force: true });
-  rmSync("fixtures/tiny-ts/src/added.lua", { force: true });
+  for (const f of ["src/added.ts", "src/added.lua", "src/added.json", "src/escape", "src/loop"])
+    rmSync(`fixtures/tiny-ts/${f}`, { force: true });
   rmSync("fixtures/tiny-ts/node_modules", { recursive: true, force: true });
+  rmSync(outside, { recursive: true, force: true });
+  mapDb.run("DELETE FROM files WHERE file = 'tsconfig.json'");
+  mapDb.close();
 }
 const afterInfo = await tool("index_info", {});
-check("a file added after the build is stale and new; other languages and skipped folders are not; gone again after removal",
+check("a file added after the build is stale and new; other languages, skipped folders, symlinked folders and edit-only endings are not; gone again after removal",
   fresh.new_file_count === 0 &&
   addedInfo.stale_files.join(",") === "src/added.ts" && addedInfo.stale_file_count === 1 && addedInfo.new_file_count === 1 &&
   afterInfo.stale_file_count === 0 && afterInfo.new_file_count === 0);
+if (addedInfo.stale_files.join(",") !== "src/added.ts") console.log("     stale_files:", addedInfo.stale_files.join(", "));
 
 const amb = await tool("get_callers", { name_path: "total" });
 check("get_callers with a name three symbols share sends the question back instead of merging",
