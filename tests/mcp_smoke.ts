@@ -131,6 +131,30 @@ check("an edited file's answers say stale, others don't",
   stale[0].references.every((r: any) => !!r.stale === (r.relative_path === "src/report.ts")) &&
   staleInfo.stale_files.join(",") === "src/report.ts");
 
+// A file added after the build: the map has no answers for it, so index_info
+// lists it as stale and counts it as new. A new file in a language the map
+// holds no files of (Lua), and one in a folder `swan map` skips
+// (node_modules), are left out. All three are removed again.
+const { writeFileSync, rmSync, mkdirSync } = await import("node:fs");
+const addedFiles = { "fixtures/tiny-ts/src/added.ts": "export const added = 1;\n",
+                     "fixtures/tiny-ts/src/added.lua": "x = 1\n",
+                     "fixtures/tiny-ts/node_modules/dep/index.ts": "export const dep = 1;\n" };
+let addedInfo: any;
+try {
+  mkdirSync("fixtures/tiny-ts/node_modules/dep", { recursive: true });
+  for (const [f, text] of Object.entries(addedFiles)) writeFileSync(f, text);
+  addedInfo = await tool("index_info", {});
+} finally {
+  rmSync("fixtures/tiny-ts/src/added.ts", { force: true });
+  rmSync("fixtures/tiny-ts/src/added.lua", { force: true });
+  rmSync("fixtures/tiny-ts/node_modules", { recursive: true, force: true });
+}
+const afterInfo = await tool("index_info", {});
+check("a file added after the build is stale and new; other languages and skipped folders are not; gone again after removal",
+  fresh.new_file_count === 0 &&
+  addedInfo.stale_files.join(",") === "src/added.ts" && addedInfo.stale_file_count === 1 && addedInfo.new_file_count === 1 &&
+  afterInfo.stale_file_count === 0 && afterInfo.new_file_count === 0);
+
 const amb = await tool("get_callers", { name_path: "total" });
 check("get_callers with a name three symbols share sends the question back instead of merging",
   amb.ambiguous === true && amb.targets.length === 3 && !amb.callers);

@@ -67,6 +67,64 @@ fn is_stale(file: const u8[:]) -> bool {
     return m > fresh_scip_time && m != edited_mtime(file);
 }
 
+// Files added since the map was built: in the repo, never in the map, with
+// an ending the map already holds files for, and written after the SCIP run.
+// is_stale only checks mapped files, so a new file was missing from every
+// answer with nothing saying so (2026-11-01: AEON's new
+// app-server-openai-chat-key-store.ts was absent from a reference list).
+// Appends "relative/path\n" to out for each one and returns how many.
+// Endings come from the map, so a language it never indexed (no indexer
+// here, or one waiting for swan trust) never shows. A file the indexers leave
+// out on purpose (outside the tsconfig, say) shows only until the next
+// refresh moves the SCIP time past it. One walk of the repo, skipping the
+// folders `swan map` skips (each_file), and one stat per file with such an
+// ending.
+fn new_files(db: i64, out: u8[>..]&) -> i64 {
+    guard fresh_scip_time > 0 && fresh_root.len > 1 else { return 0; }
+    var endings: u8[>..] = [];      // "\n.ts\n.py\n"
+    endings.push('\n');
+    var err: u8[>..] = [];
+    let all = prepare_or_die(db, "SELECT file FROM files");
+    while sqlite::step(all, err) == 1 {
+        var f: u8[>..] = [];
+        sqlite::col_text(all, 0, f);
+        let e = file_ending(f);
+        if e.len > 0 && find(endings, str("\n", e, "\n")) < 0 {
+            endings.append(e);
+            endings.push('\n');
+        }
+    }
+    sqlite::finalize(all);
+    guard endings.len > 1 else { return 0; }
+    let known = prepare_or_die(db, "SELECT 1 FROM files WHERE file = ?1");
+    var n: i64 = 0;
+    each_file(fresh_root[..fresh_root.len - 1]) { full, name =>
+        let e = file_ending(name);
+        if e.len > 0 && find(endings, str("\n", e, "\n")) >= 0 && swan_mtime_ns(full) > fresh_scip_time {
+            let rel = full[fresh_root.len..];
+            sqlite::bind_text(known, 1, rel);
+            let mapped = sqlite::step(known, err) == 1;
+            sqlite::reset(known);
+            if !mapped {
+                out.append(rel);
+                out.push('\n');
+                n++;
+            }
+        }
+    };
+    sqlite::finalize(known);
+    return n;
+}
+
+// ".ts" for "src/a.ts": from the last dot of the last path part, or "" when
+// that part has no dot (or only a leading one, as in ".gitignore").
+fn file_ending(path: u8[:]) -> u8[:] {
+    let slash = rfind(path, "/");
+    let base = if slash >= 0 { path[slash + 1..] } else { path };
+    let dot = rfind(base, ".");
+    return if dot > 0 { base[dot..] } else { base[0..0] };
+}
+
 // When the SCIP run started: the marker `swan map` leaves, or else
 // index.scip beside the rows, or the rows themselves.
 fn scip_time_of(dir: const u8[:]) -> i64 {

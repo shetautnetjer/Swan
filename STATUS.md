@@ -331,6 +331,29 @@ branch fix/greptile-review:
   and `swan serve <db>` unchanged. Both mutation checks run: no-switch
   fails the tiny-rs checks, exact-match-only fails the inside-path check.
 
+## 2026-11-01: files added after a build count as stale
+
+- `index_info` and `use_repo` now count files added since the map was built
+  in `stale_file_count`. Such a file is in the repo (walked with `swan map`'s
+  skip list), absent from the map, has an ending the map already holds files
+  of, and was written after the SCIP run. `index_info` lists these files in
+  `stale_files` and adds `new_file_count`. Before this, `is_stale` only
+  checked mapped files, so a new file was missing from every answer while
+  the map said stale 0. Seen twice: AEON's new
+  `app-server-openai-chat-key-store.ts` was absent from
+  `acquireDurableFileLock`'s references, and evolve's map missed 5 files
+  after #16 merged.
+- Languages the map never indexed (no indexer, or waiting for `swan trust`)
+  don't count. A file the indexers leave out on purpose shows only until
+  the next refresh moves the SCIP time past it.
+- tests/mcp_smoke.ts: a new `.ts` file is stale and new. A new `.lua` file
+  (no Lua in the map) and `node_modules/dep/index.ts` are not. All three are
+  gone after removal. Mutation: `new_files` returning 0 fails the check.
+  `scripts/test.sh` passes.
+- Cross-checked on the live maps against an independent Python walk:
+  evolve has 5 new files (the #16 merge), AEON 0. `index_info` on AEON
+  (2,716 files walked) takes 7 ms.
+
 ## Remaining work
 
 1. Qualify real server adapters and indexers separately from the mock LSP
