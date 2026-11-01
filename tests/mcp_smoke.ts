@@ -138,37 +138,46 @@ check("an edited file's answers say stale, others don't",
 // anything reached again through a link back to ".", and a new .json whose
 // ending is in the map only through the empty row an edit leaves
 // (mark_edited, rows = 0). Everything is removed again.
-const { writeFileSync, rmSync, mkdirSync, mkdtempSync, symlinkSync } = await import("node:fs");
+const { writeFileSync, rmSync, mkdirSync, mkdtempSync, symlinkSync, existsSync } = await import("node:fs");
 const { Database } = await import("bun:sqlite");
+// Everything this test creates lives under its own uniquely named folders, so
+// a developer's own fixtures/tiny-ts/src or node_modules files are never
+// overwritten or deleted (CodeRabbit, Swan #9).
+const tag = `swan-new-files-${process.pid}-${Date.now()}`;
+const srcDir = `fixtures/tiny-ts/src/${tag}`;
+const nmRoot = "fixtures/tiny-ts/node_modules";
+const nmHad = existsSync(nmRoot);
+const nmDir = `${nmRoot}/${tag}`;
 const outside = mkdtempSync(`${(await import("node:os")).tmpdir()}/swan-outside-`);
-const addedFiles = { "fixtures/tiny-ts/src/added.ts": "export const added = 1;\n",
-                     "fixtures/tiny-ts/src/added.lua": "x = 1\n",
-                     "fixtures/tiny-ts/src/added.json": "{}\n",
-                     "fixtures/tiny-ts/node_modules/dep/index.ts": "export const dep = 1;\n",
+const addedFiles = { [`${srcDir}/added.ts`]: "export const added = 1;\n",
+                     [`${srcDir}/added.lua`]: "x = 1\n",
+                     [`${srcDir}/added.json`]: "{}\n",
+                     [`${nmDir}/index.ts`]: "export const dep = 1;\n",
                      [`${outside}/secret.ts`]: "export const secret = 1;\n" };
 const mapDb = new Database(db);
+const jsonRowHad = !!mapDb.query("SELECT 1 FROM files WHERE file = 'tsconfig.json'").get();
 let addedInfo: any;
 try {
-  mkdirSync("fixtures/tiny-ts/node_modules/dep", { recursive: true });
+  mkdirSync(srcDir, { recursive: true });
+  mkdirSync(nmDir, { recursive: true });
   for (const [f, text] of Object.entries(addedFiles)) writeFileSync(f, text);
-  symlinkSync(outside, "fixtures/tiny-ts/src/escape");
-  symlinkSync(".", "fixtures/tiny-ts/src/loop");
-  mapDb.run("INSERT INTO files (file, hash, rows, edited_mtime) VALUES ('tsconfig.json', '', 0, 0)");
+  symlinkSync(outside, `${srcDir}/escape`);
+  symlinkSync(".", `${srcDir}/loop`);
+  if (!jsonRowHad) mapDb.run("INSERT INTO files (file, hash, rows, edited_mtime) VALUES ('tsconfig.json', '', 0, 0)");
   addedInfo = await tool("index_info", {});
 } finally {
-  for (const f of ["src/added.ts", "src/added.lua", "src/added.json", "src/escape", "src/loop"])
-    rmSync(`fixtures/tiny-ts/${f}`, { force: true });
-  rmSync("fixtures/tiny-ts/node_modules", { recursive: true, force: true });
+  rmSync(srcDir, { recursive: true, force: true });
+  rmSync(nmHad ? nmDir : nmRoot, { recursive: true, force: true });
   rmSync(outside, { recursive: true, force: true });
-  mapDb.run("DELETE FROM files WHERE file = 'tsconfig.json'");
+  if (!jsonRowHad) mapDb.run("DELETE FROM files WHERE file = 'tsconfig.json'");
   mapDb.close();
 }
 const afterInfo = await tool("index_info", {});
 check("a file added after the build is stale and new; other languages, skipped folders, symlinked folders and edit-only endings are not; gone again after removal",
   fresh.new_file_count === 0 &&
-  addedInfo.stale_files.join(",") === "src/added.ts" && addedInfo.stale_file_count === 1 && addedInfo.new_file_count === 1 &&
+  addedInfo.stale_files.join(",") === `src/${tag}/added.ts` && addedInfo.stale_file_count === 1 && addedInfo.new_file_count === 1 &&
   afterInfo.stale_file_count === 0 && afterInfo.new_file_count === 0);
-if (addedInfo.stale_files.join(",") !== "src/added.ts") console.log("     stale_files:", addedInfo.stale_files.join(", "));
+if (addedInfo.stale_files.join(",") !== `src/${tag}/added.ts`) console.log("     stale_files:", addedInfo.stale_files.join(", "));
 
 const amb = await tool("get_callers", { name_path: "total" });
 check("get_callers with a name three symbols share sends the question back instead of merging",
