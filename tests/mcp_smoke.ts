@@ -131,6 +131,54 @@ check("an edited file's answers say stale, others don't",
   stale[0].references.every((r: any) => !!r.stale === (r.relative_path === "src/report.ts")) &&
   staleInfo.stale_files.join(",") === "src/report.ts");
 
+// A file added after the build: the map has no answers for it, so index_info
+// lists it as stale and counts it as new. Left out: a new file in a language
+// the map holds no files of (Lua), one in a folder `swan map` skips
+// (node_modules), one behind a symlinked folder that leads out of the repo,
+// anything reached again through a link back to ".", and a new .json whose
+// ending is in the map only through the empty row an edit leaves
+// (mark_edited, rows = 0). Everything is removed again.
+const { writeFileSync, rmSync, mkdirSync, mkdtempSync, symlinkSync, existsSync } = await import("node:fs");
+const { Database } = await import("bun:sqlite");
+// Everything this test creates lives under its own uniquely named folders, so
+// a developer's own fixtures/tiny-ts/src or node_modules files are never
+// overwritten or deleted (CodeRabbit, Swan #9).
+const tag = `swan-new-files-${process.pid}-${Date.now()}`;
+const srcDir = `fixtures/tiny-ts/src/${tag}`;
+const nmRoot = "fixtures/tiny-ts/node_modules";
+const nmHad = existsSync(nmRoot);
+const nmDir = `${nmRoot}/${tag}`;
+const outside = mkdtempSync(`${(await import("node:os")).tmpdir()}/swan-outside-`);
+const addedFiles = { [`${srcDir}/added.ts`]: "export const added = 1;\n",
+                     [`${srcDir}/added.lua`]: "x = 1\n",
+                     [`${srcDir}/added.json`]: "{}\n",
+                     [`${nmDir}/index.ts`]: "export const dep = 1;\n",
+                     [`${outside}/secret.ts`]: "export const secret = 1;\n" };
+const mapDb = new Database(db);
+const jsonRowHad = !!mapDb.query("SELECT 1 FROM files WHERE file = 'tsconfig.json'").get();
+let addedInfo: any;
+try {
+  mkdirSync(srcDir, { recursive: true });
+  mkdirSync(nmDir, { recursive: true });
+  for (const [f, text] of Object.entries(addedFiles)) writeFileSync(f, text);
+  symlinkSync(outside, `${srcDir}/escape`);
+  symlinkSync(".", `${srcDir}/loop`);
+  if (!jsonRowHad) mapDb.run("INSERT INTO files (file, hash, rows, edited_mtime) VALUES ('tsconfig.json', '', 0, 0)");
+  addedInfo = await tool("index_info", {});
+} finally {
+  rmSync(srcDir, { recursive: true, force: true });
+  rmSync(nmHad ? nmDir : nmRoot, { recursive: true, force: true });
+  rmSync(outside, { recursive: true, force: true });
+  if (!jsonRowHad) mapDb.run("DELETE FROM files WHERE file = 'tsconfig.json'");
+  mapDb.close();
+}
+const afterInfo = await tool("index_info", {});
+check("a file added after the build is stale and new; other languages, skipped folders, symlinked folders and edit-only endings are not; gone again after removal",
+  fresh.new_file_count === 0 &&
+  addedInfo.stale_files.join(",") === `src/${tag}/added.ts` && addedInfo.stale_file_count === 1 && addedInfo.new_file_count === 1 &&
+  afterInfo.stale_file_count === 0 && afterInfo.new_file_count === 0);
+if (addedInfo.stale_files.join(",") !== `src/${tag}/added.ts`) console.log("     stale_files:", addedInfo.stale_files.join(", "));
+
 const amb = await tool("get_callers", { name_path: "total" });
 check("get_callers with a name three symbols share sends the question back instead of merging",
   amb.ambiguous === true && amb.targets.length === 3 && !amb.callers);

@@ -308,11 +308,24 @@ fn index_info(db: i64, out: u8[>..]&) {
         }
     }
     sqlite::finalize(fs);
+    // Files added since the build count too: the map has no answers for them at all.
+    var added: u8[>..] = [];
+    let nnew = new_files(db, added);
+    each_split(added, '\n') { f =>
+        guard f.len > 0;
+        if stale < 50 {
+            if stale > 0 { listed.push(','); }
+            json::format_string(listed, f);
+        }
+        stale++;
+    };
     out.append(",\"stale_file_count\":");
     json::format_int(out, stale);
     out.append(",\"stale_files\":[");
     out.append(listed);
-    out.append("]}");
+    out.append("],\"new_file_count\":");
+    json::format_int(out, nnew);
+    out.push('}');
 }
 
 // What is at a position: the symbol whose occurrence covers line:column

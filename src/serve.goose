@@ -31,7 +31,7 @@ let TOOLS = """
      {"name":"format_file","description":"Run a file through its language's formatter from tools/modules.json (ruff format, biome format, rustfmt). The file's positions in the map are stale afterwards until update_map.","inputSchema":{"type":"object","properties":{"repo":{"type":"string","description":"A repo path: answer about that repo's map instead (as use_repo; the choice persists)."},"relative_path":{"type":"string"}},"required":["relative_path"]}},
      {"name":"search_pattern","description":"Structural search, ast-grep style: a pattern is code in the target language with metavariables, $X for any one node and $$$X for any run of nodes (none included); $_ matches without capturing, and a name used twice must match the same text. Matches by syntax tree, not text (so spacing and comments do not matter), in TS/TSX/JS, Python, Rust, Java, Kotlin, C, C++, CUDA, C#, PHP, Lua, GDScript and the GLSL, HLSL and WGSL shading languages via tree-sitter. Each match has its position, what each metavariable captured, and the symbol it sits in.","inputSchema":{"type":"object","properties":{"repo":{"type":"string","description":"A repo path: answer about that repo's map instead (as use_repo; the choice persists)."},"pattern":{"type":"string"},"language":{"type":"string","description":"typescript, tsx, javascript, python, rust, java, kotlin, c, cpp, cuda, csharp, php, lua, gdscript, glsl, hlsl or wgsl; default every language the pattern parses in."},"relative_path":{"type":"string","description":"A file or directory to search; default the whole repo."},"max_results":{"type":"integer"}},"required":["pattern"]}},
      {"name":"rewrite_pattern","description":"Structural rewrite: every match of pattern (as in search_pattern) replaced by rewrite, where $X and $$$X stand for what they captured. Without apply it only plans the edits (before and after for each); apply writes them, refused when a file changed since the map was built. Nested matches are left to the outer one. Rewritten files are stale in the map until update_map.","inputSchema":{"type":"object","properties":{"repo":{"type":"string","description":"A repo path: answer about that repo's map instead (as use_repo; the choice persists)."},"pattern":{"type":"string"},"rewrite":{"type":"string"},"language":{"type":"string"},"relative_path":{"type":"string"},"apply":{"type":"boolean"}},"required":["pattern","rewrite"]}},
-     {"name":"index_info","description":"When and from what the code map was built: repo root, build time, counts, and the files changed since the SCIP run (stale_files). Answers about a stale file carry \"stale\": true; refresh the map or reread the file.","inputSchema":{"type":"object","properties":{"repo":{"type":"string","description":"A repo path: answer about that repo's map instead (as use_repo; the choice persists)."}}}}]
+     {"name":"index_info","description":"When and from what the code map was built: repo root, build time, counts, and the files changed since the SCIP run or added since then (stale_files; new_file_count of them are new, so no answer covers them yet). Answers about a stale file carry \"stale\": true; refresh the map or reread the file.","inputSchema":{"type":"object","properties":{"repo":{"type":"string","description":"A repo path: answer about that repo's map instead (as use_repo; the choice persists)."}}}}]
     """;
 
 fn arg_text(args: json::Node?, key: const u8[:]) -> const u8[:] {
@@ -166,7 +166,8 @@ fn list_maps(out: u8[>..]&) {
     out.append("]}");
 }
 
-// Files changed since the map's SCIP run (index_info's stale_file_count).
+// Files changed since the map's SCIP run, or added since (index_info's
+// stale_file_count).
 fn stale_count(db: i64) -> i64 {
     let fs = prepare_or_die(db, "SELECT file FROM files");
     var err: u8[>..] = [];
@@ -177,6 +178,8 @@ fn stale_count(db: i64) -> i64 {
         if is_stale(f) { n++; }
     }
     sqlite::finalize(fs);
+    var added: u8[>..] = [];
+    n += new_files(db, added);
     return n;
 }
 
