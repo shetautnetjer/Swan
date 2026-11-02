@@ -80,12 +80,24 @@ def hits(d, by_line):
     return out
 
 
+def default_swan():
+    """The checkout's own bin/swan when this script runs from a Swan checkout
+    (skills/swan-code-check/scripts/), else the host install."""
+    checkout = Path(__file__).resolve().parents[3] / "bin" / "swan"
+    if checkout.is_file():
+        return str(checkout)
+    return os.path.expanduser("~/aya/sandbox/swan/bin/swan")
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--swan", default=os.path.expanduser("~/aya/sandbox/swan/bin/swan"))
+    ap.add_argument("--swan", default=default_swan())
     ap.add_argument("--map-swan", help="binary that builds the fixture map (default: --swan)")
     ap.add_argument("--out", default=os.environ.get("SWAN_SELFTEST_OUT") or os.path.expanduser("~/.cache/aya/tmp/swan-skill-selftest"))
     a = ap.parse_args()
+    for b in {a.swan, a.map_swan or a.swan}:
+        if not (os.path.isfile(b) and os.access(b, os.X_OK)):
+            raise SystemExit(f"swan binary not found or not executable: {b} (build it with scripts/build.sh, or pass --swan PATH)")
 
     built = subprocess.run([a.map_swan or a.swan, "map", str(FIXTURE), a.out], capture_output=True, text=True)
     if built.returncode != 0:

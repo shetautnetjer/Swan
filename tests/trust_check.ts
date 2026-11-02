@@ -23,6 +23,30 @@ const run = (env: Record<string, string | undefined>, ...a: string[]) =>
   Bun.spawnSync(["bin/swan", ...a], { env, stdout: "pipe", stderr: "pipe" });
 const trustFile = "data/trusted-repos";
 const before = existsSync(trustFile) ? readFileSync(trustFile, "utf8") : null;
+// Leave Swan's trust list as it was, also when a check throws part way.
+const restoreTrust = () => { if (before === null) rmSync(trustFile, { force: true }); else writeFileSync(trustFile, before); };
+process.on("exit", restoreTrust);
+
+// One live tools/call through `swan serve` (env decides trust); returns the reply line. Closing stdin
+// ends the server, which stops its language server.
+async function liveCall(env: Record<string, string | undefined>, db: string, args: Record<string, unknown>): Promise<string> {
+  const proc = Bun.spawn(["bin/swan", "serve", db], { env, stdin: "pipe", stdout: "pipe", stderr: "pipe" });
+  proc.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "get_diagnostics", arguments: args } }) + "\n");
+  proc.stdin.flush();
+  const reader = proc.stdout.getReader();
+  const dec = new TextDecoder();
+  let buf = "";
+  const timer = setTimeout(() => proc.kill(), 120_000);
+  while (!buf.includes("\n")) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value);
+  }
+  clearTimeout(timer);
+  proc.stdin.end();
+  await proc.exited;
+  return buf.split("\n")[0];
+}
 
 if (existsSync(".tools/dotnet-tools/scip-dotnet") && existsSync(".tools/dotnet-tools/csharp-ls")) {
   const dir = "data/trust-check/cs";
@@ -86,7 +110,10 @@ if (existsSync(".tools/dotnet-tools/scip-dotnet") && existsSync(".tools/dotnet-t
   const marker = resolve(`${dir}/venv-python-ran`);
   mkdirSync(`${dir}/repo/.venv/bin`, { recursive: true });
   writeFileSync(`${dir}/repo/.venv/pyvenv.cfg`, "home = /usr/bin\n");
-  const fake = `#!/bin/sh\necho ran >> ${marker}\nexec python3 "$@"\n`;
+  // Exec the system python by absolute path: with the virtualenv first on PATH a bare `python3` is this
+  // script again, and the interpreter would loop forever instead of answering.
+  const systemPython = Bun.which("python3") ?? "/usr/bin/python3";
+  const fake = `#!/bin/sh\necho ran >> ${marker}\nexec ${systemPython} "$@"\n`;
   for (const n of ["python", "python3", "pip"]) writeFileSync(`${dir}/repo/.venv/bin/${n}`, fake, { mode: 0o755 });
   const m = run(untrusted, "map", repo, out);
   check("untrusted repo: mapping never runs its virtualenv's python, pip or PATH entries",
@@ -95,11 +122,23 @@ if (existsSync(".tools/dotnet-tools/scip-dotnet") && existsSync(".tools/dotnet-t
     existsSync(`${out}/swan.db`), m.stdout.toString().slice(0, 400));
   run(untrusted, "check", repo, out);
   check("untrusted repo: swan check never runs its virtualenv either", !existsSync(marker));
+  if (existsSync("tools/node_modules/.bin/pyright-langserver")) {
+    const live = await liveCall(untrusted, `${out}/swan.db`, { relative_path: "main.py", live: true });
+    check("untrusted repo: live diagnostics answer", live.includes('"result"'), live.slice(0, 400));
+    check("untrusted repo: the live python server never runs its virtualenv's python",
+      !existsSync(marker), live.slice(0, 400));
+  } else {
+    console.log("skip live python trust checks: pyright-langserver is not installed");
+  }
   const t = run(trustedEnv, "map", repo, out);
   check("trusted repo: its virtualenv is used", existsSync(marker), t.stdout.toString().slice(0, 400));
+  if (existsSync("tools/node_modules/.bin/pyright-langserver")) {
+    rmSync(marker, { force: true });
+    const live = await liveCall(trustedEnv, `${out}/swan.db`, { relative_path: "main.py", live: true });
+    check("trusted repo: the live python server uses its virtualenv (proves the check above can fail)",
+      existsSync(marker), live.slice(0, 400));
+  }
 }
 
-// Leave Swan's trust list as it was.
-if (before === null) rmSync(trustFile, { force: true }); else writeFileSync(trustFile, before);
 console.log(failures ? `${failures} check(s) failed` : "all trust checks passed");
 process.exit(failures ? 1 : 0);
