@@ -1,0 +1,241 @@
+{
+  "about": "Swan security/quality pattern pack. Every entry is checked against fixture/ by scripts/selftest.py; 'expect' lists the fixture tags it must match exactly. A match is a lead to read, not a finding. 'expect_if_fixed' is the answer once Swan's empty-$$$-beside-a-comma bug is fixed (goose-treesitter branch fix/empty-run-separator).",
+  "patterns": [
+    {
+      "lang": "typescript",
+      "pattern": "execSync($$$)",
+      "catches": "shell commands; flag hits whose first argument is a template literal or + concatenation (use execFileSync(cmd, [args]))",
+      "expect": [
+        "T01",
+        "T02",
+        "T03"
+      ]
+    },
+    {
+      "lang": "typescript",
+      "pattern": "exec($$$)",
+      "catches": "child_process.exec shell strings (does not match regex.exec)",
+      "expect": [
+        "T04"
+      ]
+    },
+    {
+      "lang": "typescript",
+      "pattern": "spawn($A, $B, { $$$, shell: true })",
+      "catches": "spawn through a shell (with the $$$ bug present it misses { shell: true } alone) - also run rg 'shell:\\s*true'",
+      "expect": [
+        "T06"
+      ],
+      "expect_if_fixed": [
+        "T06",
+        "T08"
+      ]
+    },
+    {
+      "lang": "typescript",
+      "pattern": "eval($X)",
+      "catches": "eval",
+      "expect": [
+        "T09"
+      ]
+    },
+    {
+      "lang": "typescript",
+      "pattern": "new Function($$$)",
+      "catches": "code from strings",
+      "expect": [
+        "T10"
+      ]
+    },
+    {
+      "lang": "typescript",
+      "pattern": "$F({ $$$, rejectUnauthorized: false })",
+      "catches": "TLS verification off; partial - also run rg 'rejectUnauthorized:\\s*false|NODE_TLS_REJECT_UNAUTHORIZED'",
+      "expect": [
+        "T11"
+      ]
+    },
+    {
+      "lang": "typescript",
+      "pattern": "try { $$$ } catch { }",
+      "catches": "swallowed error (no binding)",
+      "expect": [
+        "T13"
+      ]
+    },
+    {
+      "lang": "typescript",
+      "pattern": "try { $$$ } catch ($E) { }",
+      "catches": "swallowed error",
+      "expect": [
+        "T14"
+      ]
+    },
+    {
+      "lang": "typescript",
+      "pattern": "JSON.parse($X) as $T",
+      "catches": "parsed external data cast without validation",
+      "expect": [
+        "T16"
+      ]
+    },
+    {
+      "lang": "typescript",
+      "pattern": "chmodSync($P, 0o777)",
+      "catches": "world-writable directory",
+      "expect": [
+        "T17"
+      ]
+    },
+    {
+      "lang": "typescript",
+      "pattern": "chmodSync($P, 0o666)",
+      "catches": "world-writable file",
+      "expect": [
+        "T19"
+      ]
+    },
+    {
+      "lang": "typescript",
+      "pattern": "$T.only($$$)",
+      "catches": "focused test left in (other tests silently skipped)",
+      "expect": [
+        "T20"
+      ]
+    },
+    {
+      "lang": "typescript",
+      "pattern": "$T.skip($$$)",
+      "catches": "skipped test",
+      "expect": [
+        "T21"
+      ]
+    },
+    {
+      "lang": "python",
+      "pattern": "subprocess.$F($$$, shell=True, $$$)",
+      "catches": "shell=True with arguments after it",
+      "expect": [
+        "P01"
+      ],
+      "expect_if_fixed": [
+        "P01",
+        "P03"
+      ]
+    },
+    {
+      "lang": "python",
+      "pattern": "subprocess.$F($$$, shell=True)",
+      "catches": "shell=True as last argument",
+      "expect": [
+        "P03"
+      ]
+    },
+    {
+      "lang": "python",
+      "pattern": "os.system($X)",
+      "catches": "shell command",
+      "expect": [
+        "P04"
+      ]
+    },
+    {
+      "lang": "python",
+      "pattern": "eval($X)",
+      "catches": "eval",
+      "expect": [
+        "P05"
+      ]
+    },
+    {
+      "lang": "python",
+      "pattern": "exec($X)",
+      "catches": "exec",
+      "expect": [
+        "P06"
+      ]
+    },
+    {
+      "lang": "python",
+      "pattern": "pickle.loads($X)",
+      "catches": "unpickling data",
+      "expect": [
+        "P07"
+      ]
+    },
+    {
+      "lang": "python",
+      "pattern": "pickle.load($X)",
+      "catches": "unpickling a file",
+      "expect": [
+        "P08"
+      ]
+    },
+    {
+      "lang": "python",
+      "pattern": "yaml.load($X)",
+      "catches": "yaml.load without a Loader",
+      "expect": [
+        "P09"
+      ]
+    },
+    {
+      "lang": "python",
+      "pattern": "requests.$M($$$, verify=False)",
+      "catches": "TLS off, last argument",
+      "expect": [
+        "P11"
+      ]
+    },
+    {
+      "lang": "python",
+      "pattern": "requests.$M($$$, verify=False, $$$)",
+      "catches": "TLS off, arguments after it",
+      "expect": [
+        "P13"
+      ],
+      "expect_if_fixed": [
+        "P11",
+        "P13"
+      ]
+    },
+    {
+      "lang": "python",
+      "pattern": "try:\n    $$$\nexcept:\n    pass",
+      "catches": "bare except that swallows everything",
+      "expect": [
+        "P14"
+      ]
+    }
+  ],
+  "known_bug_canaries": [
+    {
+      "lang": "python",
+      "pattern": "os.system($X, $$$)",
+      "docs_expect": [
+        "P04"
+      ],
+      "bug_result": [],
+      "bug": "$$$ next to a comma must match >=1 node; docs say it may match none"
+    },
+    {
+      "lang": "typescript",
+      "pattern": "spawn($A, $B, { $$$, shell: true })",
+      "docs_expect": [
+        "T06",
+        "T08"
+      ],
+      "bug_result": [
+        "T06"
+      ],
+      "bug": "same: { shell: true } alone is missed"
+    },
+    {
+      "lang": "typescript",
+      "pattern": "shell: true",
+      "docs_expect": [],
+      "bug_result": [],
+      "bug": "not a bug but a trap: parses as a JS label, so 0 matches over a whole repo means nothing"
+    }
+  ]
+}

@@ -340,6 +340,7 @@ lsp/                goose-lsp submodule; standalone Goose client + C bridge
 tools/              scip-flatten.ts, modules.json, external npm tool manifest
 tests/               MCP smoke test, refresh-vs-fresh check, latency bench
 fixtures/tiny-ts/    a small repo with the tricky cases (re-export, rename, same-name method and function)
+skills/swan-code-check/  the agent skill for using Swan (single source; copies follow it, see its PROVENANCE.md)
 ```
 
 ## License
