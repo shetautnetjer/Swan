@@ -37,7 +37,8 @@ fn live_start(db: i64, lang: const u8[:], why: u8[>..]&) -> bool {
     guard mods else { why.append(str("tools/modules.json: ", perr)); return false; }
     let list = json::member(json::member(mods, lang), "lsp");
     guard list else { format(why, "no live server for ", lang, " in tools/modules.json"); return false; }
-    let l = detect(root);
+    var l = detect(root);
+    if !build_trusted(root, dir) { l.venv.clear(); }    // the repo's virtualenv is its own code
     let c = mod_ctx(root, dir, home, l);
     let base = child_env(l, "");
     var started = false;
