@@ -1,6 +1,16 @@
 ---
 name: swan-code-check
-description: Use Swan, the local compiler-accurate code map (MCP server `swan`), whenever you touch code in a repo or review one: before editing a shared function, class or type (who uses it, what breaks, which tests to run), after editing (live compiler errors, only the affected tests), when reviewing a diff or PR (impact plus a validated security/quality pattern sweep), before handing coding to another agent (blast radius and tests go in its prompt), for renames, implementations, dead code. TS/JS, Python, Rust, Java, Kotlin, C/C++/CUDA, C#, Lua, GDScript, shaders. Trigger on "who calls", "what breaks", "impact", "find usages", "code review", "security review", "find errors", "rename", "unused code", or any non-trivial code edit.
+description: >-
+  Use Swan, the local compiler-accurate code map (MCP server `swan`), whenever
+  you touch code in a repo or review one: before editing a shared function,
+  class or type (who uses it, what breaks, which tests to run), after editing
+  (live compiler errors, only the affected tests), when reviewing a diff or PR
+  (impact plus a validated security/quality pattern sweep), before handing
+  coding to another agent (blast radius and tests go in its prompt), for
+  renames, implementations, dead code. TS/JS, Python, Rust, Java, Kotlin,
+  C/C++/CUDA, C#, Lua, GDScript, shaders. Trigger on "who calls", "what
+  breaks", "impact", "find usages", "code review", "security review", "find
+  errors", "rename", "unused code", or any non-trivial code edit.
 ---
 
 # Swan code check
@@ -42,8 +52,9 @@ This file's single source is the Swan repo (`skills/swan-code-check/`); see
    works without an index.
 2. `index_info {"repo"}`: refresh when `stale_file_count > 0` **or when the
    repo has commits since `refreshed_at`/`built_at`**. Files added after a
-   build count as stale too and are listed in `new_file_count` (Swan #9,
-   839c4b0, live since 2026-11-01). If `new_file_count` is missing, the
+   build show in `stale_files` and count in both `stale_file_count` and
+   `new_file_count` (Swan #9, 839c4b0, live since 2026-11-01); files in a
+   language the map never indexed don't count. If `new_file_count` is missing, the
    binary predates #9 and new files are invisible, so refresh on any new file.
    - Small repo: `update_map {"repo"}`.
    - Large repo (AEON, ~2.4k files) from a shell, one build at a time
@@ -95,10 +106,11 @@ This file's single source is the Swan repo (`skills/swan-code-check/`); see
 - Matcher bug (open as of Swan 839c4b0): a `$$$` beside a comma must match at
   least one node, though the docs say none is fine. `os.system($X, $$$)`
   misses `os.system(x)`; `{ $$$, shell: true }` misses `{ shell: true }`. The
-  pack carries both variants; the self-test's canaries say PRESENT until the
-  goose-treesitter fix lands, then FIXED.
+  pack carries both variants; for a new pattern, write both variants or add an
+  `rg` check. The self-test's canaries say PRESENT until the goose-treesitter
+  fix lands, then FIXED.
 - New pattern: add a tagged line to `fixture/sec.*` and an entry to
-  `patterns.json`, then `python3 -I scripts/selftest.py` (exit 0 = every
+  `patterns.json`, then, from the skill directory, `python3 -I scripts/selftest.py` (exit 0 = every
   pattern hits exactly its tags; `--swan PATH` picks the binary,
   `SWAN_SELFTEST_OUT` or `--out` the scratch dir).
 

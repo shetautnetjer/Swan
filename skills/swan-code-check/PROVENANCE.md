@@ -17,13 +17,14 @@ copy (not a symlink), refreshed after a skill change merges:
 - **Aya (Letta MemFS):** `$MEMORY_DIR/skills/swan-code-check/`. MemFS is a git
   repo that syncs off the machine, so a symlink into `~/aya/sandbox/swan`
   would break on any other host. Aya refreshes it with
-  `rsync -a --delete --exclude __pycache__ ~/aya/sandbox/swan/skills/swan-code-check/ "$MEMORY_DIR/skills/swan-code-check/"`
+  `: "${MEMORY_DIR:?unset}" && test -f ~/aya/sandbox/swan/skills/swan-code-check/SKILL.md && rsync -a --delete --exclude __pycache__ ~/aya/sandbox/swan/skills/swan-code-check/ "$MEMORY_DIR/skills/swan-code-check/"`
+  (check that `$MEMORY_DIR` is Aya's own MemFS first; it overwrites that skill)
   and commits only that path in MemFS.
 - **Jabari (Claude Code on the PC):** `~/.claude/skills/swan-code-check/`.
   A symlink to `~/aya/sandbox/swan/skills/swan-code-check` would also work
   here (same machine), but a copy keeps a half-merged branch checkout from
   changing his skill underneath him. Refresh with
-  `rsync -a --delete --exclude __pycache__ ~/aya/sandbox/swan/skills/swan-code-check/ ~/.claude/skills/swan-code-check/`.
+  `test -f ~/aya/sandbox/swan/skills/swan-code-check/SKILL.md && rsync -a --delete --exclude __pycache__ ~/aya/sandbox/swan/skills/swan-code-check/ ~/.claude/skills/swan-code-check/`.
   Not applied by this PR: Khamani or Jabari applies it after merge.
 
 ## How a later change reaches both
