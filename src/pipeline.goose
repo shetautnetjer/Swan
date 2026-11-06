@@ -207,6 +207,9 @@ fn child_env(l: const Langs&, extra: const u8[:]) -> u8[>..] {
     var vars: u8[>..] = [];
     var path: u8[>..] = [];
     if l.venv.len > 0 { format(path, l.venv, "/bin:"); }
+    // Package-local Node/Bun, when installed. Trust-gated virtualenvs retain
+    // their existing precedence; the runtime directory belongs to Swan.
+    format(path, swan_home(), "/.tools/runtime/bin:");
     var jh: u8[>..] = [];
     if l.java || l.kt {
         jh = java_home(swan_home());
@@ -1198,7 +1201,7 @@ fn map_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> bo
     for k in 1..parts.len { arg(fl, parts[k]); }
     var o: u8[>..] = [];
     let t_flat = clock();
-    guard run_step("flatten", fl, home, "", 600000, o) == 0 else { format(report, "flatten failed"); return false; }
+    guard run_step("flatten", fl, home, child_env(l, ""), 600000, o) == 0 else { format(report, "flatten failed"); return false; }
     format(report, "flatten: ", ((clock() - t_flat) * 1000.0) as i64, " ms\n");
     index_main(out, db, repo, file_exists(db), report);
     format(report, "\nswan map: ", ((clock() - t_start) * 1000.0) as i64, " ms in all, up to ", limit, " indexers at once");

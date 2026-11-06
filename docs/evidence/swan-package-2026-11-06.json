@@ -1,0 +1,485 @@
+{
+  "build-receipt.json": {
+    "source_revision": "bae3873bfd8dfecae5eb5ab64bf0cf45bde9998f",
+    "binary_sha256": "1b87c08b51912059f6469e27dc760881e47dabc785042c7acb5de4a53cd93b5c",
+    "goose_archive_sha256": "06ac30284338269d3996d457412bf4f2b47c1f9a5601de65b6317187fe78d5c9",
+    "goose_version": "v2026.3-linux-x64",
+    "gcc": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+    "system": "Linux-6.8.0-146-generic-x86_64-with-glibc2.39",
+    "libc": [
+      "glibc",
+      "2.39"
+    ],
+    "sqlite_revision": "80a4e71315ee75f606fd7bbfcf1a78bfc74d6d8d",
+    "submodules": "d6868658975d41b34a46baa5ea881ac2ded05e0a lsp (v0.1.3)",
+    "build_command": "GOOSE=/home/cua/swan-fresh-NHb1m01M/source/.tools/goose/goose-v2026.3-linux-x64/goose GOOSE_HOME=/home/cua/swan-package-m1RBGOcY/source/.tools/goose-home bash scripts/build.sh",
+    "build_log": "/home/cua/swan-package-m1RBGOcY/build-committed.log",
+    "cache_note": "New private cache initially fetched corrected immutable SQLite and other declared imports; final committed build reused that cache without source patches."
+  },
+  "install-preview.json": {
+    "prefix": "/home/cua/swan-package-m1RBGOcY/installed Swan",
+    "profile": "python-typescript",
+    "archive": "/home/cua/swan-package-m1RBGOcY/export-1/swan-linux-x86_64.tar.gz",
+    "archive_sha256": "15af01347afd44dae229c10d98cfdb649cb771d26c3b18db313b2b430562500b",
+    "source_revision": "bae3873bfd8dfecae5eb5ab64bf0cf45bde9998f",
+    "detected": {
+      "python3": {
+        "status": "ready",
+        "path": "/usr/bin/python3.12",
+        "version": "Python 3.12.3",
+        "detail": "Version probe only; feature semantics are not qualification."
+      },
+      "node": {
+        "status": "ready",
+        "path": "/usr/local/lib/nodejs/bin/node",
+        "version": "v24.21.0",
+        "detail": "Version probe only; feature semantics are not qualification."
+      },
+      "bun": {
+        "status": "missing",
+        "path": null,
+        "version": null,
+        "detail": "No trusted bun found in /usr/local/bin:/usr/bin:/bin or the private runtime."
+      },
+      "npm": {
+        "status": "ready",
+        "path": "/usr/local/lib/nodejs/lib/node_modules/npm/bin/npm-cli.js",
+        "version": "11.19.0",
+        "detail": "Version probe only; feature semantics are not qualification."
+      }
+    },
+    "downloads": [
+      {
+        "name": "Bun baseline",
+        "version": "1.3.14",
+        "url": "https://github.com/oven-sh/bun/releases/download/bun-v1.3.14/bun-linux-x64-baseline.zip",
+        "sha256": "a063908ae08b7852ca10939bbdc6ceed3ddabce8fb9402dce83d65d73b36e6c7"
+      },
+      {
+        "name": "Bun pinned license/linked-library notices",
+        "url": "https://raw.githubusercontent.com/oven-sh/bun/bun-v1.3.14/LICENSE.md",
+        "sha256": "2c6160ec8fb853f7e8f97d9b249e756c9b0ac44860a68b6bf4f1b0bcbc5c3741"
+      },
+      {
+        "name": "Frozen npm tool set",
+        "source": "tools/package-lock.json",
+        "command": "npm ci --ignore-scripts --no-audit --no-fund"
+      }
+    ],
+    "unselected": [
+      "Python ruff/pytest",
+      "Rust",
+      "Java/Kotlin",
+      "C#",
+      "CUDA/C++",
+      "game/shader adapters"
+    ],
+    "writes": "New sibling staging and the new prefix only; no sudo, global configuration or repository trust."
+  },
+  "install-preview.json_trailing_text": "Dry run complete: no files written or downloads performed.",
+  "doctor-relocated.json": {
+    "home": "/home/cua/swan-package-m1RBGOcY/relocated Swan",
+    "profile": "python-typescript",
+    "ready": true,
+    "scope": "Dependency availability/version probes only; no repository code, indexing, downloads or trust changes.",
+    "checks": [
+      {
+        "name": "platform",
+        "group": "core",
+        "status": "ready",
+        "detail": "Linux x86_64/glibc; runtime behavior requires the separate smoke checks.",
+        "path": null,
+        "version": null,
+        "required": true
+      },
+      {
+        "name": "swan",
+        "group": "core",
+        "status": "ready",
+        "detail": "Executable ELF x86_64 required; rerun the verified archive installer if missing or incompatible.",
+        "path": "/home/cua/swan-package-m1RBGOcY/relocated Swan/bin/swan",
+        "version": null,
+        "required": true
+      },
+      {
+        "name": "tools/modules.json",
+        "group": "core",
+        "status": "ready",
+        "detail": "Required packaged resource.",
+        "path": "/home/cua/swan-package-m1RBGOcY/relocated Swan/tools/modules.json",
+        "version": null,
+        "required": true
+      },
+      {
+        "name": "tools/scip-flatten.ts",
+        "group": "core",
+        "status": "ready",
+        "detail": "Required packaged resource.",
+        "path": "/home/cua/swan-package-m1RBGOcY/relocated Swan/tools/scip-flatten.ts",
+        "version": null,
+        "required": true
+      },
+      {
+        "name": "skills/swan-code-check/SKILL.md",
+        "group": "core",
+        "status": "ready",
+        "detail": "Required packaged resource.",
+        "path": "/home/cua/swan-package-m1RBGOcY/relocated Swan/skills/swan-code-check/SKILL.md",
+        "version": null,
+        "required": true
+      },
+      {
+        "name": "python3",
+        "group": "core",
+        "status": "ready",
+        "detail": "Version probe only; feature semantics are not qualification.",
+        "path": "/usr/bin/python3.12",
+        "version": "Python 3.12.3",
+        "required": true
+      },
+      {
+        "name": "node",
+        "group": "indexing",
+        "status": "ready",
+        "detail": "Version probe only; feature semantics are not qualification.",
+        "path": "/usr/local/lib/nodejs/bin/node",
+        "version": "v24.21.0",
+        "required": true
+      },
+      {
+        "name": "bun",
+        "group": "indexing",
+        "status": "ready",
+        "detail": "Version probe only; feature semantics are not qualification.",
+        "path": "/home/cua/swan-package-m1RBGOcY/relocated Swan/.tools/runtime/bun-v1.3.14/bun",
+        "version": "1.3.14",
+        "required": true
+      },
+      {
+        "name": "scip-python",
+        "group": "python-typescript",
+        "status": "ready",
+        "detail": "Pinned package and vendor version probe; real map/check is separate.",
+        "path": "/home/cua/swan-package-m1RBGOcY/relocated Swan/tools/node_modules/@sourcegraph/scip-python/index.js",
+        "version": "0.6.8",
+        "required": true
+      },
+      {
+        "name": "scip-typescript",
+        "group": "python-typescript",
+        "status": "ready",
+        "detail": "Pinned package and vendor version probe; real map/check is separate.",
+        "path": "/home/cua/swan-package-m1RBGOcY/relocated Swan/tools/node_modules/@sourcegraph/scip-typescript/dist/src/main.js",
+        "version": "0.5.2",
+        "required": true
+      },
+      {
+        "name": "pyright",
+        "group": "python-typescript",
+        "status": "ready",
+        "detail": "Pinned package and vendor version probe; real map/check is separate.",
+        "path": "/home/cua/swan-package-m1RBGOcY/relocated Swan/tools/node_modules/pyright/index.js",
+        "version": "pyright 1.1.414",
+        "required": true
+      },
+      {
+        "name": "typescript-language-server",
+        "group": "python-typescript",
+        "status": "ready",
+        "detail": "Pinned package and vendor version probe; real map/check is separate.",
+        "path": "/home/cua/swan-package-m1RBGOcY/relocated Swan/tools/node_modules/typescript-language-server/lib/cli.mjs",
+        "version": "6.0.2",
+        "required": true
+      },
+      {
+        "name": "biome",
+        "group": "python-typescript",
+        "status": "ready",
+        "detail": "Pinned package and vendor version probe; real map/check is separate.",
+        "path": "/home/cua/swan-package-m1RBGOcY/relocated Swan/tools/node_modules/@biomejs/biome/bin/biome",
+        "version": "Version: 2.6.3",
+        "required": true
+      },
+      {
+        "name": "Python ruff/pytest",
+        "group": "optional",
+        "status": "unselected",
+        "detail": "Not installed or qualified by this profile; use explicit adapter setup and qualification.",
+        "path": null,
+        "version": null,
+        "required": false
+      },
+      {
+        "name": "Rust/Cargo",
+        "group": "optional",
+        "status": "unselected",
+        "detail": "Not installed or qualified by this profile; use explicit adapter setup and qualification.",
+        "path": null,
+        "version": null,
+        "required": false
+      },
+      {
+        "name": "Java/Kotlin",
+        "group": "optional",
+        "status": "unselected",
+        "detail": "Not installed or qualified by this profile; use explicit adapter setup and qualification.",
+        "path": null,
+        "version": null,
+        "required": false
+      },
+      {
+        "name": "C#/.NET",
+        "group": "optional",
+        "status": "unselected",
+        "detail": "Not installed or qualified by this profile; use explicit adapter setup and qualification.",
+        "path": null,
+        "version": null,
+        "required": false
+      },
+      {
+        "name": "CUDA/C++",
+        "group": "optional",
+        "status": "unselected",
+        "detail": "Not installed or qualified by this profile; use explicit adapter setup and qualification.",
+        "path": null,
+        "version": null,
+        "required": false
+      },
+      {
+        "name": "game/shader adapters",
+        "group": "optional",
+        "status": "unselected",
+        "detail": "Not installed or qualified by this profile; use explicit adapter setup and qualification.",
+        "path": null,
+        "version": null,
+        "required": false
+      }
+    ]
+  },
+  "negative-checks.json": {
+    "existing_prefix_refused": true,
+    "existing_binary_unchanged": true,
+    "bad_hash_refused": true,
+    "abbreviated_home_refused": true,
+    "core_profile_no_runtime_downloads": true,
+    "uninstalled_profile_fails_doctor": true
+  },
+  "core-doctor.json": {
+    "home": "/home/cua/swan-package-m1RBGOcY/core-only",
+    "profile": "core",
+    "ready": true,
+    "scope": "Dependency availability/version probes only; no repository code, indexing, downloads or trust changes.",
+    "checks": [
+      {
+        "name": "platform",
+        "group": "core",
+        "status": "ready",
+        "detail": "Linux x86_64/glibc; runtime behavior requires the separate smoke checks.",
+        "path": null,
+        "version": null,
+        "required": true
+      },
+      {
+        "name": "swan",
+        "group": "core",
+        "status": "ready",
+        "detail": "Executable ELF x86_64 required; rerun the verified archive installer if missing or incompatible.",
+        "path": "/home/cua/swan-package-m1RBGOcY/core-only/bin/swan",
+        "version": null,
+        "required": true
+      },
+      {
+        "name": "tools/modules.json",
+        "group": "core",
+        "status": "ready",
+        "detail": "Required packaged resource.",
+        "path": "/home/cua/swan-package-m1RBGOcY/core-only/tools/modules.json",
+        "version": null,
+        "required": true
+      },
+      {
+        "name": "tools/scip-flatten.ts",
+        "group": "core",
+        "status": "ready",
+        "detail": "Required packaged resource.",
+        "path": "/home/cua/swan-package-m1RBGOcY/core-only/tools/scip-flatten.ts",
+        "version": null,
+        "required": true
+      },
+      {
+        "name": "skills/swan-code-check/SKILL.md",
+        "group": "core",
+        "status": "ready",
+        "detail": "Required packaged resource.",
+        "path": "/home/cua/swan-package-m1RBGOcY/core-only/skills/swan-code-check/SKILL.md",
+        "version": null,
+        "required": true
+      },
+      {
+        "name": "python3",
+        "group": "core",
+        "status": "ready",
+        "detail": "Version probe only; feature semantics are not qualification.",
+        "path": "/usr/bin/python3.12",
+        "version": "Python 3.12.3",
+        "required": true
+      },
+      {
+        "name": "node",
+        "group": "indexing",
+        "status": "unselected",
+        "detail": "Select the python-typescript profile to install indexing dependencies.",
+        "path": null,
+        "version": null,
+        "required": false
+      },
+      {
+        "name": "bun",
+        "group": "indexing",
+        "status": "unselected",
+        "detail": "Select the python-typescript profile to install indexing dependencies.",
+        "path": null,
+        "version": null,
+        "required": false
+      },
+      {
+        "name": "Python ruff/pytest",
+        "group": "optional",
+        "status": "unselected",
+        "detail": "Not installed or qualified by this profile; use explicit adapter setup and qualification.",
+        "path": null,
+        "version": null,
+        "required": false
+      },
+      {
+        "name": "Rust/Cargo",
+        "group": "optional",
+        "status": "unselected",
+        "detail": "Not installed or qualified by this profile; use explicit adapter setup and qualification.",
+        "path": null,
+        "version": null,
+        "required": false
+      },
+      {
+        "name": "Java/Kotlin",
+        "group": "optional",
+        "status": "unselected",
+        "detail": "Not installed or qualified by this profile; use explicit adapter setup and qualification.",
+        "path": null,
+        "version": null,
+        "required": false
+      },
+      {
+        "name": "C#/.NET",
+        "group": "optional",
+        "status": "unselected",
+        "detail": "Not installed or qualified by this profile; use explicit adapter setup and qualification.",
+        "path": null,
+        "version": null,
+        "required": false
+      },
+      {
+        "name": "CUDA/C++",
+        "group": "optional",
+        "status": "unselected",
+        "detail": "Not installed or qualified by this profile; use explicit adapter setup and qualification.",
+        "path": null,
+        "version": null,
+        "required": false
+      },
+      {
+        "name": "game/shader adapters",
+        "group": "optional",
+        "status": "unselected",
+        "detail": "Not installed or qualified by this profile; use explicit adapter setup and qualification.",
+        "path": null,
+        "version": null,
+        "required": false
+      }
+    ]
+  },
+  "relocated Swan/INSTALLATION.json": {
+    "stage": "installed candidate; not production",
+    "profile": "python-typescript",
+    "source_revision": "bae3873bfd8dfecae5eb5ab64bf0cf45bde9998f",
+    "archive_sha256": "15af01347afd44dae229c10d98cfdb649cb771d26c3b18db313b2b430562500b",
+    "checks": [
+      "read-only selected dependency probes",
+      "offline synthetic-row semantic smoke"
+    ],
+    "not_qualified": "Real selected-language indexing, diagnostics and trust controls require the separate qualification receipt."
+  },
+  "swan-package-smoke-j_jt05ze/result.json": {
+    "status": "PASS",
+    "binary_sha256": "1b87c08b51912059f6469e27dc760881e47dabc785042c7acb5de4a53cd93b5c",
+    "cases": [
+      {
+        "language": "python",
+        "real_index": true,
+        "definition_and_reference": true,
+        "live_clean_error_fixed": true,
+        "diagnostic_code": "reportAssignmentType"
+      },
+      {
+        "language": "typescript",
+        "real_index": true,
+        "definition_and_reference": true,
+        "live_clean_error_fixed": true,
+        "diagnostic_code": "2322"
+      }
+    ],
+    "trust_unchanged": true
+  },
+  "swan-verify-bfip4xp0/result.json": {
+    "status": "PASS",
+    "cases": [
+      {
+        "case": "untrusted-before",
+        "diagnostics": "reportAssignmentType",
+        "repo_interpreter_executed": false,
+        "expected": false
+      },
+      {
+        "case": "trusted-control",
+        "diagnostics": "reportAssignmentType",
+        "repo_interpreter_executed": true,
+        "expected": true
+      },
+      {
+        "case": "untrusted-after",
+        "diagnostics": "reportAssignmentType",
+        "repo_interpreter_executed": false,
+        "expected": false
+      }
+    ],
+    "after": {
+      "binary": "1b87c08b51912059f6469e27dc760881e47dabc785042c7acb5de4a53cd93b5c",
+      "trust": null,
+      "modules": "df3f58d9252c7cf6b4f918b052f7a34937ca7209a49bb16d5de57306f19ef2c5"
+    },
+    "production_unchanged": true,
+    "isolated_trust_list_absent": true
+  },
+  "swan-verify-bfip4xp0/provenance.json": {
+    "source_binary": "/home/cua/swan-package-m1RBGOcY/relocated Swan/bin/swan",
+    "source_home": "/home/cua/swan-package-m1RBGOcY/relocated Swan",
+    "before": {
+      "binary": "1b87c08b51912059f6469e27dc760881e47dabc785042c7acb5de4a53cd93b5c",
+      "trust": null,
+      "modules": "df3f58d9252c7cf6b4f918b052f7a34937ca7209a49bb16d5de57306f19ef2c5"
+    },
+    "copy_sha256": "1b87c08b51912059f6469e27dc760881e47dabc785042c7acb5de4a53cd93b5c",
+    "pyright_version": "1.1.414",
+    "bwrap": "/home/cua/swan-test-mtyMVmYy/dependencies/extracted/usr/bin/bwrap",
+    "node": "/usr/local/lib/nodejs/bin/node",
+    "input": "synthetic TSV rows, not SCIP-indexer output",
+    "isolation": "host read-only; only lab writable; network namespace disabled",
+    "trusted_control": "process-local SWAN_TRUST_BUILD=1; no saved trust grants"
+  },
+  "artifact_hashes": {
+    "swan-linux-x86_64.tar.gz": "15af01347afd44dae229c10d98cfdb649cb771d26c3b18db313b2b430562500b",
+    "install.py": "84724d91b9699ac57e06337485fc545c3ee366979518c0afb4c16cd92b8fce6e",
+    "package_support.py": "2d4383fd9d9ab4c04b4bb0a833c617f701b306546be1411e360dff9b40e07d59"
+  },
+  "skill_summary": "24/24 patterns match the fixture exactly"
+}

@@ -20,11 +20,12 @@ import .modules;
 import .live;
 import .structural;
 import treesitter from "shetautnetjer/goose-treesitter@v0.1.4";   // tree-sitter and its grammars, built once and cached
-import sqlite from "shetautnetjer/goose-sqlite@v0.1.2";   // SQLite, built once and cached
+import sqlite from "shetautnetjer/goose-sqlite@80a4e71315ee75f606fd7bbfcf1a78bfc74d6d8d";   // explicit stdbool.h; builds with GCC 13 as well as newer defaults
 
 fn usage() {
     write_stderr("""
         usage: swan map <repo> <out-dir>        index every language in the repo (or refresh)
+               swan doctor [--profile core|python-typescript] [--json]
                swan check <repo> <out-dir>      run compilers and linters into the map
                swan trust <repo>                let map, check and live answers run the repo's build files
                swan format <repo> <out-dir> <file>...
@@ -65,7 +66,27 @@ fn close_db(db: i64) {
 fn main() {
     let a = args();
     if a.len < 2 { usage(); }
-    if a[1] == "index" && a.len >= 4 {
+    if a[1] == "doctor" {
+        let home = swan_home();
+        var cmd: u8[>..] = [];
+        arg(cmd, "python3");
+        arg(cmd, "-I");
+        arg(cmd, str(home, "/scripts/doctor.py"));
+        arg(cmd, "--home");
+        arg(cmd, home);
+        for k in 2..a.len {
+            // Diagnose this executable's installation, never a caller-supplied
+            // repository passed off as a different runtime home.
+            if a[k] == "--home" || starts_with(a[k], "--home=") { usage(); }
+            arg(cmd, a[k]);
+        }
+        var environment: u8[>..] = [];
+        arg(environment, "PATH=/usr/local/bin:/usr/bin:/bin");
+        var result: u8[>..] = [];
+        let code = run_step("doctor", cmd, home, environment, 60000, result);
+        print(result);
+        exit(code);
+    } else if a[1] == "index" && a.len >= 4 {
         var report: u8[>..] = [];
         index_main(a[2], a[3], if a.len > 4 { a[4] } else { "" }, false, report);
         print(report);

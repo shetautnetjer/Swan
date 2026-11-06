@@ -1,0 +1,291 @@
+{
+  "stage": "experiment; not installed or released",
+  "created_at": "2026-11-06T13:04:40.457034+00:00",
+  "source_commit": "583e665e47e4ab3984bfd9076dd99d5d5e2e37a1",
+  "environment": {
+    "os": "Ubuntu 24.04.5 LTS x86_64",
+    "cc": "GCC 13.3.0",
+    "node": "24.21.0",
+    "npm": "11.19.0",
+    "bun": "1.3.14",
+    "python": "3.12.3",
+    "pyright": "1.1.414",
+    "goose": "v2026.3"
+  },
+  "binary_sha256": "2fe81c794cc411457015f9e58943b4d8c21ae0b32444aa5eeabbf3fe72b7f1e0",
+  "goose_archive_sha256": "06ac30284338269d3996d457412bf4f2b47c1f9a5601de65b6317187fe78d5c9",
+  "npm_lock_sha256": "7c6c25a7513048ad834e7a2838f9ece8cc9e9ebbde9c0a7152fe0658339bb990",
+  "patches": {
+    "Swan": "--- a/native/swan_sys.c\n+++ b/native/swan_sys.c\n@@ -5,6 +5,7 @@\n    Goose. */\n #define _GNU_SOURCE\n #include \"goose.h\"\n+#include <stdbool.h>\n #include <string.h>\n #include <sys/stat.h>\n #include <stdio.h>\n",
+    "goose-sqlite": "--- a/src/gsq.c\n+++ b/src/gsq.c\n@@ -7,6 +7,7 @@\n #include <string.h>\n #include <stdio.h>\n #include <limits.h>\n+#include <stdbool.h>\n \n typedef struct { const uint8_t *data; int64_t len; } gsq_slice;\n \n"
+  },
+  "logs": {
+    "build-before-fix.log": "fetching the package treesitter from shetautnetjer/goose-treesitter@v0.1.4\nfetching the package sqlite from shetautnetjer/goose-sqlite@v0.1.2\nparsed ok: 516 top-level declarations, 21 file(s)\ntypechecked ok: 1005 specialization(s), 30 struct/1 enum instance(s); optimized -O2: 1539 inlined, 4 base case(s), 330 folded, 459 propagated, 0 tail loop(s), 0 reassociated\nbce: elided 1247/1926 index and 546/1135 slice checks\nwrote /home/cua/swan-fresh-NHb1m01M/source/.tools/goose-home/build/prog/swan-34729dbb/swan.c (5567074 bytes)\nbuilding the package swan's C\ncompiling /home/cua/swan-fresh-NHb1m01M/source/native/swan_sys.c for the package swan failed (exit 1):\n    /usr/bin/cc -O2 -I/home/cua/swan-fresh-NHb1m01M/source/.tools/goose-home/build/prog/swan-34729dbb/native/gcc-13.3.0-a920ca84/include -fPIC -c /home/cua/swan-fresh-NHb1m01M/source/native/swan_sys.c -o /home/cua/swan-fresh-NHb1m01M/source/.tools/goose-home/build/prog/swan-34729dbb/native/gcc-13.3.0-a920ca84/swan_sys.o\n/home/cua/swan-fresh-NHb1m01M/source/native/swan_sys.c:167:1: error: unknown type name ‘bool’\n  167 | bool swan_exe_path(gs_rref out) {\n      | ^~~~\n/home/cua/swan-fresh-NHb1m01M/source/native/swan_sys.c:41:1: note: ‘bool’ is defined in header ‘<stdbool.h>’; did you forget to ‘#include <stdbool.h>’?\n   40 | #include <time.h>\n  +++ |+#include <stdbool.h>\n   41 | #include <unistd.h>\n/home/cua/swan-fresh-NHb1m01M/source/native/swan_sys.c: In function ‘swan_exe_path’:\n/home/cua/swan-fresh-NHb1m01M/source/native/swan_sys.c:170:24: error: ‘false’ undeclared (first use in this function)\n  170 |     if (n <= 0) return false;\n      |                        ^~~~~\n/home/cua/swan-fresh-NHb1m01M/source/native/swan_sys.c:170:24: note: ‘false’ is defined in header ‘<stdbool.h>’; did you forget to ‘#include <stdbool.h>’?\n/home/cua/swan-fresh-NHb1m01M/source/native/swan_sys.c:170:24: note: each undeclared identifier is reported only once for each function it appears in\n/home/cua/swan-fresh-NHb1m01M/source/native/swan_sys.c:172:12: error: ‘true’ undeclared (first use in this function)\n  172 |     return true;\n      |            ^~~~\n/home/cua/swan-fresh-NHb1m01M/source/native/swan_sys.c:172:12: note: ‘true’ is defined in header ‘<stdbool.h>’; did you forget to ‘#include <stdbool.h>’?\n/home/cua/swan-fresh-NHb1m01M/source/native/swan_sys.c: At top level:\n/home/cua/swan-fresh-NHb1m01M/source/native/swan_sys.c:176:1: error: unknown type name ‘bool’\n  176 | bool swan_realpath(swan_slice path, gs_rref out) {\n      | ^~~~\n/home/cua/swan-fresh-NHb1m01M/source/native/swan_sys.c:176:1: note: ‘bool’ is defined in header ‘<stdbool.h>’; did you forget to ‘#include <stdbool.h>’?\n/home/cua/swan-fresh-NHb1m01M/source/native/swan_sys.c: In function ‘swan_realpath’:\n/home/cua/swan-fresh-NHb1m01M/source/native/swan_sys.c:178:65: error: ‘false’ undeclared (first use in this function)\n  178 |     if (path.len <= 0 || path.len >= (int64_t)sizeof in) return false;\n      |                                                                 ^~~~~\n/home/cua/swan-fresh-NHb1m01M/source/native/swan_sys.c:178:65: note: ‘false’ is defined in header ‘<stdbool.h>’; did you forget to ‘#include <stdbool.h>’?\n/home/cua/swan-fresh-NHb1m01M/source/native/swan_sys.c:183:12: error: ‘true’ undeclared (first use in this function)\n  183 |     return true;\n      |            ^~~~\n/home/cua/swan-fresh-NHb1m01M/source/native/swan_sys.c:183:12: note: ‘true’ is defined in header ‘<stdbool.h>’; did you forget to ‘#include <stdbool.h>’?\n/home/cua/swan-fresh-NHb1m01M/source/native/swan_sys.c: At top level:\n/home/cua/swan-fresh-NHb1m01M/source/native/swan_sys.c:262:1: error: unknown type name ‘bool’\n  262 | bool swan_is_symlink(swan_slice path) {\n      | ^~~~\n/home/cua/swan-fresh-NHb1m01M/source/native/swan_sys.c:262:1: note: ‘bool’ is defined in header ‘<stdbool.h>’; did you forget to ‘#include <stdbool.h>’?\n/home/cua/swan-fresh-NHb1m01M/source/native/swan_sys.c: In function ‘swan_is_symlink’:\n/home/cua/swan-fresh-NHb1m01M/source/native/swan_sys.c:264:66: error: ‘false’ undeclared (first use in this function)\n  264 |     if (path.len <= 0 || path.len >= (int64_t)sizeof buf) return false;\n      |                                                                  ^~~~~\n/home/cua/swan-fresh-NHb1m01M/source/native/swan_sys.c:264:66: note: ‘false’ is defined in header ‘<stdbool.h>’; did you forget to ‘#include <stdbool.h>’?\n(the output is in /home/cua/swan-fresh-NHb1m01M/source/.tools/goose-home/build/prog/swan-34729dbb/native/gcc-13.3.0-a920ca84/swan_sys.cc.log)\n",
+    "build-after-fix.log": "parsed ok: 516 top-level declarations, 21 file(s)\ntypechecked ok: 1005 specialization(s), 30 struct/1 enum instance(s); optimized -O2: 1539 inlined, 4 base case(s), 330 folded, 459 propagated, 0 tail loop(s), 0 reassociated\nbce: elided 1247/1926 index and 546/1135 slice checks\nwrote /home/cua/swan-fresh-NHb1m01M/source/.tools/goose-home/build/prog/swan-34729dbb/swan.c (5567074 bytes)\nbuilding the package swan's C\nbuilding the package treesitter's C\nbuilding the package sqlite's C\ncompiling /home/cua/swan-fresh-NHb1m01M/source/.tools/goose-home/pkg/github.com/shetautnetjer/goose-sqlite/v0.1.2/src/gsq.c for the package sqlite failed (exit 1):\n    /usr/bin/cc -O2 -I/home/cua/swan-fresh-NHb1m01M/source/.tools/goose-home/pkg/github.com/shetautnetjer/goose-sqlite/v0.1.2/vendor -I/home/cua/swan-fresh-NHb1m01M/source/.tools/goose-home/build/pkg/github.com/shetautnetjer/goose-sqlite/v0.1.2/gcc-13.3.0-a920ca84/include -DSQLITE_OMIT_LOAD_EXTENSION=1 -DSQLITE_THREADSAFE=0 -DSQLITE_DQS=0 -DSQLITE_DEFAULT_MEMSTATUS=0 -fPIC -c /home/cua/swan-fresh-NHb1m01M/source/.tools/goose-home/pkg/github.com/shetautnetjer/goose-sqlite/v0.1.2/src/gsq.c -o /home/cua/swan-fresh-NHb1m01M/source/.tools/goose-home/build/pkg/github.com/shetautnetjer/goose-sqlite/v0.1.2/gcc-13.3.0-a920ca84/gsq.o\n/home/cua/swan-fresh-NHb1m01M/source/.tools/goose-home/pkg/github.com/shetautnetjer/goose-sqlite/v0.1.2/src/gsq.c:36:8: error: unknown type name ‘bool’\n   36 | static bool fits_int(int64_t len) { return len >= 0 && len <= INT_MAX; }\n      |        ^~~~\n/home/cua/swan-fresh-NHb1m01M/source/.tools/goose-home/pkg/github.com/shetautnetjer/goose-sqlite/v0.1.2/src/gsq.c:39:1: error: unknown type name ‘bool’\n   39 | bool gsq_exec(int64_t h, gsq_slice sql, gs_rref err) {\n      | ^~~~\n/home/cua/swan-fresh-NHb1m01M/source/.tools/goose-home/pkg/github.com/shetautnetjer/goose-sqlite/v0.1.2/src/gsq.c:10:1: note: ‘bool’ is defined in header ‘<stdbool.h>’; did you forget to ‘#include <stdbool.h>’?\n    9 | #include <limits.h>\n  +++ |+#include <stdbool.h>\n   10 | \n/home/cua/swan-fresh-NHb1m01M/source/.tools/goose-home/pkg/github.com/shetautnetjer/goose-sqlite/v0.1.2/src/gsq.c: In function ‘gsq_exec’:\n/home/cua/swan-fresh-NHb1m01M/source/.tools/goose-home/pkg/github.com/shetautnetjer/goose-sqlite/v0.1.2/src/gsq.c:41:90: error: ‘false’ undeclared (first use in this function)\n   41 |     if (!fits_int(sql.len)) { append_cstr(err, \"SQL longer than SQLite accepts\"); return false; }\n      |                                                                                          ^~~~~\n/home/cua/swan-fresh-NHb1m01M/source/.tools/goose-home/pkg/github.com/shetautnetjer/goose-sqlite/v0.1.2/src/gsq.c:41:90: note: ‘false’ is defined in header ‘<stdbool.h>’; did you forget to ‘#include <stdbool.h>’?\n/home/cua/swan-fresh-NHb1m01M/source/.tools/goose-home/pkg/github.com/shetautnetjer/goose-sqlite/v0.1.2/src/gsq.c:41:90: note: each undeclared identifier is reported only once for each function it appears in\n/home/cua/swan-fresh-NHb1m01M/source/.tools/goose-home/pkg/github.com/shetautnetjer/goose-sqlite/v0.1.2/src/gsq.c:56:20: error: ‘true’ undeclared (first use in this function)\n   56 |             return true;\n      |                    ^~~~\n/home/cua/swan-fresh-NHb1m01M/source/.tools/goose-home/pkg/github.com/shetautnetjer/goose-sqlite/v0.1.2/src/gsq.c:56:20: note: ‘true’ is defined in header ‘<stdbool.h>’; did you forget to ‘#include <stdbool.h>’?\n/home/cua/swan-fresh-NHb1m01M/source/.tools/goose-home/pkg/github.com/shetautnetjer/goose-sqlite/v0.1.2/src/gsq.c: At top level:\n/home/cua/swan-fresh-NHb1m01M/source/.tools/goose-home/pkg/github.com/shetautnetjer/goose-sqlite/v0.1.2/src/gsq.c:80:1: error: unknown type name ‘bool’\n   80 | bool gsq_bind_text(int64_t s, int32_t i, gsq_slice v) {\n      | ^~~~\n/home/cua/swan-fresh-NHb1m01M/source/.tools/goose-home/pkg/github.com/shetautnetjer/goose-sqlite/v0.1.2/src/gsq.c:80:1: note: ‘bool’ is defined in header ‘<stdbool.h>’; did you forget to ‘#include <stdbool.h>’?\n/home/cua/swan-fresh-NHb1m01M/source/.tools/goose-home/pkg/github.com/shetautnetjer/goose-sqlite/v0.1.2/src/gsq.c: In function ‘gsq_bind_text’:\n/home/cua/swan-fresh-NHb1m01M/source/.tools/goose-home/pkg/github.com/shetautnetjer/goose-sqlite/v0.1.2/src/gsq.c:81:34: error: ‘false’ undeclared (first use in this function)\n   81 |     if (!fits_int(v.len)) return false;\n      |                                  ^~~~~\n/home/cua/swan-fresh-NHb1m01M/source/.tools/goose-home/pkg/github.com/shetautnetjer/goose-sqlite/v0.1.2/src/gsq.c:81:34: note: ‘false’ is defined in header ‘<stdbool.h>’; did you forget to ‘#include <stdbool.h>’?\n/home/cua/swan-fresh-NHb1m01M/source/.tools/goose-home/pkg/github.com/shetautnetjer/goose-sqlite/v0.1.2/src/gsq.c: At top level:\n/home/cua/swan-fresh-NHb1m01M/source/.tools/goose-home/pkg/github.com/shetautnetjer/goose-sqlite/v0.1.2/src/gsq.c:86:1: error: unknown type name ‘bool’\n   86 | bool gsq_bind_int(int64_t s, int32_t i, int64_t v) {\n      | ^~~~\n/home/cua/swan-fresh-NHb1m01M/source/.tools/goose-home/pkg/github.com/shetautnetjer/goose-sqlite/v0.1.2/src/gsq.c:86:1: note: ‘bool’ is defined in header ‘<stdbool.h>’; did you forget to ‘#include <stdbool.h>’?\n(the output is in /home/cua/swan-fresh-NHb1m01M/source/.tools/goose-home/build/pkg/github.com/shetautnetjer/goose-sqlite/v0.1.2/gcc-13.3.0-a920ca84/gsq.cc.log)\n",
+    "build-two-header-fixes.log": "parsed ok: 516 top-level declarations, 21 file(s)\ntypechecked ok: 1005 specialization(s), 30 struct/1 enum instance(s); optimized -O2: 1539 inlined, 4 base case(s), 330 folded, 459 propagated, 0 tail loop(s), 0 reassociated\nbce: elided 1247/1926 index and 546/1135 slice checks\nwrote /home/cua/swan-fresh-NHb1m01M/source/.tools/goose-home/build/prog/swan-34729dbb/swan.c (5567074 bytes)\nbuilding the package sqlite's C\ncompiling the runtime for gcc 13.3.0\nbuilt bin/swan\n",
+    "npm-ci.log": "npm warn deprecated inflight@1.0.6: This module is not supported, and leaks memory. Do not use it. Check out lru-cache if you want a good and tested way to coalesce async requests by a key value, which is much more comprehensive and powerful.\nnpm warn deprecated glob@7.2.3: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me\n\nadded 49 packages in 5s\nnpm notice\nnpm notice New major version of npm available! 11.19.0 -> 12.2.2\nnpm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.2\nnpm notice To update run: npm install -g npm@12.2.2\nnpm notice\n",
+    "bun-install.log": "\nadded 5 packages in 6s\nnpm warn install-scripts 1 package has install scripts not yet covered by allowScripts:\nnpm warn install-scripts   bun@1.3.14 (postinstall: node install.js)\nnpm warn install-scripts\nnpm warn install-scripts Run `npm install-scripts ls` to review, or `npm install-scripts approve <pkg>` to allow.\n",
+    "skill-check.log": "ok    typescript 'execSync($$$)': got ['T01', 'T02', 'T03']\nok    typescript 'exec($$$)': got ['T04']\nok    typescript 'spawn($A, $B, { $$$, shell: true })': got ['T06']\nok    typescript 'eval($X)': got ['T09']\nok    typescript 'new Function($$$)': got ['T10']\nok    typescript '$F({ $$$, rejectUnauthorized: false })': got ['T11']\nok    typescript 'try { $$$ } catch { }': got ['T13']\nok    typescript 'try { $$$ } catch ($E) { }': got ['T14']\nok    typescript 'JSON.parse($X) as $T': got ['T16']\nok    typescript 'chmodSync($P, 0o777)': got ['T17']\nok    typescript 'chmodSync($P, 0o666)': got ['T19']\nok    typescript '$T.only($$$)': got ['T20']\nok    typescript '$T.skip($$$)': got ['T21']\nok    python     'subprocess.$F($$$, shell=True, $$$)': got ['P01']\nok    python     'subprocess.$F($$$, shell=True)': got ['P03']\nok    python     'os.system($X)': got ['P04']\nok    python     'eval($X)': got ['P05']\nok    python     'exec($X)': got ['P06']\nok    python     'pickle.loads($X)': got ['P07']\nok    python     'pickle.load($X)': got ['P08']\nok    python     'yaml.load($X)': got ['P09']\nok    python     'requests.$M($$$, verify=False)': got ['P11']\nok    python     'requests.$M($$$, verify=False, $$$)': got ['P13']\nok    python     'try:\\n    $$$\\nexcept:\\n    pass': got ['P14']\n\ncanary PRESENT  python     'os.system($X, $$$)': got [] ($$$ next to a comma must match >=1 node; docs say it may match none)\ncanary PRESENT  typescript 'spawn($A, $B, { $$$, shell: true })': got ['T06'] (same: { shell: true } alone is missed)\ncanary TRAP     typescript 'shell: true': got [] (not a bug but a trap: parses as a JS label, so 0 matches over a whole repo means nothing)\n\n24/24 patterns match the fixture exactly\n",
+    "offline.log": "swan index: 1 of 1 files rewritten; 3 occurrences and 0 relationships written; map has 2 symbols, 3 occurrences -> /home/cua/swan-fresh-NHb1m01M/demo-offline-_urlizj2/swan.db in 3 ms\nPASS MCP initialize identifies Swan\nPASS MCP advertises the demonstrated tools\nPASS square resolves to its definition and source body\nPASS the known reference to square belongs to area\nPASS the reference graph finds area as the direct user\nPASS structural search captures x and associates the match with square\nPASS a missing pattern returns zero matches\nPASS rewrite planning reports one edit without changing the source\nPASS explicit apply writes exactly the planned replacement\nPASS an outside edit causes refusal and leaves the file unchanged\nPASS unknown MCP methods return method-not-found\nArtifacts: /home/cua/swan-fresh-NHb1m01M/demo-offline-_urlizj2\nPASS offline demo complete (synthetic row input; no indexer or live server qualification)\n",
+    "live.log": "LAB=/home/cua/swan-fresh-NHb1m01M/swan-verify-xngji3bq\n{\n  \"status\": \"PASS\",\n  \"cases\": [\n    {\n      \"case\": \"untrusted-before\",\n      \"diagnostics\": \"reportAssignmentType\",\n      \"repo_interpreter_executed\": false,\n      \"expected\": false\n    },\n    {\n      \"case\": \"trusted-control\",\n      \"diagnostics\": \"reportAssignmentType\",\n      \"repo_interpreter_executed\": true,\n      \"expected\": true\n    },\n    {\n      \"case\": \"untrusted-after\",\n      \"diagnostics\": \"reportAssignmentType\",\n      \"repo_interpreter_executed\": false,\n      \"expected\": false\n    }\n  ],\n  \"after\": {\n    \"binary\": \"2fe81c794cc411457015f9e58943b4d8c21ae0b32444aa5eeabbf3fe72b7f1e0\",\n    \"trust\": null,\n    \"modules\": \"df3f58d9252c7cf6b4f918b052f7a34937ca7209a49bb16d5de57306f19ef2c5\"\n  },\n  \"production_unchanged\": true,\n  \"isolated_trust_list_absent\": true\n}\nEvidence retained at /home/cua/swan-fresh-NHb1m01M/swan-verify-xngji3bq\n"
+  },
+  "live": {
+    "provenance.json": {
+      "source_binary": "/home/cua/swan-fresh-NHb1m01M/source/bin/swan",
+      "source_home": "/home/cua/swan-fresh-NHb1m01M/source",
+      "before": {
+        "binary": "2fe81c794cc411457015f9e58943b4d8c21ae0b32444aa5eeabbf3fe72b7f1e0",
+        "trust": null,
+        "modules": "df3f58d9252c7cf6b4f918b052f7a34937ca7209a49bb16d5de57306f19ef2c5"
+      },
+      "copy_sha256": "2fe81c794cc411457015f9e58943b4d8c21ae0b32444aa5eeabbf3fe72b7f1e0",
+      "pyright_version": "1.1.414",
+      "bwrap": "/home/cua/swan-test-mtyMVmYy/dependencies/extracted/usr/bin/bwrap",
+      "node": "/usr/local/lib/nodejs/bin/node",
+      "input": "synthetic TSV rows, not SCIP-indexer output",
+      "isolation": "host read-only; only lab writable; network namespace disabled",
+      "trusted_control": "process-local SWAN_TRUST_BUILD=1; no saved trust grants"
+    },
+    "result.json": {
+      "status": "PASS",
+      "cases": [
+        {
+          "case": "untrusted-before",
+          "diagnostics": "reportAssignmentType",
+          "repo_interpreter_executed": false,
+          "expected": false
+        },
+        {
+          "case": "trusted-control",
+          "diagnostics": "reportAssignmentType",
+          "repo_interpreter_executed": true,
+          "expected": true
+        },
+        {
+          "case": "untrusted-after",
+          "diagnostics": "reportAssignmentType",
+          "repo_interpreter_executed": false,
+          "expected": false
+        }
+      ],
+      "after": {
+        "binary": "2fe81c794cc411457015f9e58943b4d8c21ae0b32444aa5eeabbf3fe72b7f1e0",
+        "trust": null,
+        "modules": "df3f58d9252c7cf6b4f918b052f7a34937ca7209a49bb16d5de57306f19ef2c5"
+      },
+      "production_unchanged": true,
+      "isolated_trust_list_absent": true
+    },
+    "untrusted-before.json": [
+      {
+        "sent": {
+          "jsonrpc": "2.0",
+          "id": 1,
+          "method": "initialize",
+          "params": {
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": {
+              "name": "trust-verification",
+              "version": "1"
+            }
+          }
+        }
+      },
+      {
+        "received": {
+          "jsonrpc": "2.0",
+          "id": 1,
+          "result": {
+            "protocolVersion": "2025-06-18",
+            "capabilities": {
+              "tools": {}
+            },
+            "serverInfo": {
+              "name": "swan",
+              "version": "0.1.0"
+            }
+          }
+        }
+      },
+      {
+        "sent": {
+          "jsonrpc": "2.0",
+          "method": "notifications/initialized"
+        }
+      },
+      {
+        "sent": {
+          "jsonrpc": "2.0",
+          "id": 2,
+          "method": "tools/call",
+          "params": {
+            "name": "get_diagnostics",
+            "arguments": {
+              "relative_path": "main.py",
+              "live": true
+            }
+          }
+        }
+      },
+      {
+        "received": {
+          "jsonrpc": "2.0",
+          "id": 2,
+          "result": {
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"ok\":true,\"diagnostics\":[{\"line\":1,\"col\":15,\"end_line\":1,\"end_col\":33,\"severity\":\"error\",\"source\":\"Pyright\",\"code\":\"reportAssignmentType\",\"message\":\"Type \\\"Literal['SWAN_TRUST_PROBE']\\\" is not assignable to declared type \\\"int\\\"\\n  \\\"Literal['SWAN_TRUST_PROBE']\\\" is not assignable to \\\"int\\\"\"}]}"
+              }
+            ],
+            "isError": false
+          }
+        }
+      }
+    ],
+    "trusted-control.json": [
+      {
+        "sent": {
+          "jsonrpc": "2.0",
+          "id": 1,
+          "method": "initialize",
+          "params": {
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": {
+              "name": "trust-verification",
+              "version": "1"
+            }
+          }
+        }
+      },
+      {
+        "received": {
+          "jsonrpc": "2.0",
+          "id": 1,
+          "result": {
+            "protocolVersion": "2025-06-18",
+            "capabilities": {
+              "tools": {}
+            },
+            "serverInfo": {
+              "name": "swan",
+              "version": "0.1.0"
+            }
+          }
+        }
+      },
+      {
+        "sent": {
+          "jsonrpc": "2.0",
+          "method": "notifications/initialized"
+        }
+      },
+      {
+        "sent": {
+          "jsonrpc": "2.0",
+          "id": 2,
+          "method": "tools/call",
+          "params": {
+            "name": "get_diagnostics",
+            "arguments": {
+              "relative_path": "main.py",
+              "live": true
+            }
+          }
+        }
+      },
+      {
+        "received": {
+          "jsonrpc": "2.0",
+          "id": 2,
+          "result": {
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"ok\":true,\"diagnostics\":[{\"line\":1,\"col\":15,\"end_line\":1,\"end_col\":33,\"severity\":\"error\",\"source\":\"Pyright\",\"code\":\"reportAssignmentType\",\"message\":\"Type \\\"Literal['SWAN_TRUST_PROBE']\\\" is not assignable to declared type \\\"int\\\"\\n  \\\"Literal['SWAN_TRUST_PROBE']\\\" is not assignable to \\\"int\\\"\"}]}"
+              }
+            ],
+            "isError": false
+          }
+        }
+      }
+    ],
+    "untrusted-after.json": [
+      {
+        "sent": {
+          "jsonrpc": "2.0",
+          "id": 1,
+          "method": "initialize",
+          "params": {
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": {
+              "name": "trust-verification",
+              "version": "1"
+            }
+          }
+        }
+      },
+      {
+        "received": {
+          "jsonrpc": "2.0",
+          "id": 1,
+          "result": {
+            "protocolVersion": "2025-06-18",
+            "capabilities": {
+              "tools": {}
+            },
+            "serverInfo": {
+              "name": "swan",
+              "version": "0.1.0"
+            }
+          }
+        }
+      },
+      {
+        "sent": {
+          "jsonrpc": "2.0",
+          "method": "notifications/initialized"
+        }
+      },
+      {
+        "sent": {
+          "jsonrpc": "2.0",
+          "id": 2,
+          "method": "tools/call",
+          "params": {
+            "name": "get_diagnostics",
+            "arguments": {
+              "relative_path": "main.py",
+              "live": true
+            }
+          }
+        }
+      },
+      {
+        "received": {
+          "jsonrpc": "2.0",
+          "id": 2,
+          "result": {
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"ok\":true,\"diagnostics\":[{\"line\":1,\"col\":15,\"end_line\":1,\"end_col\":33,\"severity\":\"error\",\"source\":\"Pyright\",\"code\":\"reportAssignmentType\",\"message\":\"Type \\\"Literal['SWAN_TRUST_PROBE']\\\" is not assignable to declared type \\\"int\\\"\\n  \\\"Literal['SWAN_TRUST_PROBE']\\\" is not assignable to \\\"int\\\"\"}]}"
+              }
+            ],
+            "isError": false
+          }
+        }
+      }
+    ]
+  },
+  "limits": [
+    "Existing VM supplied host compiler, Python, Node/npm and uv; this is a fresh Swan source/dependency tree, not an untouched OS install.",
+    "Two candidate header changes exist only in the lab; SQLite change is in private package cache, so original tagged sources still fail on GCC13.",
+    "No one-command installer, doctor or portable skill implemented.",
+    "Skill fixture maps through existing indexers but the 24 checks assert patterns, not SCIP symbol/reference correctness.",
+    "All-language suite, saved trust grant semantics, native macOS/Windows/ARM64, installed skill discovery and release archive untested."
+  ]
+}

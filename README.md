@@ -161,7 +161,7 @@ or downloaded language tools portable automatically.
 
 | Host | Current status |
 |---|---|
-| Linux x86-64 | Implemented and tested on the development host; other distributions and clean machines still need qualification |
+| Linux x86-64 | Development host verified; the package candidate also passed a fresh install and relocation in Ubuntu 24.04 CUA with real Python/TypeScript indexing and live diagnostics. Other distributions still need qualification |
 | Windows with WSL2 x86-64 | Possible route through Linux; not separately verified here, and not native Windows support |
 | macOS, Intel or Apple silicon | Not supported by the current bootstrap/native helpers; requires a port and platform tests |
 | Native Windows | Not supported; requires Windows process, path and filesystem handling |
@@ -238,6 +238,14 @@ concurrent grant. Serialize trust changes and keep tests away from the live
 installation; this limitation was not fixed by PR #11.
 
 ## Use
+
+**Linux package candidate:** the dependency-aware installer and portable agent
+skill are described in [Install the Linux package](docs/install.md). It supports
+a new user-owned prefix, `core` or `python-typescript` profiles, verified local
+runtime downloads, and a read-only `swan doctor` command. It does not replace
+an active installation, grant repository trust or configure an agent. A built
+candidate and its qualification receipt are separate from an official release.
+The source-build instructions below retain the legacy full-tool bootstrap.
 
 <!-- coderabbit-ai-generated:v1 -->
 

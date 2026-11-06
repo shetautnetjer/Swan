@@ -5,6 +5,7 @@
    Goose. */
 #define _GNU_SOURCE
 #include "goose.h"
+#include <stdbool.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <stdio.h>

@@ -1,38 +1,44 @@
-# swan-code-check: provenance and how copies follow this repo
+# swan-code-check provenance
 
-## Source
-Written by Jabari (Khamani's Claude Code) on 2026-11-01 at Khamani's request,
-with a Letta/AEON adaptation by Aya the same day. Merged into one file here
-on 2026-11-02 (Khamani: "Yes, move it"). **This directory is the single
-source.** Edit the skill only here, through a normal Swan PR.
+## Source and ownership
 
-The pattern pack (`references/patterns.json`) and fixture (`fixture/`) were
-identical in both earlier copies. The self-test's scratch dir defaults to
-`~/.cache/aya/tmp/swan-skill-selftest` (override: `SWAN_SELFTEST_OUT` or `--out`).
+Originally written on 2026-11-01 by Jabari (Claude Code), with a Letta/AEON
+adaptation by Aya. The copies were merged into this directory on 2026-11-02
+at the project owner's request. **`skills/swan-code-check/` in the Swan
+repository is the single source.** Changes belong in a normal Swan PR.
 
-## Installed copies
-Each host needs a skill directory it can load. Both follow this repo with a
-copy (not a symlink), refreshed after a skill change merges:
+On 2026-11-06 the shared instructions and self-test were made portable:
+host checkout paths and named-agent trust authority were removed; executable
+discovery uses an explicit binary, `SWAN_BINARY`, then `PATH`; default test
+output is disposable. This supersedes the earlier host-specific setup and
+`~/.cache/aya/tmp/swan-skill-selftest` default. The original 24-pattern pack,
+fixture and known matcher canaries are preserved.
 
-- **Aya (Letta MemFS):** `$MEMORY_DIR/skills/swan-code-check/`. MemFS is a git
-  repo that syncs off the machine, so a symlink into `~/aya/sandbox/swan`
-  would break on any other host. Aya refreshes it with
-  `: "${MEMORY_DIR:?unset}" && test -f ~/aya/sandbox/swan/skills/swan-code-check/SKILL.md && rsync -a --delete --exclude __pycache__ ~/aya/sandbox/swan/skills/swan-code-check/ "$MEMORY_DIR/skills/swan-code-check/"`
-  (check that `$MEMORY_DIR` is Aya's own MemFS first; it overwrites that skill)
-  and commits only that path in MemFS.
-- **Jabari (Claude Code on the PC):** `~/.claude/skills/swan-code-check/`.
-  A symlink to `~/aya/sandbox/swan/skills/swan-code-check` would also work
-  here (same machine), but a copy keeps a half-merged branch checkout from
-  changing his skill underneath him. Refresh with
-  `test -f ~/aya/sandbox/swan/skills/swan-code-check/SKILL.md && rsync -a --delete --exclude __pycache__ ~/aya/sandbox/swan/skills/swan-code-check/ ~/.claude/skills/swan-code-check/`.
-  Not applied by this PR: Khamani or Jabari applies it after merge.
+## Distribution
 
-## How a later change reaches both
-1. Change the skill here on a branch; run `python3 -I skills/swan-code-check/scripts/selftest.py`
-   (exit 0) and Swan's usual review; merge.
-2. `git -C ~/aya/sandbox/swan pull --ff-only` (the live checkout stays on main).
-3. Run the two `rsync` lines above. Each agent re-reads its skill on its next session.
+The Linux package includes this directory under its installation prefix.
+It does not install a skill into agent settings or register an MCP server.
+A caller can copy this whole directory to its host's supported skill
+location, preserving relative paths to `scripts/`, `references/` and
+`fixture/`. Keep the copy's source revision recorded in that host's own
+configuration/change record and refresh it from a reviewed Swan revision.
+Do not assume an agent-specific skill directory or command is present.
 
-Host-specific wording (how each host calls MCP tools, who may run
-`swan trust`) lives in the "Calling Swan (by host)" and step 1 sections of
-`SKILL.md`, so one file serves both.
+For validation, use the exact installed binary rather than assuming the
+first `swan` on `PATH` is the same version:
+
+```sh
+/path/to/installation/bin/swan doctor --profile python-typescript --json
+python3 -I /path/to/copied-skill/scripts/selftest.py --swan /path/to/installation/bin/swan
+```
+
+Doctor checks dependency availability, and the self-test checks the fixture's
+pattern results. Neither proves other languages, live tools or the target
+repository's map are complete. Missing dependencies or skipped indexers must
+be reported. The self-test never grants repository trust or changes agent
+configuration. Its default output is newly allocated and removed at exit;
+`--out` or `SWAN_SELFTEST_OUT` retains a new empty directory when needed.
+
+Run `python3 -I skills/swan-code-check/scripts/test_selftest.py` for portable
+executable discovery, output handling and copied-resource checks. Run the
+pattern self-test against an actual Swan binary before releasing the skill.

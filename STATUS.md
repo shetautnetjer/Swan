@@ -375,6 +375,96 @@ branch fix/greptile-review:
   comparison, Markdown local-link/anchor checks and `git diff --check`.
   Full build/integration suites are not rerun for documentation-only edits.
 
+## 2026-11-06: fresh-install investigation and package proposal
+
+- A fresh Swan checkout at `583e665` in CUA's Ubuntu 24.04 x86-64 VM
+  fetched Goose v2026.3, the LSP submodule and native packages into a private
+  initially empty cache. No host Swan executable or compiled cache was copied.
+  The existing VM supplied GCC 13.3, Python 3.12.3 and Node 24.21.0.
+- Unmodified source failed: Swan's C helper omits `<stdbool.h>`. Correcting
+  it in the lab exposed the same defect in `goose-sqlite@v0.1.2/src/gsq.c`.
+  Two local include corrections produced a working candidate. The SQLite
+  change is experimental cache content, not a published package fix; both
+  fixes must reach their owning sources and the dependency pin before release.
+- Fresh locked npm installation and lab-local Bun 1.3.14 succeeded. Candidate
+  SHA-256: `2fe81c794cc411457015f9e58943b4d8c21ae0b32444aa5eeabbf3fe72b7f1e0`.
+  It passed 24/24 skill pattern checks, 11 offline assertions, and real Python
+  diagnostics with false/true/false repository-interpreter markers. Pattern
+  tests do not by themselves validate SCIP definition/reference correctness.
+- Source/logs/patches/results: `docs/evidence/swan-install-2026-11-06.json`.
+  Guest work retained at `/home/cua/swan-fresh-NHb1m01M`; the VM was returned
+  to its stopped state. Host installed Swan/configuration/trust remain untouched.
+- PRD/HLD appended to `docs/packages.md`: a user-space Linux x86-64 package,
+  dependency checker, selected tool installation, and a portable revision of
+  the existing skill. No new installer/doctor/skill behavior is implemented.
+  Next owner/action: Khamani approves or revises this scope; implementation then
+  fixes both source owners, builds the package, verifies the selected profiles
+  and copied skill, and obtains independent review before release acceptance.
+
+## 2026-11-06: Linux package implemented and qualified in CUA
+
+- The approved candidate implements archive export, a staged new-prefix
+  installer, read-only `swan doctor`, private Node/Bun dependencies, and the
+  portable existing skill. SQLite's source header fix merged in goose-sqlite
+  PR #4; Swan pins immutable commit `80a4e713`. Swan's header is fixed too.
+- Tested source: `bae3873bfd8dfecae5eb5ab64bf0cf45bde9998f`, clean checkout,
+  Goose v2026.3 and GCC 13.3, Ubuntu 24.04 x86-64/glibc 2.39. The private
+  dependency cache fetched the corrected source; no dependency cache patches
+  were used. Build/archive/install receipts and hashes are in
+  `docs/evidence/swan-package-2026-11-06.json`.
+- The actual archive installed into a new path with spaces, downloaded private
+  Bun, reused compatible system Node/npm, installed the locked npm tools, and
+  passed its offline demo. Moving the entire tree preserved dependency checks
+  and real Python/TypeScript mapping, known definitions/references and live
+  clean/error/fixed diagnostics. A separately copied skill passed 24/24 patterns.
+- The Bubblewrap-isolated Python regression passed real diagnostics with
+  interpreter markers false/true/false. No persistent trust grant was needed.
+  A separate core-only installation passed; wrong hashes, existing prefixes,
+  doctor home-argument abbreviation and missing selected dependencies failed
+  as expected. Local checks: 18 installer/doctor, 10 archive, 7 skill portability.
+- Host production executable, trust list and module configuration matched
+  their pre-test SHA-256 snapshots. The active installation was not replaced.
+  No agent configuration or public binary release was created. Trust-list
+  concurrency remains a separate known limitation; serialize trust grants.
+- Stage: implemented, installed and qualified for these bounded CUA checks;
+  not accepted as a production replacement or cross-platform public release.
+  Next: review PR #13 and this evidence; any host activation or public binary
+  distribution is a separate decision. Native Windows/macOS/ARM64 remain ports,
+  and WSL and other Linux distributions need their own tests.
+
+## 2026-11-06: PR #13 review correction
+
+- Confirmed review comment `4493026973`: a successful `--map-swan` command
+  producing no map could be masked by `search_pattern` implicitly building
+  another map. The self-test now selects with `build:false`, requires the
+  exact existing `out/map/swan.db`, and keeps pattern calls on that selection.
+- CUA reproduction used `/usr/bin/true` as a builder returning success without
+  output. Before: false 24/24 pass with a replacement `fixture/swan.db`. After:
+  exit 2, no replacement map. The real builder still passed 24/24 against
+  `map/swan.db`. Evidence: `docs/evidence/swan-pr13-review-2026-11-06.json`.
+- Preserved CodeRabbit's concurrent fix commit `26edbfc` and its three
+  regression tests, adapting them to the stricter map-selection helper.
+  Added four regressions: map identity/no-build selection; missing, wrong,
+  rebuilt and malformed results; no repository reselection; no searches after
+  a builder leaves no usable map. Local checks pass 28 packaging tests and
+  14 skill tests. Added function documentation in response to the review's
+  docstring coverage warning; those edits preserve executable AST behavior.
+- This changes the source self-test and documentation, not the Swan native
+  executable or production state. The previously shared candidate archive
+  remains the recorded `bae3873` artifact and predates this review fix; export
+  a new candidate from the final reviewed revision before release.
+
+## 2026-11-06: ordered improvements approved
+
+The owner approved tests and merges for the sequence in
+`docs/improvements-2026-11-06.md`: skill coverage/refresh guidance, matcher
+correctness, concurrent-map qualification, Goose-language investigation, then
+measured optimization. Stage 1 now distinguishes structural/index/live
+coverage, batches refresh across coherent edits, checks branch/worktree and
+compiler-input changes, and reports actual verification limits. Skill format,
+relative links and whitespace checks pass; executable behavior is unchanged.
+The active installation and saved trust remain outside these source merges.
+
 ## Remaining work
 
 1. Qualify real server adapters and indexers separately from the mock LSP
