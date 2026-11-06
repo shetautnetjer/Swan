@@ -111,6 +111,17 @@ void swan_writer_unlock(int64_t handle) {
     if (handle > 0) close((int)(handle - 1));
 }
 
+/* Success only: all foreground jobs and publication have completed. Idle
+   build servers may retain copies of this open file description. Failure and
+   timeout paths must only close: a surviving child may still be writing. */
+void swan_writer_complete(int64_t handle) {
+    if (handle > 0) {
+        int fd = (int)(handle - 1);
+        while (flock(fd, LOCK_UN) != 0 && errno == EINTR) {}
+        close(fd);
+    }
+}
+
 static int64_t now_ms(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);

@@ -30,6 +30,7 @@ def load_native(path):
     library.swan_writer_lock.argtypes = [Slice, ctypes.POINTER(Builder)]
     library.swan_writer_lock.restype = ctypes.c_int64
     library.swan_writer_unlock.argtypes = [ctypes.c_int64]
+    library.swan_writer_complete.argtypes = [ctypes.c_int64]
     return library
 
 
@@ -175,7 +176,7 @@ signal.pause()
             child.stdout.close()
             child.stderr.close()
 
-    def orphan_writer(self, operation):
+    def orphan_writer(self, operation, outcome="death"):
         database = self.directory / "swan.db"
         ready, gate = self.directory / "ready.fifo", self.directory / "gate.fifo"
         output = self.directory / "indexer-output"
@@ -192,17 +193,37 @@ handle, error = acquire(library, Path(sys.argv[3]))
 if not handle:
     raise RuntimeError(error)
 child_code = """
-import os, sys
+import os, sys, time
 from pathlib import Path
+if sys.argv[4] != 'death':
+    done_read, done_write = os.pipe()
+    if os.fork():
+        os.close(done_write)
+        if sys.argv[4] == 'success':
+            assert os.read(done_read, 1) == b'x'
+        os.close(done_read)
+        if sys.argv[4] == 'timeout':
+            time.sleep(30)
+        sys.exit(1 if sys.argv[4] == 'failure' else 0)
+    os.close(done_read)
+    os.setsid()  # Model a build server that outlives a timed-out process group.
+    os.close(1)
+    os.close(2)
+if sys.argv[4] == 'success':
+    Path(sys.argv[3]).write_text('child wrote after parent death')
+    os.write(done_write, b'x')
+if sys.argv[4] != 'death':
+    os.close(done_write)
 ready = os.open(sys.argv[1], os.O_WRONLY)
 os.write(ready, (str(os.getpid()) + '\\n').encode())
 os.close(ready)
 gate = os.open(sys.argv[2], os.O_RDONLY)
 os.read(gate, 1)
 os.close(gate)
-Path(sys.argv[3]).write_text('child wrote after parent death')
+if sys.argv[4] != 'success':
+    Path(sys.argv[3]).write_text('child wrote after parent death')
 """
-arguments = [sys.executable, '-c', child_code, sys.argv[4], sys.argv[5], sys.argv[6]]
+arguments = [sys.executable, '-c', child_code, sys.argv[4], sys.argv[5], sys.argv[6], sys.argv[8]]
 buffers = []
 def sliced(value):
     buffer = ctypes.create_string_buffer(value)
@@ -216,22 +237,42 @@ if sys.argv[7] == 'spawn':
     pid = library.swan_spawn(argv, empty, empty, sliced(os.fsencode(sys.argv[6] + '.log')))
     if pid <= 0:
         raise RuntimeError('native spawn failed')
-    signal.pause()
+    if sys.argv[8] == 'death':
+        signal.pause()
+    library.swan_wait_any.argtypes = [ctypes.POINTER(ctypes.c_int32)]
+    library.swan_wait_any.restype = ctypes.c_int64
+    code = ctypes.c_int32()
+    assert library.swan_wait_any(ctypes.byref(code)) == pid
+    assert code.value == (1 if sys.argv[8] == 'failure' else 0)
 else:
     library.swan_run.argtypes = [Slice, Slice, Slice, ctypes.c_int64, ctypes.POINTER(Builder), ctypes.POINTER(Builder)]
     out, err = Builder(), Builder()
-    library.swan_run(argv, empty, empty, 20000, ctypes.byref(out), ctypes.byref(err))
+    code = library.swan_run(argv, empty, empty, 300 if sys.argv[8] == 'timeout' else 20000, ctypes.byref(out), ctypes.byref(err))
+    assert code == (-2 if sys.argv[8] == 'timeout' else 1 if sys.argv[8] == 'failure' else 0)
+if sys.argv[8] == 'success':
+    library.swan_writer_complete(handle)
+else:
+    library.swan_writer_unlock(handle)
 '''
         parent = subprocess.Popen([sys.executable, "-c", program, str(Path(__file__).resolve().parent),
                                    str(self.library_path), str(database), str(ready), str(gate),
-                                   str(output), operation], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+                                   str(output), operation, outcome], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         child_pid, child_finished = None, False
         try:
             self.assertTrue(select.select([ready_fd], [], [], 5)[0], "native child never reached write barrier")
             child_pid = int(os.read(ready_fd, 128).strip())
-            parent.kill()
+            if outcome == "death":
+                parent.kill()
             parent.wait(timeout=5)
-            self.refuse(database)  # Child has exec'd and still owns the writer fd.
+            if outcome != "death":
+                self.assertEqual(parent.returncode, 0, parent.stderr.read().decode())
+            if outcome == "success":
+                # Descendant is still alive at its barrier, but no output is pending.
+                handle = self.own(database)
+                self.library.swan_writer_unlock(handle)
+                self.handles.remove(handle)
+            else:
+                self.refuse(database)  # Surviving writer still owns the descriptor.
             gate_fd = os.open(gate, os.O_WRONLY | os.O_NONBLOCK)
             os.write(gate_fd, b"x")
             os.close(gate_fd)
@@ -245,6 +286,9 @@ else:
                 self.assertIn("another writer is in progress", error)
                 select.select([], [], [], 0.001)  # Wait for observed lock release.
             self.assertTrue(child_finished, "child exit did not release inherited writer ownership")
+            deadline = time.monotonic() + 5
+            while not output.exists() and time.monotonic() < deadline:
+                select.select([], [], [], 0.001)
             self.assertEqual(output.read_text(), "child wrote after parent death")
         finally:
             os.close(ready_fd)
@@ -257,6 +301,21 @@ else:
                 except ProcessLookupError:
                     pass
             parent.stderr.close()
+
+    def test_spawn_success_releases_idle_descendant_lock(self):
+        self.orphan_writer("spawn", "success")
+
+    def test_run_success_releases_idle_descendant_lock(self):
+        self.orphan_writer("run", "success")
+
+    def test_spawn_failure_retains_descendant_lock(self):
+        self.orphan_writer("spawn", "failure")
+
+    def test_run_failure_retains_descendant_lock(self):
+        self.orphan_writer("run", "failure")
+
+    def test_run_timeout_retains_escaped_descendant_lock(self):
+        self.orphan_writer("run", "timeout")
 
     def test_spawn_indexer_keeps_lock_after_parent_death(self):
         self.orphan_writer("spawn")

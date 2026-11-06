@@ -600,7 +600,7 @@ fn map_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> bo
     let writer = swan_writer_lock(str(out, "/swan.db"), report);
     guard writer != 0 else { return false; }
     let ok = map_main_locked(repo, out, report);
-    swan_writer_unlock(writer);
+    if ok { swan_writer_complete(writer); } else { swan_writer_unlock(writer); }
     return ok;
 }
 

@@ -20,10 +20,19 @@ replace an active installation or establish production readiness.
   not ownership, and it must not be deleted as a recovery step.** The OS lock
   on its open descriptor establishes ownership. Deleting the file can let
   competing writers lock different inodes under the same name.
-- Independent review identified the orphan-indexer case: a child can still
-  write shared output after its Swan parent dies. Exec'd indexers/flatteners
-  therefore inherit the lock descriptor; ownership lasts until those children
-  also exit. A killed parent alone is not evidence that a retry can proceed.
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:fa06c16c489d439cc55e05dc2ae3e93da769e4ae12d2d2413181c160bb1933df -->
+
+- Indexers and flatteners inherit the writer descriptor to protect shared
+  output if Swan dies. Failure, timeout and parent death retain ownership
+  until surviving children exit. Successful foreground jobs and map publication
+  explicitly unlock before closing, allowing idle build servers to keep their
+  descriptors without blocking a subsequent writer. This success boundary
+  assumes indexers finish output before reporting success; arbitrary background
+  writes after successful completion are outside this qualification.
+
+<!-- /coderabbit-ai-generated:v1 -->
 - A full index builds a separate database and publishes it by rename; refresh
   updates the existing database in a transaction. CLI queries and the MCP
   read-only tool whitelist hold a SQLite read transaction while constructing

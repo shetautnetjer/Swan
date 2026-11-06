@@ -114,7 +114,7 @@ fn index_main(dir: const u8[:], db_path: const u8[:], root: const u8[:], refresh
     let writer = swan_writer_lock(db_path, err);
     if writer == 0 { abort(err); }
     index_main_locked(dir, db_path, root, refresh, report);
-    swan_writer_unlock(writer);
+    swan_writer_complete(writer);
 }
 
 // map_main already owns this database's writer lock across indexer output and
