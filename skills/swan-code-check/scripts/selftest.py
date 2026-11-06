@@ -61,8 +61,7 @@ class Swan:
 
     def search(self, lang, pattern):
         r = self.rpc("tools/call", {"name": "search_pattern",
-                                    "arguments": {"repo": str(FIXTURE), "pattern": pattern,
-                                                  "language": lang}})
+                                    "arguments": {"pattern": pattern, "language": lang}})
         text = r.get("result", {}).get("content", [{}])[0].get("text", "")
         try:
             d = json.loads(text)
@@ -141,6 +140,19 @@ def run(binary, map_binary, out):
     swan = Swan(binary, out)
     fails = 0
     try:
+        selected = swan.rpc("tools/call", {"name": "use_repo",
+                                          "arguments": {"path": str(FIXTURE), "build": False}})
+        try:
+            result = selected["result"]
+            if result.get("isError"):
+                raise ValueError("map selection failed")
+            map_path = json.loads(result["content"][0]["text"])["map"]
+            if not isinstance(map_path, str) or not map_path:
+                raise ValueError("missing map path")
+        except (AttributeError, KeyError, IndexError, TypeError, ValueError):
+            raise SystemExit("cannot select fixture map")
+        if Path(map_path).resolve() != (out / "map" / "swan.db").resolve():
+            raise SystemExit("server selected a different fixture map")
         for e in pack["patterns"]:
             d, err = swan.search(e["lang"], e["pattern"])
             want = set(e["expect"])

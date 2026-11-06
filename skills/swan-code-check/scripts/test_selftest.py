@@ -8,7 +8,7 @@ import shutil
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 sys.dont_write_bytecode = True
 
@@ -92,6 +92,49 @@ class PortableSelftestTests(unittest.TestCase):
         pack = json.loads(copied.PACK.read_text())
         self.assertEqual(len(pack["patterns"]), 24)
         self.assertTrue(all(set(entry["expect"]) <= tags.keys() for entry in pack["patterns"]))
+
+
+class FixtureMapTests(unittest.TestCase):
+    def run_with_selection(self, selection):
+        server = Mock()
+        server.rpc.return_value = selection
+        with patch.object(subject.subprocess, "run") as build, \
+                patch.object(subject, "Swan", return_value=server), \
+                patch.object(subject, "PACK", Mock(read_text=Mock(return_value='{"patterns": []}'))):
+            build.return_value.returncode = 0
+            try:
+                result = subject.run("server-swan", "map-swan", Path("/scratch"))
+            finally:
+                server.close.assert_called_once_with()
+                server.search.assert_not_called()
+            self.assertEqual(result, 0)
+        server.rpc.assert_called_once_with("tools/call", {
+            "name": "use_repo", "arguments": {"path": str(subject.FIXTURE), "build": False}})
+        return server
+
+    def test_selects_map_built_by_requested_binary(self):
+        self.run_with_selection({"result": {"content": [{"text": json.dumps({
+            "map": "/scratch/map/swan.db"})}], "isError": False}})
+
+    def test_missing_incompatible_or_malformed_map_fails(self):
+        replies = [
+            {"result": {"isError": True, "content": [{"text": "no compatible map"}]}},
+            {"error": {"message": "unknown tool"}},
+            {"result": {"content": []}},
+            {"result": {"content": [{"text": "not JSON"}]}},
+            {"result": {"content": [{"text": '{"map": null}'}]}},
+            {"result": {"content": [{"text": '{"map": "/scratch/replacement/swan.db"}'}]}},
+        ]
+        for reply in replies:
+            with self.subTest(reply=reply), self.assertRaises(SystemExit):
+                self.run_with_selection(reply)
+
+    def test_pattern_search_keeps_selected_map(self):
+        server = subject.Swan.__new__(subject.Swan)
+        server.rpc = Mock(return_value={"result": {"content": [{"text": '{"matches": []}'}]}})
+        self.assertEqual(server.search("python", "print($X)"), ({"matches": []}, None))
+        server.rpc.assert_called_once_with("tools/call", {"name": "search_pattern",
+            "arguments": {"pattern": "print($X)", "language": "python"}})
 
 
 if __name__ == "__main__":
