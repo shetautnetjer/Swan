@@ -45,6 +45,19 @@ else:
 '''
 
 
+# Every repository-selecting tool the server must advertise with a boolean
+# `build` policy. Checked as a set, so a tool that disappears or loses its
+# `repo` property fails the schema case instead of being skipped.
+EXPECTED_SELECTION_TOOLS = frozenset({
+    "use_repo", "find_symbol", "find_referencing_symbols", "get_symbol_at",
+    "get_symbols_overview", "get_callers", "get_callees", "find_implementations",
+    "get_type_hierarchy", "find_unused_symbols", "replace_symbol_body",
+    "insert_after_symbol", "insert_before_symbol", "rename_symbol",
+    "get_diagnostics", "update_map", "check_errors", "run_tests", "format_file",
+    "search_pattern", "rewrite_pattern", "index_info",
+})
+
+
 def digest(path):
     """Hash a known fixture or selected executable without modifying it."""
     return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -226,6 +239,12 @@ class PolicyChecks:
                 self.refused(client, registry, name, arguments)
             except AssertionError as exc:
                 failures.append(name + ": " + str(exc))
+        missing = sorted(EXPECTED_SELECTION_TOOLS - set(tested))
+        unexpected = sorted(set(tested) - EXPECTED_SELECTION_TOOLS)
+        if missing:
+            failures.append("selection tools missing a repo schema: " + ", ".join(missing))
+        if unexpected:
+            failures.append("unlisted selection tools (update EXPECTED_SELECTION_TOOLS): " + ", ".join(unexpected))
         require(tested and not failures, "\n".join(failures))
         return {"checked_tools": tested, "zero_implicit_invocations": True}
 
