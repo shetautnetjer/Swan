@@ -47,11 +47,29 @@ location; it does not register agent settings or an MCP connection.
 ## Start once per repo per task
 
 - Resolve the target repository's absolute path. Call
-  `use_repo {"path":"<repo>"}`; use `"build":false` when only an existing
-  map may be read. First-use building writes a map and can run indexers.
-- **Pass `"repo":"<repo>"` on every subsequent repository tool call**, even
-  if a persistent server remembers `use_repo`. Stateless host wrappers start
-  fresh processes; selection in an earlier call does not carry over.
+  `use_repo {"path":"<repo>","build":false}` when implicit indexing is not
+  authorized. First-use building writes a map and can run indexers.
+- **Inspect each repository tool's actual schema for a boolean `build`
+  property.** When supported, pass `"repo":"<repo>","build":false` on every
+  call if implicit indexing is unauthorized. Do not infer support from the
+  server version or assume an older server enforces an unknown field.
+  A prior `use_repo` restriction does not carry over to subsequent `repo`
+  calls. Stateless launches must retain the intended registry, repo and
+  supported per-request policy.
+- If a tool lacks this control, use the exact database CLI, or a controlled
+  persistent server: select with `use_repo {"path":"<repo>","build":false}`,
+  verify returned repo/map identity, then **omit `repo` on subsequent calls**
+  in that same session to avoid implicit reselection. This fallback does not
+  work across fresh stateless launches; use the exact database CLI instead.
+  Stop on missing/incompatible-map or selection errors rather than rebuilding
+  without authorization. Preserve configured maps and server settings.
+- `build:false` controls implicit map selection/building only. It does not
+  pin an existing map, make SQLite opens storage-read-only, or disable explicit
+  `update_map`, checks, tests, live servers, formatting or edits; each keeps its
+  own authorization requirements. In a controlled review launcher, keep
+  process-local `SWAN_WARM` unset/empty when language-server startup is not
+  authorized: inherited warm-up can start a server after initialization or
+  selection, and `build:false` does not suppress it.
 - Confirm the returned repo root and map path cover the intended worktree;
   another branch's checkout is not interchangeable. Give a brief initial
   coverage summary for the task's languages/files from the actual tool
@@ -108,8 +126,9 @@ location; it does not register agent settings or an MCP connection.
   private `<swan-binary> serve --maps <private-root>`, call
   `use_repo {"path":"<repo>","build":false}` on it, and verify the returned
   `root` is exactly `<repo>`, `map` is exactly `<private-root>/fresh/swan.db`,
-  and `built` is false. Send every subsequent `repo` call to this private
-  server; stateless wrappers must launch with the same private `--maps` root.
+  and `built` is false. Query only this private server using the per-call
+  policy or controlled persistent fallback above. Stateless wrappers must
+  retain the same private `--maps` root and supported build restriction.
   Preserve configured maps and server settings. If the host cannot route to
   that private server, use the exact database directly, for example
   `<swan-binary> query <private-root>/fresh/swan.db symbol <name> [relative_path]`.
@@ -124,8 +143,8 @@ location; it does not register agent settings or an MCP connection.
 
 ## Editing and review
 
-All examples below also require `repo` as above. Read the advertised schema
-for exact argument names.
+All examples below follow the repo/build-policy rules above, including the
+legacy persistent-session exception. Read schemas for exact argument names.
 
 - Before changing a shared symbol, use `get_callers` with `name_path` and
   `depth:2`. `summary.files` is the impact radius; `summary.test_files` guide
@@ -188,7 +207,7 @@ The unchanged fixture and 24-pattern pack are checked by
   that exact existing map and refuses to build a replacement during searches.
   It selects the map once with `build:false` in its private persistent server,
   then omits `repo` during searches to prevent implicit rebuilding. This is
-  specific to the self-test; normal host wrappers still pass `repo` each call.
+  specific to the self-test; host wrappers follow the schema-aware routing above.
   `--map-swan` may choose a separate builder, whose map must be compatible
   with the server binary. Never point the output at shared maps.
   Exit 0 means all 24 patterns match exactly; it does not qualify

@@ -14,6 +14,16 @@ output is disposable. This supersedes the earlier host-specific setup and
 `~/.cache/aya/tmp/swan-skill-selftest` default. The original 24-pattern pack,
 fixture and known matcher canaries are preserved.
 
+Later on 2026-11-06, the approved per-request build-policy change added
+schema-aware client guidance: use `repo` plus boolean `build:false` only when
+advertised, with exact-database CLI or controlled persistent selection for
+legacy tools. This supersedes the blanket every-call `repo` instruction when
+implicit indexing is unauthorized and the server lacks the control. Build
+policy does not pin map identity or authorize other effects; inherited
+`SWAN_WARM` also needs process-local handling in controlled review launchers.
+The pattern pack, fixtures and self-test behavior are unchanged. Guidance is
+conditional on the actual tool schema, not an installation or version claim.
+
 ## Distribution
 
 The Linux package includes this directory under its installation prefix.

@@ -245,3 +245,23 @@ isolation. For dependency/configuration changes, the skill must select its
 fresh map through a private registry or exact-database CLI query; creation time
 does not determine map selection. See the review-completion receipt and
 `docs/concurrency.md` for final evidence and remaining limits.
+
+## 2026-11-06 — Explicit per-request map selection policy
+
+Following the independent optimization review, the user authorized the
+recommended first implementation and pull request. Add optional boolean
+`build` to all repository-selecting MCP tools, preserving omitted/true
+behavior while honoring false on the common selection path. Reject supplied
+nonbooleans, including null, before selection/reopening/tool effects. This
+corrects the earlier skill assumption that `use_repo(build:false)` could
+constrain subsequent ordinary `repo` calls.
+
+Keep existing root-selection, snapshot, trust and explicit-tool semantics.
+The control is not a general read-only mode; warm-up and explicit writes
+retain their own effects. Older schemas require the exact-database or
+controlled persistent-session fallback. See `docs/request-build-policy.md`.
+
+Keep cache publication/recovery, test-path deduplication, skipped-check
+diagnostic preservation, broader skill evaluation and performance work in
+separate changes, as recommended by the review. No library upgrade, database
+replacement, new service or installed-binary update is part of this PR.
