@@ -194,3 +194,34 @@ The owner approved the sequence and acceptance checks described in
 Keep focused changes in their owning repositories and preserve active
 installations, trust/configuration and package identities. Investigate and
 measure before introducing a new language adapter or changing architecture.
+
+## 2026-11-06 — Bound concurrent-map guarantees to tested operations
+
+Keep SQLite and the existing map pipeline. The stage 3 candidate in Swan
+PR #15 serializes `map`/`index`/`refresh` using an OS advisory lock on a stable
+adjacent lockfile, covering shared intermediate output as well as publication.
+Preserve that file after release; its existence does not indicate ownership.
+Resolve parent-directory aliases, refuse database-file symlink writes, and
+inherit writer descriptors into indexer/flattener children so a parent death
+does not release ownership while those children still write.
+
+Use request-scoped database snapshots for the read-only whitelist and reopen
+the selected path before subsequent requests. A complete old/new answer or
+an explicit contention failure is acceptable; seamless concurrency is not
+promised. Preserve source freshness checks because database snapshots do not
+freeze on-disk source. Other stateful operations and saved trust-list updates
+remain outside this contract and require coordination. No Windows/macOS,
+network-filesystem or power-loss guarantee follows from the Linux tests.
+See `docs/concurrency.md` for the qualified `ef03ba0` binary and test scope;
+PR #15 is still open, and qualification does not authorize host replacement.
+
+For Goose-language work, investigate the existing official grammar/compiler
+server before proposing an adapter. The successful v2026.3 LSP probe only
+confirms an entrypoint; grammar/live/semantic-map acceptance remain distinct.
+Stage 5 measurements now support retaining the correctness change and
+existing reuse without additional optimization: database loading took 6–23 ms,
+reported indexer work 388–766 ms, and the reader median increased by only
+0.082385 ms in the bounded 50,000-row fixture. Mapping equality and query
+answers passed. These measurements do not justify a new backend, daemon,
+parser, package split or speculative performance change; see
+`docs/improvements-2026-11-06.md` for fixture scope and exact observations.

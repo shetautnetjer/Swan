@@ -1,0 +1,348 @@
+{
+  "date": "2026-11-06",
+  "source_revision": "ef03ba0e13e357316e318a2384b58c5ec0b222d3",
+  "runtime": {
+    "status": "passed",
+    "languages": {
+      "typescript": {
+        "samples": [
+          {
+            "stage": "cold",
+            "wall_seconds": 0.46658667500014417,
+            "exit_code": 0,
+            "time_wall_seconds": 0.45,
+            "user_seconds": 0.72,
+            "system_seconds": 0.07,
+            "max_rss_kib": 228464,
+            "phase_reports": [
+              "scip-typescript: 408 ms",
+              "flatten: 20 ms",
+              "swan index: 120 of 120 files rewritten; 837 occurrences and 0 relationships written; map has 360 symbols, 837 occurrences -> /home/cua/swan-package-m1RBGOcY/swan-runtime-bigun36h/typescript/map/swan.db in 6 ms",
+              "swan map: 436 ms in all, up to 1 indexers at once"
+            ],
+            "known_answers_passed": true
+          },
+          {
+            "stage": "unchanged-1",
+            "wall_seconds": 0.031484095999985584,
+            "exit_code": 0,
+            "time_wall_seconds": 0.02,
+            "user_seconds": 0.0,
+            "system_seconds": 0.0,
+            "max_rss_kib": 4352,
+            "phase_reports": [
+              "scip-typescript: reused (no changes)",
+              "nothing changed since the last map",
+              "swan map: 0 ms in all"
+            ],
+            "known_answers_passed": true
+          },
+          {
+            "stage": "unchanged-2",
+            "wall_seconds": 0.03149382499987041,
+            "exit_code": 0,
+            "time_wall_seconds": 0.02,
+            "user_seconds": 0.0,
+            "system_seconds": 0.0,
+            "max_rss_kib": 4352,
+            "phase_reports": [
+              "scip-typescript: reused (no changes)",
+              "nothing changed since the last map",
+              "swan map: 0 ms in all"
+            ],
+            "known_answers_passed": true
+          },
+          {
+            "stage": "unchanged-3",
+            "wall_seconds": 0.031469694999941566,
+            "exit_code": 0,
+            "time_wall_seconds": 0.02,
+            "user_seconds": 0.0,
+            "system_seconds": 0.0,
+            "max_rss_kib": 4352,
+            "phase_reports": [
+              "scip-typescript: reused (no changes)",
+              "nothing changed since the last map",
+              "swan map: 0 ms in all"
+            ],
+            "known_answers_passed": true
+          },
+          {
+            "stage": "edit",
+            "wall_seconds": 0.4643036579998352,
+            "exit_code": 0,
+            "time_wall_seconds": 0.45,
+            "user_seconds": 0.72,
+            "system_seconds": 0.05,
+            "max_rss_kib": 227576,
+            "phase_reports": [
+              "scip-typescript: 388 ms",
+              "flatten: 22 ms",
+              "swan refresh: 1 of 120 files rewritten; 4 occurrences and 0 relationships written; map has 360 symbols, 837 occurrences -> /home/cua/swan-package-m1RBGOcY/swan-runtime-bigun36h/typescript/map/swan.db in 21 ms",
+              "swan map: 433 ms in all, up to 1 indexers at once"
+            ],
+            "known_answers_passed": true
+          },
+          {
+            "stage": "new-file",
+            "wall_seconds": 0.5146065840001484,
+            "exit_code": 0,
+            "time_wall_seconds": 0.48,
+            "user_seconds": 0.71,
+            "system_seconds": 0.06,
+            "max_rss_kib": 229496,
+            "phase_reports": [
+              "scip-typescript: 414 ms",
+              "flatten: 20 ms",
+              "swan refresh: 1 of 121 files rewritten; 7 occurrences and 0 relationships written; map has 363 symbols, 844 occurrences -> /home/cua/swan-package-m1RBGOcY/swan-runtime-bigun36h/typescript/map/swan.db in 23 ms",
+              "swan map: 459 ms in all, up to 1 indexers at once"
+            ],
+            "known_answers_passed": true
+          }
+        ],
+        "fresh_oracle_timing": {
+          "wall_seconds": 0.46432238300008066,
+          "exit_code": 0,
+          "time_wall_seconds": 0.44,
+          "user_seconds": 0.71,
+          "system_seconds": 0.05,
+          "max_rss_kib": 219908,
+          "phase_reports": [
+            "scip-typescript: 390 ms",
+            "flatten: 21 ms",
+            "swan index: 121 of 121 files rewritten; 844 occurrences and 0 relationships written; map has 363 symbols, 844 occurrences -> /home/cua/swan-package-m1RBGOcY/swan-runtime-bigun36h/typescript/fresh-map/swan.db in 14 ms",
+            "swan map: 426 ms in all, up to 1 indexers at once"
+          ]
+        },
+        "incremental_equals_fresh": true,
+        "unchanged_median_seconds": 0.031484095999985584,
+        "mcp_checked": true,
+        "canonical_row_counts": {
+          "symbols": 363,
+          "occurrences": 844,
+          "relationships": 0,
+          "files": 121
+        }
+      },
+      "python": {
+        "samples": [
+          {
+            "stage": "cold",
+            "wall_seconds": 1.5662375690001227,
+            "exit_code": 0,
+            "time_wall_seconds": 1.54,
+            "user_seconds": 1.47,
+            "system_seconds": 0.13,
+            "max_rss_kib": 185464,
+            "phase_reports": [
+              "scip-python: 766 ms",
+              "flatten: 21 ms",
+              "swan index: 120 of 120 files rewritten; 1077 occurrences and 0 relationships written; map has 361 symbols, 1077 occurrences -> /home/cua/swan-package-m1RBGOcY/swan-runtime-bigun36h/python/map/swan.db in 14 ms",
+              "swan map: 1522 ms in all, up to 1 indexers at once"
+            ],
+            "known_answers_passed": true
+          },
+          {
+            "stage": "unchanged-1",
+            "wall_seconds": 0.1638376349999362,
+            "exit_code": 0,
+            "time_wall_seconds": 0.14,
+            "user_seconds": 0.11,
+            "system_seconds": 0.0,
+            "max_rss_kib": 41088,
+            "phase_reports": [
+              "python: 1 pieces reused",
+              "nothing changed since the last map",
+              "swan map: 126 ms in all"
+            ],
+            "known_answers_passed": true
+          },
+          {
+            "stage": "unchanged-2",
+            "wall_seconds": 0.16378948400006266,
+            "exit_code": 0,
+            "time_wall_seconds": 0.14,
+            "user_seconds": 0.11,
+            "system_seconds": 0.01,
+            "max_rss_kib": 41100,
+            "phase_reports": [
+              "python: 1 pieces reused",
+              "nothing changed since the last map",
+              "swan map: 124 ms in all"
+            ],
+            "known_answers_passed": true
+          },
+          {
+            "stage": "unchanged-3",
+            "wall_seconds": 0.16379475500002627,
+            "exit_code": 0,
+            "time_wall_seconds": 0.15,
+            "user_seconds": 0.11,
+            "system_seconds": 0.01,
+            "max_rss_kib": 40968,
+            "phase_reports": [
+              "python: 1 pieces reused",
+              "nothing changed since the last map",
+              "swan map: 128 ms in all"
+            ],
+            "known_answers_passed": true
+          },
+          {
+            "stage": "edit",
+            "wall_seconds": 0.8150861239998903,
+            "exit_code": 0,
+            "time_wall_seconds": 0.79,
+            "user_seconds": 0.91,
+            "system_seconds": 0.09,
+            "max_rss_kib": 185076,
+            "phase_reports": [
+              "scip-python: 613 ms",
+              "flatten: 21 ms",
+              "swan refresh: 1 of 120 files rewritten; 6 occurrences and 0 relationships written; map has 361 symbols, 1077 occurrences -> /home/cua/swan-package-m1RBGOcY/swan-runtime-bigun36h/python/map/swan.db in 11 ms",
+              "swan map: 771 ms in all, up to 1 indexers at once"
+            ],
+            "known_answers_passed": true
+          },
+          {
+            "stage": "new-file",
+            "wall_seconds": 0.8650419790001251,
+            "exit_code": 0,
+            "time_wall_seconds": 0.81,
+            "user_seconds": 0.92,
+            "system_seconds": 0.1,
+            "max_rss_kib": 185736,
+            "phase_reports": [
+              "scip-python: 624 ms",
+              "flatten: 22 ms",
+              "swan refresh: 1 of 121 files rewritten; 9 occurrences and 0 relationships written; map has 364 symbols, 1086 occurrences -> /home/cua/swan-package-m1RBGOcY/swan-runtime-bigun36h/python/map/swan.db in 23 ms",
+              "swan map: 797 ms in all, up to 1 indexers at once"
+            ],
+            "known_answers_passed": true
+          }
+        ],
+        "fresh_oracle_timing": {
+          "wall_seconds": 0.8150453690000177,
+          "exit_code": 0,
+          "time_wall_seconds": 0.79,
+          "user_seconds": 0.9,
+          "system_seconds": 0.1,
+          "max_rss_kib": 185364,
+          "phase_reports": [
+            "scip-python: 615 ms",
+            "flatten: 20 ms",
+            "swan index: 121 of 121 files rewritten; 1086 occurrences and 0 relationships written; map has 364 symbols, 1086 occurrences -> /home/cua/swan-package-m1RBGOcY/swan-runtime-bigun36h/python/fresh-map/swan.db in 13 ms",
+            "swan map: 777 ms in all, up to 1 indexers at once"
+          ]
+        },
+        "incremental_equals_fresh": true,
+        "unchanged_median_seconds": 0.16379475500002627,
+        "mcp_checked": true,
+        "canonical_row_counts": {
+          "symbols": 364,
+          "occurrences": 1086,
+          "relationships": 0,
+          "files": 121
+        }
+      }
+    },
+    "optimization_decision": "Evidence only: inspect phase reports and absolute user-visible cost. Do not optimize a cheap phase, rewrite SQLite, or split grammar packages without a measured material bottleneck and a semantic-preserving comparison.",
+    "trust_file_sha256_after": null,
+    "binary_sha256_after": "597dd20e6b58919a703249e9f77c55783a2c2a04a7a8d8bd66739b7617b4a5f8"
+  },
+  "reader_latency": {
+    "status": "passed",
+    "started_utc": "2026-11-06T14:30:43.863013+00:00",
+    "database": "/home/cua/swan-package-m1RBGOcY/swan-concurrency-v5hsqttc/baseline.db",
+    "database_before": {
+      "sha256": "080707fbeda0aafdc23a7edeee1544dc875534338a1574ff4053722a0235af1e",
+      "inode": 551008,
+      "device": 64771,
+      "size": 18841600,
+      "mtime_ns": 1793974484453696618
+    },
+    "repository": "/home/cua/swan-package-m1RBGOcY/swan-concurrency-v5hsqttc/repo",
+    "fixture": {
+      "in_repo_symbols": 50000,
+      "schema_version": "9",
+      "scip_time": 1793974484198699840,
+      "source": {
+        "sha256": "4d6fa9b1566a5bb298d92d75d778819689ae32daf8dad7e846aecae932a0bffd",
+        "inode": 551003,
+        "device": 64771,
+        "size": 27,
+        "mtime_ns": 1793974484251699170
+      }
+    },
+    "expected_reply": [
+      {
+        "name_path": "probe",
+        "kind": "function",
+        "signature": "function probe(): void // A",
+        "relative_path": "A.ts",
+        "line": 1,
+        "column": 10,
+        "body_lines": [
+          1,
+          1
+        ],
+        "stale": true
+      }
+    ],
+    "platform": "Linux-6.8.0-146-generic-x86_64-with-glibc2.39",
+    "load_average": [
+      0.26416015625,
+      0.12890625,
+      0.04345703125
+    ],
+    "harness_sha256": "0c742720d00639cf2a792b3042bc94c9388c85be5246eaf8f96026380c8099ba",
+    "helper": "/home/cua/swan-package-m1RBGOcY/concurrent-improvements/scripts/demo-offline.py",
+    "helper_sha256": "a55285a56d895c2cdc8fa3e31c76db13681653ea5838454a59800cb0cc9a651a",
+    "trials": {
+      "baseline": {
+        "binary": "/home/cua/swan-package-m1RBGOcY/ordered-improvements/bin/swan",
+        "binary_sha256": "8ccabdcaf95983b319609c54b7f413757cf0de1694306ae1c715e6b2f78554b7",
+        "warmup_count": 20,
+        "sample_count": 200,
+        "status": "passed",
+        "startup_initialize_ms": 1.162811,
+        "median_ms": 0.08596899999999999,
+        "mean_ms": 0.09217599,
+        "p95_ms": 0.10285,
+        "min_ms": 0.082161,
+        "max_ms": 0.691061,
+        "every_reply_validated": true
+      },
+      "candidate": {
+        "binary": "/home/cua/swan-package-m1RBGOcY/concurrent-improvements/bin/swan",
+        "binary_sha256": "597dd20e6b58919a703249e9f77c55783a2c2a04a7a8d8bd66739b7617b4a5f8",
+        "warmup_count": 20,
+        "sample_count": 200,
+        "status": "passed",
+        "startup_initialize_ms": 1.186171,
+        "median_ms": 0.168354,
+        "mean_ms": 0.16921327,
+        "p95_ms": 0.21576,
+        "min_ms": 0.141291,
+        "max_ms": 0.33632,
+        "every_reply_validated": true
+      }
+    },
+    "limits": [
+      "one process session per binary; 200 serial samples after 20 warmups",
+      "IPC and JSON decoding included; assertion and startup time excluded",
+      "baseline runs first; OS cache/order/scheduling effects remain",
+      "no live query, mutation, map building, or concurrent writer",
+      "synthetic fixture; not a tail-latency or statistical-significance claim"
+    ],
+    "comparison": {
+      "median_delta_ms": 0.08238500000000001,
+      "p95_delta_ms": 0.11291000000000001,
+      "interpretation": "descriptive overhead only; assess absolute cost before considering optimization"
+    }
+  },
+  "raw_summary_sha256": {
+    "swan-runtime-bigun36h": "cf73155bdb0421518c85652e6df92bc7d486b75466122f8573d9abced3bbf701",
+    "swan-reader-latency-y32vjttc": "bf44a536c25144963796e1c81f15b612f2d9e8fe028c9a759feeb7d6902e25bc"
+  },
+  "decision": "Keep correctness fix and current caches; measured absolute costs do not justify another optimization or database/parser redesign."
+}

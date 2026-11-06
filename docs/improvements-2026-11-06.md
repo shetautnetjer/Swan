@@ -38,9 +38,60 @@ redesigns. Material architecture changes reopen the design decision.
 
 ## Progress and evidence
 
-- Stage 1: skill guidance implemented; format, links and whitespace validated.
-- Stage 2: preparing matcher regression cases in its owning repository.
-- Stages 3–5: source inspection/preparation only; execution follows the order.
-- Existing Linux package/self-test evidence remains under `docs/evidence/`.
-  Previously exported binaries keep their recorded identities; regenerate a
-  candidate from the final reviewed source before distribution.
+- **Stage 1 — merged:** [Swan PR #13](https://github.com/shetautnetjer/Swan/pull/13)
+  at `b569146` includes portable skill coverage/refresh guidance; skill format,
+  links and whitespace validated. Source merge does not activate an installation.
+- **Stage 2 — merged:** [goose-treesitter PR #5](https://github.com/shetautnetjer/goose-treesitter/pull/5)
+  at `590107` owns the matcher fix; [Swan PR #14](https://github.com/shetautnetjer/Swan/pull/14)
+  at `b3bd50c` integrates it. The CUA run passed 136 native library checks,
+  24/24 skill patterns (both empty-variadic canaries FIXED; JS-label TRAP),
+  and real Python/TypeScript definition/reference and live clean/error/fixed
+  checks. See [matcher receipt](evidence/swan-matcher-2026-11-06.json).
+- **Stage 3 — qualified candidate, PR open:** [Swan PR #15](https://github.com/shetautnetjer/Swan/pull/15),
+  source `ef03ba0e13e357316e318a2384b58c5ec0b222d3`, built in CUA with SHA-256
+  `597dd20e6b58919a703249e9f77c55783a2c2a04a7a8d8bd66739b7617b4a5f8`.
+  Passed 9/9 concurrency scenarios, five focused reader regressions, 36 local
+  package/native tests (eight locks), 24 skill patterns and real Python/TypeScript
+  definitions/references/live checks. Independent review added inherited child
+  lock ownership and database-file symlink refusal; parent-directory aliases
+  remain supported. [Contract, limits and reproduction](concurrency.md).
+  This candidate is not yet merged or installed as a production replacement.
+- **Stage 4 — investigation:** official Goose `v2026.3` source at
+  [`8511ae34`](https://github.com/aardappel/goose/commit/8511ae34bdc9aabf77baaab80b4d659ea87835e2)
+  already has a `tree-sitter/` grammar and compiler LSP in `src/lsp*.h`.
+  A November 6 CUA probe of that compiler actually returned `goose lsp 3.17`
+  from `lsp --probe`; this supersedes the investigation draft's earlier
+  "probe not run" status. This identifies an interface, not a qualified Swan
+  adapter. No Goose adapter is implemented; grammar generation/corpus,
+  live error/clean cycles, untrusted execution boundaries and compiler-resolved
+  semantic export remain unqualified. A grammar alone cannot supply SCIP
+  definitions/references. Reuse upstream work before proposing a parser.
+- **Stage 5 — measured; no additional optimization justified:** the same
+  `ef03ba0`/`597dd20e…` candidate passed 14 mapping calls over generated
+  fixtures with 120 files per language. Known definitions/references,
+  unchanged-map equality, incremental-versus-fresh equality for both languages
+  and MCP answers passed. Wall times in seconds:
+
+  | Language | Cold map | Unchanged median | One edit | New file |
+  | --- | ---: | ---: | ---: | ---: |
+  | TypeScript | 0.467 | 0.03148 | 0.464 | 0.515 |
+  | Python | 1.566 | 0.16379 | 0.815 | 0.865 |
+
+  Database load was 6–23 ms; reported indexer work was 388–766 ms. On a
+  50,000-row fixture, 20 warmups and 200 validated requests per binary gave
+  median reader latency 0.085969 ms before the concurrency change versus
+  0.168354 ms for the candidate (increase 0.082385 ms; candidate p95
+  0.21576 ms). Database/source bytes remained unchanged. These bounded
+  generated fixtures establish no universal speed claim. Retain the
+  correctness fix and existing reuse; no additional optimization is justified.
+  CUA run references: `swan-runtime-bigun36h/summary.json` and
+  `swan-reader-latency-y32vjttc/summary.json`.
+- **Final isolated trust regression — passed:** real Python diagnostics and
+  interpreter markers false/true/false passed in `swan-verify-_azjgets`;
+  the saved trust file remained absent and unchanged. This rechecks the
+  tested live-Python path, not every execution path or trust-list concurrency.
+
+Earlier package evidence remains under `docs/evidence/`. Exported binaries
+keep their recorded identities; regenerate a candidate from final reviewed
+source before distribution. Preserve the active executable, saved trust,
+module configuration and agent settings throughout these source changes.
