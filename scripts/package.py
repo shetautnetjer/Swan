@@ -36,14 +36,17 @@ class PackageError(ValueError):
 
 
 def sha256(data):
+    """Return the SHA-256 identity used to bind reviewed inputs to outputs."""
     return hashlib.sha256(data).hexdigest()
 
 
 def json_bytes(value):
+    """Encode stable JSON bytes for reproducible manifests and checksums."""
     return (json.dumps(value, sort_keys=True, indent=2) + "\n").encode()
 
 
 def safe_relative(value):
+    """Require a portable relative inventory path without traversal or control characters."""
     path = PurePosixPath(value)
     if (not value or path.is_absolute() or "\\" in value or ":" in value
             or any(part in ("", ".", "..") for part in value.split("/"))
@@ -68,6 +71,7 @@ def regular_file(path):
 
 
 def git(root, *arguments):
+    """Run Git against this checkout and fail if the requested operation fails."""
     result = subprocess.run(["git", "-C", str(root), *arguments],
                             capture_output=True, check=False)
     if result.returncode:
@@ -76,6 +80,7 @@ def git(root, *arguments):
 
 
 def source_snapshot(root, revision):
+    """Require the exact clean Git revision and return its tracked file inventory."""
     if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", revision):
         raise PackageError("source revision must be a full lowercase Git commit hash")
     head = git(root, "rev-parse", "HEAD").decode().strip()
@@ -91,6 +96,7 @@ def source_snapshot(root, revision):
 
 
 def validate_elf(data, mode):
+    """Reject non-executable or malformed ELF64 x86-64 binaries before export."""
     if (len(data) < 64 or data[:7] != b"\x7fELF\x02\x01\x01"
             or data[7] not in (0, 3)
             or int.from_bytes(data[16:18], "little") not in (2, 3)
@@ -123,6 +129,7 @@ def validate_elf(data, mode):
 
 
 def collect_licenses(directory, required):
+    """Collect original regular-file notices and require every explicitly named license."""
     directory = Path(os.path.abspath(directory))
     if directory.is_symlink() or not directory.is_dir():
         raise PackageError("licenses must be a directory without symlinks")
@@ -145,6 +152,7 @@ def collect_licenses(directory, required):
 
 
 def build_package(root, binary, output, revision, receipt_path, licenses, required_licenses=()):
+    """Export a deterministic candidate bound to its clean source and binary receipt."""
     root = Path(root).resolve()
     output = Path(os.path.abspath(output))
     if output.exists() or output.is_symlink():
@@ -221,6 +229,7 @@ def build_package(root, binary, output, revision, receipt_path, licenses, requir
 
 
 def main():
+    """Parse command-line options and return or report the operation status."""
     root = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", type=Path, default=root / "bin/swan")

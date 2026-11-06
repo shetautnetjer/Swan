@@ -34,6 +34,7 @@ MAX_UNPACKED = 1024 * 1024 * 1024
 
 
 def sha256(path):
+    """Return the SHA-256 identity used to bind reviewed inputs to outputs."""
     digest = hashlib.sha256()
     with Path(path).open("rb") as source:
         for block in iter(lambda: source.read(1024 * 1024), b""):
@@ -42,6 +43,7 @@ def sha256(path):
 
 
 def safe_name(name):
+    """Reject archive paths that could escape the extraction directory."""
     path = PurePosixPath(name)
     if not name or not path.parts or path.is_absolute() or ".." in path.parts or "\\" in name or "\x00" in name:
         raise ValueError(f"Unsafe archive path: {name!r}")
@@ -49,6 +51,7 @@ def safe_name(name):
 
 
 def inspect_archive(archive, expected):
+    """Validate the reviewed hash, safe inventory, manifest and matching support helper."""
     if not re.fullmatch(r"[a-fA-F0-9]{64}", expected):
         raise ValueError("--sha256 must be the reviewed 64-character archive SHA-256.")
     if sha256(archive) != expected.lower():
@@ -107,6 +110,7 @@ def inspect_archive(archive, expected):
 def unpack_release(archive, destination):
     # inspect_archive already rejected links and special files. Use our own
     # extraction so Python 3.10 does not depend on newer tarfile filters.
+    """Extract a validated release into fresh staging without following archive links."""
     with tarfile.open(archive, "r:*") as bundle:
         for member in bundle.getmembers():
             path = destination.joinpath(*safe_name(member.name).parts)
@@ -122,6 +126,7 @@ def unpack_release(archive, destination):
 
 
 def download(url, destination, expected):
+    """Fetch an HTTPS artifact and require its independently pinned SHA-256."""
     request = urllib.request.Request(url, headers={"User-Agent": "Swan-candidate-installer/1"})
     with urllib.request.urlopen(request, timeout=60) as source, destination.open("xb") as target:
         if not source.url.startswith("https://"):
@@ -132,6 +137,7 @@ def download(url, destination, expected):
 
 
 def unpack_node(archive, runtime):
+    """Extract the pinned Node layout, deferring only links confined to that runtime."""
     root = f"node-v{NODE_VERSION}-linux-x64"
     deferred_links = []
     total = 0
@@ -164,6 +170,7 @@ def unpack_node(archive, runtime):
 
 
 def install_runtimes(home, state, detected):
+    """Reuse compatible system tools or install pinned runtimes beneath the new prefix."""
     runtime = home / ".tools/runtime"
     commands = runtime / "bin"
     commands.mkdir(parents=True)
@@ -203,6 +210,7 @@ def install_runtimes(home, state, detected):
 def atomic_activate(stage, prefix):
     # os.rename may replace an empty directory created concurrently. Linux's
     # RENAME_NOREPLACE gives activation the promised no-overwrite semantics.
+    """Move staged content into place atomically without replacing an existing destination."""
     libc = ctypes.CDLL(None, use_errno=True)
     rename = getattr(libc, "renameat2", None)
     if rename is None:
@@ -215,6 +223,7 @@ def atomic_activate(stage, prefix):
 
 
 def plan(options):
+    """Validate prerequisites and describe selected downloads without changing files."""
     if sys.version_info < (3, 10):
         raise ValueError("System Python >=3.10 is required.")
     error = platform_error()
@@ -246,6 +255,7 @@ def plan(options):
 
 
 def install(options):
+    """Stage the selected profile, verify it, then activate a new prefix without overwriting."""
     prefix, manifest, detected, summary = plan(options)
     print(json.dumps(summary, indent=2), flush=True)
     if options.dry_run:
@@ -295,6 +305,7 @@ def install(options):
 
 
 def main(argv=None):
+    """Parse command-line options and return or report the operation status."""
     parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     parser.add_argument("--prefix", type=Path, required=True)
     parser.add_argument("--archive", type=Path, required=True)

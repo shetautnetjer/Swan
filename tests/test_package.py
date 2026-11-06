@@ -16,6 +16,7 @@ SPEC.loader.exec_module(package)
 
 
 def elf_header(machine=62):
+    """Construct a minimal ELF fixture for format validation, not runtime execution."""
     identity = b"\x7fELF\x02\x01\x01" + bytes(9)
     return identity + struct.pack("<HHIQQQIHHHHHH", 2, machine, 1, 0x400078,
                                   64, 0, 0, 64, 56, 1, 0, 0, 0) + struct.pack(
@@ -24,6 +25,7 @@ def elf_header(machine=62):
 
 class PackageTests(unittest.TestCase):
     def setUp(self):
+        """Create isolated fixtures for this test and register their cleanup."""
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.base = Path(self.temporary.name)
@@ -52,14 +54,17 @@ class PackageTests(unittest.TestCase):
         self.output = self.base / "candidate artifacts"
 
     def git(self, *arguments):
+        """Run Git against this checkout and fail if the requested operation fails."""
         return subprocess.check_output(["git", "-C", str(self.root), *arguments], text=True)
 
     def write_receipt(self, **values):
+        """Bind the fixture receipt to its current revision and binary, with optional corruptions."""
         self.receipt.write_text(json.dumps({"source_revision": self.revision,
                                            "binary_sha256": package.sha256(self.binary.read_bytes()),
                                            **values}))
 
     def build(self, **overrides):
+        """Export the isolated fixture using test defaults and explicitly requested overrides."""
         values = {"root": self.root, "binary": self.binary, "output": self.output,
                   "revision": self.revision, "receipt_path": self.receipt,
                   "licenses": self.licenses, "required_licenses": ["Goose-LICENSE"]}
@@ -67,6 +72,7 @@ class PackageTests(unittest.TestCase):
         return package.build_package(**values)
 
     def test_inventory_checksums_modes_and_candidate_provenance(self):
+        """Verify that inventory checksums modes and candidate provenance."""
         manifest = self.build()
         expected = {*package.RUNTIME_FILES, "scripts/verify-live-trust.py", "bin/swan",
                     "BUILD-RECEIPT.json", "licenses/Goose-LICENSE",
@@ -98,6 +104,7 @@ class PackageTests(unittest.TestCase):
                          package.sha256((self.output / "package_support.py").read_bytes()))
 
     def test_private_and_generated_inputs_never_enter_archive(self):
+        """Verify that private and generated inputs never enter archive."""
         for name in (".env", "data/trusted-repos", ".tools/private", "tools/node_modules/secret",
                      "skills/swan-code-check/untracked-token", "other/private"):
             path = self.root / name
@@ -117,6 +124,7 @@ class PackageTests(unittest.TestCase):
                                  or "untracked-token" in name or ".env" in name for name in names))
 
     def test_existing_destination_is_preserved(self):
+        """Verify that existing destination is preserved."""
         self.output.mkdir()
         marker = self.output / "keep"
         marker.write_text("unchanged")
@@ -126,6 +134,7 @@ class PackageTests(unittest.TestCase):
         self.assertEqual(list(self.output.iterdir()), [marker])
 
     def test_dirty_or_staged_tracked_source_is_refused(self):
+        """Verify that dirty or staged tracked source is refused."""
         (self.root / "LICENSE").write_text("changed")
         for staged in (False, True):
             if staged:
@@ -135,6 +144,7 @@ class PackageTests(unittest.TestCase):
         self.assertFalse(self.output.exists())
 
     def test_source_revision_and_receipt_must_bind_exact_binary(self):
+        """Verify that source revision and receipt must bind exact binary."""
         for revision in ("HEAD", "../escape", "0" * 40):
             with self.subTest(revision=revision), self.assertRaises(package.PackageError):
                 self.build(revision=revision)
@@ -147,6 +157,7 @@ class PackageTests(unittest.TestCase):
         self.assertFalse(self.output.exists())
 
     def test_invalid_binary_isa_format_or_permissions_is_refused(self):
+        """Verify that invalid binary isa format or permissions is refused."""
         for data in (b"#!/bin/sh\n", elf_header(183), b"MZ" + bytes(100), elf_header()[:20],
                      elf_header()[:64], elf_header()[:-1]):
             self.binary.write_bytes(data)
@@ -160,12 +171,14 @@ class PackageTests(unittest.TestCase):
             self.build()
 
     def test_missing_required_license_and_unsafe_license_path_fail_without_output(self):
+        """Verify that missing required license and unsafe license path fail without output."""
         for name in ("missing-LICENSE", "../outside", "/absolute", "folder\\escape", "C:/outside"):
             with self.subTest(name=name), self.assertRaises(package.PackageError):
                 self.build(required_licenses=[name])
         self.assertFalse(self.output.exists())
 
     def test_symlink_inputs_are_refused(self):
+        """Verify that symlink inputs are refused."""
         linked = self.base / "linked-swan"
         linked.symlink_to(self.binary)
         with self.assertRaisesRegex(package.PackageError, "symlink"):
@@ -175,6 +188,7 @@ class PackageTests(unittest.TestCase):
             self.build()
 
     def test_untracked_required_runtime_cannot_be_included(self):
+        """Verify that untracked required runtime cannot be included."""
         self.git("rm", "--cached", "scripts/doctor.py")
         self.git("-c", "user.name=Package Test", "-c", "user.email=test@example.invalid",
                  "commit", "--quiet", "-m", "remove required runtime")
@@ -184,6 +198,7 @@ class PackageTests(unittest.TestCase):
             self.build()
 
     def test_identical_inputs_produce_identical_archives(self):
+        """Verify that identical inputs produce identical archives."""
         self.build()
         other = self.base / "second export"
         self.build(output=other)

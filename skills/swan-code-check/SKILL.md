@@ -122,6 +122,9 @@ The unchanged fixture and 24-pattern pack are checked by
   Omit `--swan` to use `SWAN_BINARY`, then `swan` on `PATH`.
   The default output is a new disposable temporary directory, removed at
   exit. `--out DIR` (or `SWAN_SELFTEST_OUT`) retains a new, empty output
-  directory for inspection. The map is `DIR/map/swan.db`. Never point it at
-  shared maps. Exit 0 means all 24 patterns match exactly; it does not qualify
+  directory for inspection. The map is `DIR/map/swan.db`; the test requires
+  that exact existing map and refuses to build a replacement during searches.
+  `--map-swan` may choose a separate builder, whose map must be compatible
+  with the server binary. Never point the output at shared maps.
+  Exit 0 means all 24 patterns match exactly; it does not qualify
   live diagnostics or index completeness for another repository.

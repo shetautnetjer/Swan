@@ -40,6 +40,7 @@ def tag_lines():
 
 class Swan:
     def __init__(self, swan, maps):
+        """Start one private persistent server using only the supplied map registry."""
         self.p = subprocess.Popen([swan, "serve", "--maps", str(maps)], stdin=subprocess.PIPE,
                                   stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
         self.n = 0
@@ -48,10 +49,12 @@ class Swan:
         self._send({"jsonrpc": "2.0", "method": "notifications/initialized"})
 
     def _send(self, msg):
+        """Write and flush a newline-delimited JSON-RPC message."""
         self.p.stdin.write(json.dumps(msg) + "\n")
         self.p.stdin.flush()
 
     def rpc(self, method, params):
+        """Send a request and decode its response, failing when the server exits early."""
         self.n += 1
         self._send({"jsonrpc": "2.0", "id": self.n, "method": method, "params": params})
         line = self.p.stdout.readline()
@@ -60,6 +63,7 @@ class Swan:
         return json.loads(line)
 
     def search(self, lang, pattern):
+        """Search the already selected map without repository reselection or implicit map building."""
         r = self.rpc("tools/call", {"name": "search_pattern",
                                     "arguments": {"pattern": pattern, "language": lang}})
         text = r.get("result", {}).get("content", [{}])[0].get("text", "")
@@ -69,12 +73,33 @@ class Swan:
             return None, text[:200]
         return d, None
 
+    def select_fixture_map(self, expected):
+        """Require the builder's exact map without allowing an implicit rebuild."""
+        reply = self.rpc("tools/call", {"name": "use_repo",
+                                       "arguments": {"path": str(FIXTURE), "build": False}})
+        result = reply.get("result")
+        if "error" in reply or not isinstance(result, dict) or result.get("isError"):
+            raise ValueError("cannot select fixture map without rebuilding")
+        try:
+            selected = json.loads(result["content"][0]["text"])
+            map_path = selected["map"]
+            if not isinstance(map_path, str) or selected.get("built") is not False:
+                raise ValueError("expected an existing map")
+            actual = Path(map_path).resolve(strict=True)
+            expected = expected.resolve(strict=True)
+        except (KeyError, IndexError, TypeError, ValueError, OSError, RuntimeError) as error:
+            raise ValueError("cannot select fixture map: invalid or missing map") from error
+        if actual != expected:
+            raise ValueError("server selected a different fixture map")
+
     def close(self):
+        """Close the private server input and require its timely exit."""
         self.p.stdin.close()
         self.p.wait(timeout=10)
 
 
 def hits(d, by_line):
+    """Translate matched source locations into fixture tags, retaining unexpected locations."""
     out = set()
     for m in d.get("matches", []):
         name = Path(m["relative_path"]).name
@@ -112,6 +137,7 @@ def output_directory(requested=None):
 
 
 def main():
+    """Parse command-line options and return or report the operation status."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--swan", help="binary path or command (default: SWAN_BINARY, then swan on PATH)")
     ap.add_argument("--map-swan", help="binary that builds the fixture map (default: --swan)")
@@ -129,6 +155,7 @@ def main():
 
 
 def run(binary, map_binary, out):
+    """Build and select the exact fixture map, then check patterns and report matcher canaries."""
     built = subprocess.run([map_binary, "map", str(FIXTURE), str(out / "map")], capture_output=True, text=True)
     if built.returncode != 0:
         print(built.stdout[-800:], built.stderr[-800:])
@@ -140,19 +167,9 @@ def run(binary, map_binary, out):
     swan = Swan(binary, out)
     fails = 0
     try:
-        selected = swan.rpc("tools/call", {"name": "use_repo",
-                                          "arguments": {"path": str(FIXTURE), "build": False}})
-        try:
-            result = selected["result"]
-            if result.get("isError"):
-                raise ValueError("map selection failed")
-            map_path = json.loads(result["content"][0]["text"])["map"]
-            if not isinstance(map_path, str) or not map_path:
-                raise ValueError("missing map path")
-        except (AttributeError, KeyError, IndexError, TypeError, ValueError):
-            raise SystemExit("cannot select fixture map")
-        if Path(map_path).resolve() != (out / "map" / "swan.db").resolve():
-            raise SystemExit("server selected a different fixture map")
+        swan.select_fixture_map(out / "map" / "swan.db")
+        # This private client keeps one server alive. Omit repo after selection
+        # so pattern calls cannot implicitly build or switch to another map.
         for e in pack["patterns"]:
             d, err = swan.search(e["lang"], e["pattern"])
             want = set(e["expect"])

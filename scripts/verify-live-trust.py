@@ -21,10 +21,12 @@ import time
 
 
 def digest(path):
+    """Hash a file for before/after comparison, or return None when absent."""
     return hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() else None
 
 
 def main():
+    """Parse command-line options and return or report the operation status."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--binary', type=Path, required=True)
     parser.add_argument('--output-parent', type=Path, required=True)
@@ -81,6 +83,7 @@ def main():
     (lab / 'provenance.json').write_text(json.dumps(provenance, indent=2) + '\n')
 
     def command(argv, trusted=False):
+        """Build a read-only, network-isolated sandbox command with process-local trust control."""
         cmd = [str(bwrap), '--die-with-parent', '--new-session',
                '--unshare-pid', '--unshare-ipc', '--unshare-net',
                '--ro-bind', '/', '/', '--bind', str(lab), str(lab),
@@ -94,6 +97,7 @@ def main():
         return cmd + ['--'] + list(map(str, argv))
 
     def bounded(argv, label):
+        """Run a sandbox setup command with a deadline and retain its diagnostic log."""
         result = subprocess.run(command(argv), capture_output=True, timeout=30)
         (lab / (label + '.log')).write_bytes(result.stdout + result.stderr)
         if result.returncode:
@@ -126,6 +130,7 @@ def main():
             path.chmod(0o755)
 
         def live_case(label, trusted):
+            """Require real Pyright diagnostics and record whether this trust case ran the planted interpreter."""
             marker.unlink(missing_ok=True)
             transcript = []
             stderr = (lab / (label + '.stderr.log')).open('wb')
@@ -134,10 +139,12 @@ def main():
                                        stderr=stderr, start_new_session=True)
             buffer = b''
             def send(message):
+                """Send one JSON-RPC message and retain it in the evidence transcript."""
                 process.stdin.write(json.dumps(message).encode() + b'\n')
                 process.stdin.flush()
                 transcript.append({'sent': message})
             def request(ident, method, params):
+                """Wait for the matching JSON-RPC result within the deadline; errors never count as passes."""
                 nonlocal buffer
                 send({'jsonrpc': '2.0', 'id': ident, 'method': method, 'params': params})
                 deadline = time.monotonic() + 45

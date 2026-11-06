@@ -1,0 +1,28 @@
+{
+  "status": "PASS",
+  "binary_sha256": "1b87c08b51912059f6469e27dc760881e47dabc785042c7acb5de4a53cd93b5c",
+  "selftest_sha256": "0e06ae4ab0a8efe377cb242c304f7a916f8bce81e7168ba61c289d6d4b1485c2",
+  "before_missing_map": {
+    "returncode": 0,
+    "patterns_pass": true,
+    "maps": [
+      "before-missing-map/fixture/swan.db"
+    ],
+    "cannot_select": false
+  },
+  "after_missing_map": {
+    "returncode": 2,
+    "patterns_pass": false,
+    "maps": [],
+    "cannot_select": true
+  },
+  "after_real_map": {
+    "returncode": 0,
+    "patterns_pass": true,
+    "maps": [
+      "after-real-map/map/swan.db"
+    ],
+    "cannot_select": false
+  },
+  "lab": "/home/cua/swan-package-m1RBGOcY/pr13-review-mskj6a1p"
+}

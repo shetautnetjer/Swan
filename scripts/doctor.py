@@ -14,10 +14,12 @@ from package_support import (PROFILES, elf_x64, platform_error, probe, read_json
 
 
 def report(home, profile="python-typescript"):
+    """Probe the selected installation profile without installing tools or granting trust."""
     home = home.resolve()
     checks = []
 
     def add(name, group, status, detail, path=None, version=None, required=True):
+        """Append one dependency result with its required or optional status."""
         checks.append(dict(name=name, group=group, status=status, detail=detail,
                            path=str(path) if path else None, version=version, required=required))
 
@@ -79,6 +81,7 @@ def report(home, profile="python-typescript"):
 
 
 def main(argv=None):
+    """Parse command-line options and return or report the operation status."""
     parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     parser.add_argument("--home", type=Path, required=True)
     parser.add_argument("--profile", choices=PROFILES, default="python-typescript")

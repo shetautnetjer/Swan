@@ -24,6 +24,7 @@ PROFILES = ("core", "python-typescript")
 
 
 def platform_error():
+    """Return an unsupported-platform reason, or None for the declared prerequisites."""
     if platform.system() != "Linux" or platform.machine().lower() not in ("x86_64", "amd64"):
         return "Unsupported platform: this candidate supports Linux x86_64 only (WSL is a separate qualification)."
     libc, version = platform.libc_ver()
@@ -33,11 +34,13 @@ def platform_error():
 
 
 def version_tuple(value):
+    """Parse a tool version into three comparable integers; unknown formats become zero."""
     match = re.search(r"(?:^|\s|v)(\d+)\.(\d+)(?:\.(\d+))?", value)
     return tuple(int(x or 0) for x in match.groups()) if match else (0, 0, 0)
 
 
 def compatible(name, version):
+    """Apply the selected runtime version policy to a version-probe response."""
     value = version_tuple(version)
     if name == "node":
         return value >= (22, 22, 2) and value[0] in (22, 24)
@@ -51,6 +54,7 @@ def compatible(name, version):
 
 
 def within(path, root):
+    """Check resolved path containment, treating resolution errors as outside the root."""
     try:
         path.resolve().relative_to(root.resolve())
         return True
@@ -70,6 +74,7 @@ def trusted_system(path):
 
 
 def system_tool(name):
+    """Find an executable only through approved system paths and resolved locations."""
     for directory in SAFE_PATH.split(":"):
         found = shutil.which(name, path=directory)
         if found and trusted_system(found):
@@ -78,6 +83,7 @@ def system_tool(name):
 
 
 def elf_x64(path):
+    """Check executable permission and the Linux x86-64 ELF header used by probes."""
     try:
         with Path(path).open("rb") as source:
             header = source.read(20)
@@ -89,6 +95,7 @@ def elf_x64(path):
 
 
 def runtime_tool(home, name):
+    """Prefer a contained private runtime, falling back to approved system discovery."""
     candidate = home / ".tools/runtime/bin" / name
     try:
         resolved = candidate.resolve(strict=True)
@@ -103,6 +110,7 @@ def runtime_tool(home, name):
 def clean_env(home=None, state=None, network=False):
     # In particular, do not inherit NODE_OPTIONS, PYTHONPATH, shell hooks,
     # npm configuration, repo PATH entries or a real HOME/cache directory.
+    """Construct isolated probe/install settings; forward proxy and CA settings only on request."""
     environment = {
         "PATH": (str(home / ".tools/runtime/bin") + ":" if home else "") + SAFE_PATH,
         "XDG_CACHE_HOME": str(state / "cache") if state else "/dev/null",
@@ -123,6 +131,7 @@ def clean_env(home=None, state=None, network=False):
 
 
 def run_checked(command, *, home=None, state=None, cwd="/", timeout=15):
+    """Run a bounded command with isolated settings and report nonzero status as failure."""
     result = subprocess.run([str(item) for item in command], cwd=cwd,
                             env=clean_env(home, state), stdin=subprocess.DEVNULL,
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -133,6 +142,7 @@ def run_checked(command, *, home=None, state=None, cwd="/", timeout=15):
 
 
 def probe(path, name, *, home=None):
+    """Report a trusted tool version without consulting repository interpreters or caller PATH."""
     if not path:
         return {"status": "missing", "path": None, "version": None,
                 "detail": f"No trusted {name} found in {SAFE_PATH} or the private runtime."}
@@ -157,4 +167,5 @@ def probe(path, name, *, home=None):
 
 
 def read_json(path):
+    """Load a UTF-8 JSON file, leaving invalid content for the caller to report."""
     return json.loads(Path(path).read_text(encoding="utf-8"))

@@ -26,15 +26,18 @@ import package_support as support
 
 class PackagingTests(unittest.TestCase):
     def setUp(self):
+        """Create isolated fixtures for this test and register their cleanup."""
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
         self.archive = self.make_archive()
         self.prefix = self.root / "new install with spaces"
 
     def tearDown(self):
+        """Remove only the temporary fixtures owned by this test."""
         self.temporary.cleanup()
 
     def make_archive(self, extra=None, mutate=None):
+        """Build a disposable release fixture with optional payload or manifest corruption."""
         payloads = {name: b"fixture\n" for name in install.REQUIRED}
         payloads["bin/swan"] = Path("/usr/bin/true").read_bytes()
         if extra:
@@ -58,12 +61,14 @@ class PackagingTests(unittest.TestCase):
         return archive
 
     def options(self, **changes):
+        """Provide isolated core dry-run defaults, allowing each test to override its trigger."""
         values = dict(prefix=self.prefix, archive=self.archive, sha256=install.sha256(self.archive),
                       profile="core", dry_run=True)
         values.update(changes)
         return argparse.Namespace(**values)
 
     def test_dry_run_has_no_writes_downloads_or_repository_execution(self):
+        """Verify that dry run has no writes downloads or repository execution."""
         repository = self.root / "repo"
         repository.mkdir()
         (repository / ".git").mkdir()
@@ -81,12 +86,14 @@ class PackagingTests(unittest.TestCase):
         self.assertFalse(self.prefix.exists())
 
     def test_empty_existing_prefix_is_preserved(self):
+        """Verify that empty existing prefix is preserved."""
         self.prefix.mkdir()
         with self.assertRaisesRegex(ValueError, "already exists"):
             install.plan(self.options())
         self.assertEqual([], list(self.prefix.iterdir()))
 
     def test_existing_nonempty_and_symlink_prefix_are_preserved(self):
+        """Verify that existing nonempty and symlink prefix are preserved."""
         previous = self.root / "previous"
         previous.mkdir()
         marker = previous / "trusted-repos"
@@ -98,11 +105,13 @@ class PackagingTests(unittest.TestCase):
         self.assertEqual(marker.read_text(), "keep\n")
 
     def test_checksum_refusal_leaves_destination_absent(self):
+        """Verify that checksum refusal leaves destination absent."""
         with self.assertRaisesRegex(ValueError, "SHA-256 mismatch"):
             install.plan(self.options(sha256="f" * 64))
         self.assertFalse(self.prefix.exists())
 
     def test_archive_traversal_and_state_refused(self):
+        """Verify that archive traversal and state refused."""
         for name in ("../escape", "/absolute", "data/trusted-repos", "tools/node_modules/evil", ".tools/goose"):
             with self.subTest(name=name):
                 archive = self.make_archive({name: b"do not extract"})
@@ -111,6 +120,7 @@ class PackagingTests(unittest.TestCase):
         self.assertFalse((self.root.parent / "escape").exists())
 
     def test_manifest_or_helper_mismatch_refused(self):
+        """Verify that manifest or helper mismatch refused."""
         for mutate in (lambda manifest: manifest["files"]["LICENSE"].update(size=999),
                        lambda manifest: manifest.update(installer_support_sha256="f" * 64),
                        lambda manifest: manifest["platform"].update(architecture="aarch64")):
@@ -119,6 +129,7 @@ class PackagingTests(unittest.TestCase):
                 install.inspect_archive(archive, install.sha256(archive))
 
     def test_release_symlink_refused(self):
+        """Verify that release symlink refused."""
         archive = self.root / "link.tar"
         with tarfile.open(archive, "w") as target:
             entry = tarfile.TarInfo("tools/link")
@@ -129,6 +140,7 @@ class PackagingTests(unittest.TestCase):
             install.inspect_archive(archive, install.sha256(archive))
 
     def test_wrong_elf_architecture_refused(self):
+        """Verify that wrong elf architecture refused."""
         bad = bytearray(Path("/usr/bin/true").read_bytes())
         bad[18:20] = (183).to_bytes(2, "little")
         archive = self.make_archive({"bin/swan": bytes(bad)})
@@ -136,6 +148,7 @@ class PackagingTests(unittest.TestCase):
             install.inspect_archive(archive, install.sha256(archive))
 
     def test_platform_and_old_missing_tool_diagnostics(self):
+        """Verify that platform and old missing tool diagnostics."""
         with patch.object(support.platform, "system", return_value="Windows"):
             with self.assertRaisesRegex(ValueError, "Unsupported platform"):
                 install.plan(self.options())
@@ -150,6 +163,7 @@ class PackagingTests(unittest.TestCase):
             self.assertEqual(support.probe(Path("/usr/bin/true"), "node")["status"], "incompatible")
 
     def test_doctor_ignores_fake_repository_python_and_caller_path(self):
+        """Verify that doctor ignores fake repository python and caller path."""
         home = self.root / "home"
         install.unpack_release(self.archive, home)
         fake_dir = self.root / "repository/.venv/bin"
@@ -170,6 +184,7 @@ class PackagingTests(unittest.TestCase):
         self.assertNotIn("repository", interpreter["path"] or "")
 
     def test_doctor_core_does_not_require_optional_tools(self):
+        """Verify that doctor core does not require optional tools."""
         home = self.root / "core"
         install.unpack_release(self.archive, home)
         result = doctor.report(home, "core")
@@ -177,6 +192,7 @@ class PackagingTests(unittest.TestCase):
         self.assertTrue(all(not item["required"] for item in result["checks"] if item["status"] == "unselected"))
 
     def test_doctor_rejects_abbreviated_home_before_probing(self):
+        """Verify that doctor rejects abbreviated home before probing."""
         for arguments in (("--hom", str(self.root / "repo")), ("--ho=" + str(self.root / "repo"),)):
             with self.subTest(arguments=arguments), patch.object(doctor, "report", side_effect=AssertionError("unexpected probe")):
                 with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as error:
@@ -184,6 +200,7 @@ class PackagingTests(unittest.TestCase):
                 self.assertEqual(error.exception.code, 2)
 
     def test_safe_system_lookup_rejects_repo_symlink(self):
+        """Verify that safe system lookup rejects repo symlink."""
         repository = self.root / "repository"
         repository.mkdir()
         (repository / ".git").mkdir()
@@ -197,6 +214,7 @@ class PackagingTests(unittest.TestCase):
             self.assertIsNone(support.system_tool("node"))
 
     def test_atomic_activation_never_replaces_concurrent_empty_directory(self):
+        """Verify that atomic activation never replaces concurrent empty directory."""
         stage = self.root / "stage"
         stage.mkdir()
         (stage / "candidate").write_text("ours")
@@ -207,6 +225,7 @@ class PackagingTests(unittest.TestCase):
         self.assertEqual((stage / "candidate").read_text(), "ours")
 
     def test_failed_smoke_cleans_only_owned_staging(self):
+        """Verify that failed smoke cleans only owned staging."""
         untouched = self.root / "unrelated"
         untouched.write_text("preserve")
         with patch.object(install, "run_checked", side_effect=RuntimeError("deliberate smoke failure")):
@@ -218,6 +237,7 @@ class PackagingTests(unittest.TestCase):
         self.assertEqual(untouched.read_text(), "preserve")
 
     def test_runtime_environment_drops_interpreter_and_npm_injections(self):
+        """Verify that runtime environment drops interpreter and npm injections."""
         with patch.dict(os.environ, {"NODE_OPTIONS": "--require bad", "PYTHONPATH": ".", "NPM_CONFIG_PREFIX": "/global"}):
             environment = support.clean_env(self.root, self.root / "state")
         for key in ("NODE_OPTIONS", "PYTHONPATH", "NPM_CONFIG_PREFIX"):
@@ -230,6 +250,7 @@ class PackagingTests(unittest.TestCase):
             self.assertEqual(support.clean_env(network=True)["HTTPS_PROXY"], "http://proxy.invalid:8080")
 
     def test_musl_and_old_glibc_are_reported_as_unsupported_prerequisites(self):
+        """Verify that musl and old glibc are reported as unsupported prerequisites."""
         for value in (("musl", "1.2.5"), ("glibc", "2.27")):
             with self.subTest(libc=value), patch.object(support.platform, "libc_ver", return_value=value):
                 self.assertIn("Unsupported libc", support.platform_error())
@@ -237,6 +258,7 @@ class PackagingTests(unittest.TestCase):
                     install.plan(self.options())
 
     def test_actual_builder_output_is_accepted_by_installer(self):
+        """Verify that actual builder output is accepted by installer."""
         spec = importlib.util.spec_from_file_location("swan_test_package", SCRIPTS / "package.py")
         builder = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(builder)
@@ -251,6 +273,7 @@ class PackagingTests(unittest.TestCase):
             else:
                 path.write_text("builder contract fixture " + name + "\n")
         def git(*arguments):
+            """Run Git against this checkout and fail if the requested operation fails."""
             return subprocess.check_output(["git", "-C", str(source), *arguments], text=True).strip()
         git("init", "--quiet")
         git("add", ".")

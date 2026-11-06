@@ -15,10 +15,12 @@ import tempfile
 
 
 def digest(path):
+    """Hash a file for before/after comparison, or return None when absent."""
     return hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() else None
 
 
 def main():
+    """Qualify real Python and TypeScript maps and live diagnostics using disposable repositories."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--binary', type=Path, required=True)
     parser.add_argument('--output-parent', type=Path, required=True)

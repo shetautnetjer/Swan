@@ -432,6 +432,28 @@ branch fix/greptile-review:
   distribution is a separate decision. Native Windows/macOS/ARM64 remain ports,
   and WSL and other Linux distributions need their own tests.
 
+## 2026-11-06: PR #13 review correction
+
+- Confirmed review comment `4493026973`: a successful `--map-swan` command
+  producing no map could be masked by `search_pattern` implicitly building
+  another map. The self-test now selects with `build:false`, requires the
+  exact existing `out/map/swan.db`, and keeps pattern calls on that selection.
+- CUA reproduction used `/usr/bin/true` as a builder returning success without
+  output. Before: false 24/24 pass with a replacement `fixture/swan.db`. After:
+  exit 2, no replacement map. The real builder still passed 24/24 against
+  `map/swan.db`. Evidence: `docs/evidence/swan-pr13-review-2026-11-06.json`.
+- Preserved CodeRabbit's concurrent fix commit `26edbfc` and its three
+  regression tests, adapting them to the stricter map-selection helper.
+  Added four regressions: map identity/no-build selection; missing, wrong,
+  rebuilt and malformed results; no repository reselection; no searches after
+  a builder leaves no usable map. Local checks pass 28 packaging tests and
+  14 skill tests. Added function documentation in response to the review's
+  docstring coverage warning; those edits preserve executable AST behavior.
+- This changes the source self-test and documentation, not the Swan native
+  executable or production state. The previously shared candidate archive
+  remains the recorded `bae3873` artifact and predates this review fix; export
+  a new candidate from the final reviewed revision before release.
+
 ## Remaining work
 
 1. Qualify real server adapters and indexers separately from the mock LSP
