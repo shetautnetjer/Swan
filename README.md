@@ -151,7 +151,109 @@ Every answer about a file that changed after the SCIP run carries
 Every tool also takes an optional `repo` (a path): it switches to that
 repo's map before answering, as `use_repo` would, and the choice persists.
 
+## Platform support
+
+Swan is intended to run on other people's machines, using their own
+checkouts, tools and MCP clients. The current implementation and bootstrap
+are **Linux x86-64**; native macOS and Windows support is not implemented.
+A portable compiler and MCP interface do not make the native process layer
+or downloaded language tools portable automatically.
+
+| Host | Current status |
+|---|---|
+| Linux x86-64 | Implemented and tested on the development host; other distributions and clean machines still need qualification |
+| Windows with WSL2 x86-64 | Possible route through Linux; not separately verified here, and not native Windows support |
+| macOS, Intel or Apple silicon | Not supported by the current bootstrap/native helpers; requires a port and platform tests |
+| Native Windows | Not supported; requires Windows process, path and filesystem handling |
+| Linux ARM64 | Not qualified; the bootstrap currently selects x86-64 binaries |
+
+Use the installation paths on **your** machine in the MCP examples below.
+Keep the checkout layout: `bin/swan` locates `tools/`, `.tools/` and
+`data/trusted-repos` relative to its real executable, not your shell's
+working directory. Copying only the binary is not a complete installation
+for indexing or live diagnostics. Maps record absolute repository paths;
+rebuild them for the repositories on a different machine rather than copying
+another person's maps or trust list. See the
+[portability proposal](docs/packages.md#platform-portability-proposal-2026-11-06)
+for the remaining work and acceptance checks.
+
+## Security update: live Python diagnostics
+
+[PR #11](https://github.com/shetautnetjer/Swan/pull/11), merged November 2,
+2026, fixes an execution-before-trust bug. Previously, a live Python
+question could pass an untrusted repository's detected virtualenv to
+Pyright, which could execute the interpreter supplied by that repository.
+`live_start` now clears the detected virtualenv unless the repository is
+trusted, before constructing the interpreter setting and child PATH.
+Trusted repositories can still use their virtualenv.
+
+The fix is in commit
+[`821474f`](https://github.com/shetautnetjer/Swan/commit/821474fe12e06aaefd96580a4903ab8aba08568e).
+**Updating source does not update an already-built or running Swan.**
+Existing users must build a revision containing the fix, verify the exact
+executable their MCP client launches, and restart that client's Swan
+process after an executable replacement. `scripts/build.sh` overwrites
+that checkout's `bin/swan`; preserve a binary backup and use a separate
+build/test checkout before replacing an active installation. Keep its trust
+list and maps intact. A source ancestry check alone is not binary proof:
+
+```bash
+git merge-base --is-ancestor 821474fe12e06aaefd96580a4903ab8aba08568e HEAD
+# Exit 0 means this source history includes the fix; it says nothing about bin/swan.
+```
+
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:4a5b46aca3b744b82d0a1b7cd5e11e1e8c6c563b220004ff37c8fb0f836806ac -->
+
+[The regression test](tests/trust_check.ts) checks that the untrusted live
+reply contains a `result` field without executing a planted interpreter,
+and that a trusted control does execute it. The `result` assertion does not
+establish successful diagnostics: MCP tool errors also contain that field.
+It skips live Python checks if Pyright is missing;
+a skip is not evidence that this protection works. Run the test only in a
+separate installation with its own executable, dependencies and `data/`.
+It can write and restore that installation's entire trust list. The full
+`scripts/test.sh` also rebuilds its executable.
+
+<!-- /coderabbit-ai-generated:v1 -->
+
+A separate installed-binary check on November 6, 2026 used real Pyright
+1.1.414 and a byte-identical isolated executable copy: untrusted, trusted
+control, and fresh untrusted sessions all returned a deliberate Python type
+error, with the planted interpreter executing only in the trusted control.
+This verifies that tested Linux executable, not every user's installation
+or every possible repository-code execution path.
+
+`SWAN_TRUST_BUILD=1` explicitly trusts every repository for that process;
+keep it out of normal untrusted-repository sessions. Do not launch those
+sessions from an environment that already puts a repository-controlled
+interpreter on PATH. The trust check is not an operating-system sandbox.
+Test runners (`run_tests`) execute repository code by design.
+
+**Remaining concurrency limitation:** `swan trust` still rewrites
+`data/trusted-repos` without a lock, so simultaneous grants can lose an
+entry. The regression test's whole-file restoration can also erase a
+concurrent grant. Serialize trust changes and keep tests away from the live
+installation; this limitation was not fixed by PR #11.
+
 ## Use
+
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:408c1072b178095036c667f595f53dd2aa9053552258c86a2411dc15c4baef78 -->
+
+The documented bootstrap needs Bash, Git, a C toolchain, Node.js >=22.22.2
+with npm, Bun,
+Python 3, uv (used to create the tool virtualenvs), and the download/archive utilities used by
+`scripts/fetch-tools.sh` (including curl, tar, unzip and SHA checksum tools).
+It fetches pinned language tools into this checkout. The first Goose build
+can fetch the pinned SQLite and tree-sitter packages. Individual language
+adapters have additional requirements; the full integration suite exercises
+those external tools. These are setup requirements, not proof of a clean
+installation on every Linux distribution.
+
+<!-- /coderabbit-ai-generated:v1 -->
 
 ```bash
 git clone --recurse-submodules https://github.com/shetautnetjer/Swan   # lsp/ is the goose-lsp submodule

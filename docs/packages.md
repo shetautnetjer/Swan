@@ -125,3 +125,53 @@ does not include package downloads or external tool installation.
 
 The contribution preserves these boundaries while making their costs and
 tests reviewable.
+
+## Platform portability proposal (2026-11-06)
+
+**Stage: proposal; no macOS/Windows port or release qualification is claimed.**
+The goal is the same Swan commands, MCP behavior and trust boundary on
+supported Linux, macOS and Windows machines, with builds for each selected
+OS/CPU target. Keep the Goose/SQLite/tree-sitter/LSP split and existing
+schemas. Supporting another host does not require a new daemon, database,
+package manager or rewriting the language servers.
+
+Goose v2026.3 already publishes Linux x64, macOS x64/ARM64 and Windows x64
+compiler distributions ([upstream release](https://github.com/aardappel/goose/releases/tag/v2026.3)).
+Swan still selects the Linux archive and compiles platform-specific helpers;
+compiler availability is only one prerequisite. External indexers and
+language servers must also be checked per platform and language.
+
+| Boundary | Current implementation | Work required |
+|---|---|---|
+| Executable discovery and filesystem facts | `native/swan_sys.c`: `/proc/self/exe`, `st_mtim`, `lstat`, `sysconf` | Platform-specific implementations preserving the existing helper contract |
+| Child processes and LSP transport | Swan native helpers and goose-lsp's `native/proc.c`: POSIX fork/exec, pipes, poll, signals and process groups | Preserve streaming, deadlines, exit reporting and descendant cleanup; add the Windows implementation in its owning library |
+| Paths, virtualenvs and executable lookup | Unix separators, colon-separated PATH and `.venv/bin/python` | Correct path canonicalization, PATH rules, executable suffixes and Windows virtualenv `Scripts/` handling |
+| Tool bootstrap | `scripts/fetch-tools.sh` selects Linux x86-64 downloads; Bash scripts and GNU utility assumptions | Select pinned OS/CPU assets, verify checksums, and report unavailable language adapters clearly |
+| Resource defaults | `/proc/meminfo` is read when available | Review the existing fallback and qualify sensible defaults elsewhere |
+| Installation and tests | Relative installation tree; current evidence is from a Linux development host | Test clean machines, paths with spaces, install relocation, dependencies and trust isolation on every claimed target |
+
+Proposed order: first qualify the existing Linux setup on a clean machine,
+then port and qualify macOS, then native Windows. WSL2 may provide an interim
+Linux route for Windows users, but requires its own check and must not be
+advertised as native Windows support. ARM64 targets require matching tools
+as well as a matching compiler; they are not implied by x64 success.
+
+A small platform layer behind the current native helper interfaces is the
+preferred approach to review. Replacing the process layer wholesale with a
+new dependency is an alternative only if a bounded prototype demonstrates
+that it preserves existing timeout, I/O, cleanup and trust behavior with
+less maintenance. A Linux container/WSL distribution is another option for
+accessibility, but does not meet a native-host support claim.
+
+Acceptance before marking a target supported: a clean install/build; the
+offline map/query/MCP checks; real Python diagnostics with untrusted and
+trusted interpreter controls; process exit, timeout and cleanup checks;
+path/URI tests (spaces, Unicode, symlinks or junctions and Windows drive
+letters as applicable); and per-adapter availability results. The trust
+controls must run on that target, not merely inherit a Linux result or skip
+when a required tool is missing. Test state must not alter a user's trust
+list. Record which OS/CPU and tool versions actually passed.
+
+The implementation scope and this proposal need approval before detailed
+port design or runtime changes. Documentation of the current support level
+is independent of that future work.
