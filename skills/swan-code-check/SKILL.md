@@ -60,7 +60,7 @@ location; it does not register agent settings or an MCP connection.
 
   | Mode | Evidence and boundary |
   | --- | --- |
-  | Structural patterns | Advertised grammar plus an applicable search; reads on-disk syntax, not compiler-resolved references. Inspect `files_searched` and `skipped`. |
+  | Structural patterns | Advertised grammar plus an applicable search; reads on-disk syntax, not compiler-resolved references. Inspect `files_searched` and `pattern_does_not_parse_in`. |
   | Indexed symbols/references | Map report and a known-symbol/reference check; limited to files and languages the SCIP indexers actually included. |
   | Live diagnostics/checks/tests | Installed adapter/runner plus the actual call result; availability alone does not prove execution or success. |
 
