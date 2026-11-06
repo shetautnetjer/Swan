@@ -19,7 +19,7 @@ import .pipeline;
 import .modules;
 import .live;
 import .structural;
-import treesitter from "shetautnetjer/goose-treesitter@v0.1.4";   // tree-sitter and its grammars, built once and cached
+import treesitter from "shetautnetjer/goose-treesitter@59313e9da0b9f1cce8df83cabe53ed73fa92345c";   // tree-sitter and its grammars, built once and cached
 import sqlite from "shetautnetjer/goose-sqlite@80a4e71315ee75f606fd7bbfcf1a78bfc74d6d8d";   // explicit stdbool.h; builds with GCC 13 as well as newer defaults
 
 fn usage() {
