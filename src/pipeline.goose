@@ -468,6 +468,52 @@ fn plan_ts(repo: const u8[:], listing: const u8[:], k: i64, decls: u8[>..]&, ref
 }
 
 // "path\tsize\tmtime" for every .py file, in walk order (list_dir sorts).
+extern fn swan_relink(target: const u8[:], link: const u8[:]) -> bool;
+
+// A src-layout Python repo: its packages live under src/ (src itself is not
+// a package) and it gives pyright no settings of its own. scip-python names
+// a module by its path from the project root, so src/pkg/mod.py becomes
+// src.pkg.mod, while tests and scripts import pkg.mod, which then resolves
+// to nothing: no reference from tests/ ever reaches the code it tests, and
+// get_callers, find_referencing_symbols and run_tests miss them. pyright's
+// own language server adds src by itself (autoSearchPaths); scip-python
+// does not. A repo with its own pyright settings keeps them.
+fn python_src_layout(repo: const u8[:], stamps: const u8[:]) -> bool {
+    guard is_dir(str(repo, "/src")) else { return false; }
+    if file_exists(str(repo, "/src/__init__.py")) { return false; }
+    if file_exists(str(repo, "/pyrightconfig.json")) { return false; }
+    var toml: u8[>..] = [];
+    if read_file(str(repo, "/pyproject.toml"), toml) && find(toml, "[tool.pyright") >= 0 { return false; }
+    var yes = false;
+    each_split(stamps, '\n') { line => if starts_with(line, "src/") { yes = true; } };
+    return yes;
+}
+
+// The project root scip-python runs from for such a repo, so the repo itself
+// is never written: a folder in the map folder holding a link to each of
+// the repo's top-level entries and a pyrightconfig.json of our own with src
+// as an extra search path. Document paths come out as they are in the repo.
+// Rebuilt every map, so added and removed entries are followed.
+fn python_shadow_root(repo: const u8[:], out: const u8[:]) -> u8[>..] {
+    let dir = str(out, "/py-root");
+    make_dir(dir);
+    var old: u8[>..] = [];
+    if list_dir(dir, old) {
+        each_split(old, '\n') { n => if n.len > 0 { delete_file(str(dir, "/", n)); } };
+    }
+    var names: u8[>..] = [];
+    if list_dir(repo, names) {
+        each_split(names, '\n') { n =>
+            let full = str(repo, "/", n);
+            // Not the map folder itself, when it sits in the repo.
+            let holds_out = starts_with(out, full) && (out.len == full.len || out[full.len] == '/');
+            if n.len > 0 && !holds_out { swan_relink(full, str(dir, "/", n)); }
+        };
+    }
+    write_file(str(dir, "/pyrightconfig.json"), "{\"extraPaths\":[\"src\"]}\n");
+    return dir;
+}
+
 fn py_stamps(repo: const u8[:]) -> u8[>..] {
     var s: u8[>..] = [];
     each_file(repo) { full, name =>
@@ -941,11 +987,28 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&) -> boo
         let slash = rfind(repo, "/");
         let pieces = plan_python(repo, min(jobs_limit(), 6));
         let stamps = py_stamps(repo);
+        // A src-layout repo runs scip-python from a project root of our own
+        // that puts src on pyright's search path (see python_src_layout).
+        let src_layout = python_src_layout(repo, stamps);
+        var py_root: u8[>..] = [];
+        if src_layout {
+            py_root = python_shadow_root(repo, out);
+            format(report, "python: src layout, scip-python runs with src on its search path\n");
+        }
+        // The folder a job's document paths are relative to. From our own
+        // project root it is the repo's own layout, so say so ("."), and the
+        // flattener does not re-root from that folder's place on disk.
+        fn py_base(piece: const u8[:]) -> u8[>..] {
+            if piece.len > 0 { return str(piece); }
+            if src_layout { return str("."); }
+            return str("");
+        }
         fn add_python_job(piece: const u8[:], target: const u8[:]) {
             var a: u8[>..] = [];
             arg(a, str(bin, "scip-python"));
             arg(a, "index");
             arg(a, ".");
+            if src_layout { arg(a, "--cwd"); arg(a, py_root); }
             arg(a, "--quiet");
             arg(a, "--project-name");
             arg(a, repo[slash + 1..]);
@@ -956,7 +1019,7 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&) -> boo
             if piece.len > 0 { arg(a, "--target-only"); arg(a, piece); }
             a.append(env_args);
             let label: u8[>..] = if piece.len > 0 { str("scip-python ", piece) } else { str("scip-python") };
-            add_job(label, target, a, child_env(l, ""), piece);
+            add_job(label, target, a, child_env(l, ""), py_base(piece));
         }
 
         // Reuse: a piece whose files are unchanged since the last map, and
@@ -971,7 +1034,10 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&) -> boo
         var manifest: u8[>..] = [];
         var reused = 0;
         each_split(pieces[..pieces.len - 1], '\n') { piece =>
-            let fp = str(piece_fingerprint(stamps, piece));
+            // Indexes made with and without src on the search path name the
+            // repo's modules differently, so the layout is part of the key.
+            let fp = str(if src_layout { hash_combine(piece_fingerprint(stamps, piece), hash("python src layout")) }
+                         else { piece_fingerprint(stamps, piece) });
             let target = str(out, "/index-python-", hash(piece), ".scip");
             var hit = false;
             each_split(prev_manifest, '\n') { line =>
@@ -980,7 +1046,7 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&) -> boo
             };
             if hit && !piece_has(dirty, piece) {
                 reused++;
-                add_job("", target, "", "", piece);      // already done: no argv
+                add_job("", target, "", "", py_base(piece));      // already done: no argv
             } else {
                 add_python_job(piece, target);
             }

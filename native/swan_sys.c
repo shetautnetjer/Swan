@@ -350,4 +350,19 @@ bool swan_is_symlink(swan_slice path) {
     return lstat(buf, &st) == 0 && S_ISLNK(st.st_mode);
 }
 
+/* Points link at target, replacing whatever link was there (never
+   following it). For scip-python's project root of links (src/pipeline.goose). */
+bool swan_relink(swan_slice target, swan_slice link) {
+    char t[4096], l[4096];
+    if (target.len <= 0 || target.len >= (int64_t)sizeof t || link.len <= 0 || link.len >= (int64_t)sizeof l) return false;
+    memcpy(t, target.data, (size_t)target.len); t[target.len] = 0;
+    memcpy(l, link.data, (size_t)link.len); l[link.len] = 0;
+    struct stat st;
+    if (lstat(l, &st) == 0) {
+        if (!S_ISLNK(st.st_mode)) return false;
+        if (unlink(l) != 0) return false;
+    }
+    return symlink(t, l) == 0;
+}
+
 int32_t swan_cpu_count(void) { long n = sysconf(_SC_NPROCESSORS_ONLN); return n > 0 ? (int32_t)n : 1; }
