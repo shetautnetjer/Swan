@@ -161,7 +161,7 @@ or downloaded language tools portable automatically.
 
 | Host | Current status |
 |---|---|
-| Linux x86-64 | Implemented and tested on the development host; other distributions and clean machines still need qualification |
+| Linux x86-64 | Development host verified; the package candidate also passed a fresh install and relocation in Ubuntu 24.04 CUA with real Python/TypeScript indexing and live diagnostics. Other distributions still need qualification |
 | Windows with WSL2 x86-64 | Possible route through Linux; not separately verified here, and not native Windows support |
 | macOS, Intel or Apple silicon | Not supported by the current bootstrap/native helpers; requires a port and platform tests |
 | Native Windows | Not supported; requires Windows process, path and filesystem handling |

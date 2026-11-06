@@ -12,6 +12,27 @@ and runtime checks have been reviewed. It is not an automatic update to an
 existing Swan. No public release, system package or agent registration is
 created by these commands.
 
+### Candidate qualification, November 6, 2026
+
+Source `bae3873bfd8dfecae5eb5ab64bf0cf45bde9998f` was built with Goose v2026.3
+and GCC 13.3 in an Ubuntu 24.04 x86-64 CUA VM (glibc 2.39). Its archive passed
+a fresh `python-typescript` installation in a path containing spaces, relocation,
+and dependency checks. Real SCIP maps resolved the expected definitions and
+references in Python and TypeScript; live diagnostics passed clean, deliberate
+type-error, and repaired-source cases. The separately copied skill passed
+24/24 pattern checks. Real Pyright returned the deliberate diagnostic in all
+three trust cases, with repository-interpreter execution false/true/false.
+
+The `core` installation and offline demo also passed. Existing-prefix and
+wrong-checksum installations were refused, and asking a core-only installation
+for the missing Python/TypeScript profile failed its dependency check.
+The local suite passed 28 installer/archive checks and 7 skill-portability
+checks. See [the exact build, archive and runtime receipts](evidence/swan-package-2026-11-06.json).
+These results qualify this candidate's tested profiles and environment, not
+all languages, Linux distributions, or an official public release. The receipt's
+source revision identifies the tested code; later documentation does not
+change that artifact's identity.
+
 ## Files and profiles
 
 The exporter produces these matching files:

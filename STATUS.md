@@ -401,16 +401,38 @@ branch fix/greptile-review:
   fixes both source owners, builds the package, verifies the selected profiles
   and copied skill, and obtains independent review before release acceptance.
 
-## Remaining work
+## 2026-11-06: Linux package implemented and qualified in CUA
 
-The 2026-11-06 package proposal above was approved for implementation and CUA
-testing. The candidate now implements archive export, a staged new-prefix
-installer, read-only doctor, private Node/Bun discovery, and a portable revision
-of the existing skill. SQLite's header fix is in its owning repository and
-Swan pins `80a4e713`; the Swan header fix is also in source. Local verification
-currently passes 18 installer/doctor checks, 10 archive checks and 7 skill
-portability checks. Exact installed-runtime qualification follows separately;
-these test counts are not an official release or a production replacement.
+- The approved candidate implements archive export, a staged new-prefix
+  installer, read-only `swan doctor`, private Node/Bun dependencies, and the
+  portable existing skill. SQLite's source header fix merged in goose-sqlite
+  PR #4; Swan pins immutable commit `80a4e713`. Swan's header is fixed too.
+- Tested source: `bae3873bfd8dfecae5eb5ab64bf0cf45bde9998f`, clean checkout,
+  Goose v2026.3 and GCC 13.3, Ubuntu 24.04 x86-64/glibc 2.39. The private
+  dependency cache fetched the corrected source; no dependency cache patches
+  were used. Build/archive/install receipts and hashes are in
+  `docs/evidence/swan-package-2026-11-06.json`.
+- The actual archive installed into a new path with spaces, downloaded private
+  Bun, reused compatible system Node/npm, installed the locked npm tools, and
+  passed its offline demo. Moving the entire tree preserved dependency checks
+  and real Python/TypeScript mapping, known definitions/references and live
+  clean/error/fixed diagnostics. A separately copied skill passed 24/24 patterns.
+- The Bubblewrap-isolated Python regression passed real diagnostics with
+  interpreter markers false/true/false. No persistent trust grant was needed.
+  A separate core-only installation passed; wrong hashes, existing prefixes,
+  doctor home-argument abbreviation and missing selected dependencies failed
+  as expected. Local checks: 18 installer/doctor, 10 archive, 7 skill portability.
+- Host production executable, trust list and module configuration matched
+  their pre-test SHA-256 snapshots. The active installation was not replaced.
+  No agent configuration or public binary release was created. Trust-list
+  concurrency remains a separate known limitation; serialize trust grants.
+- Stage: implemented, installed and qualified for these bounded CUA checks;
+  not accepted as a production replacement or cross-platform public release.
+  Next: review PR #13 and this evidence; any host activation or public binary
+  distribution is a separate decision. Native Windows/macOS/ARM64 remain ports,
+  and WSL and other Linux distributions need their own tests.
+
+## Remaining work
 
 1. Qualify real server adapters and indexers separately from the mock LSP
    and synthetic-row tests; existing integrations need their full toolchains.
