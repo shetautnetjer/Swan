@@ -60,7 +60,7 @@ location; it does not register agent settings or an MCP connection.
 
   | Mode | Evidence and boundary |
   | --- | --- |
-  | Structural patterns | Advertised grammar plus an applicable search; reads on-disk syntax, not compiler-resolved references. Inspect `files_searched` and `pattern_does_not_parse_in`. |
+  | Structural patterns | Advertised grammar plus an applicable search; reads on-disk syntax, not compiler-resolved references. Inspect `files_searched`, `pattern_does_not_parse_in` and `truncated`. |
   | Indexed symbols/references | Map report and a known-symbol/reference check; limited to files and languages the SCIP indexers actually included. |
   | Live diagnostics/checks/tests | Installed adapter/runner plus the actual call result; availability alone does not prove execution or success. |
 
@@ -69,6 +69,9 @@ location; it does not register agent settings or an MCP connection.
   establish that an optional tool is absent. An existing map's empty
   `skipped`/`report` does not prove every indexer ran. Do not invent a
   capability API, or call an unsearched/unindexed area clean.
+  If `truncated` is true, increase `max_results` or narrow `relative_path`
+  and repeat until the relevant matches are inspected before calling a
+  structural sweep complete.
 - Read the map report and its `skipped` entries. Some indexers run the repo's
   build files, and a repo-local Python environment can execute repo code.
   **Never grant trust automatically.** Run `<swan-binary> trust <exact-repo>`
@@ -89,13 +92,19 @@ location; it does not register agent settings or an MCP connection.
   has changed since the map's `refreshed_at`/`built_at`.
 - Recheck repo/map identity after switching branches, revisions or worktrees.
   Refresh before relying on indexed answers when that switch changes source,
-  or when dependencies, lockfiles, compiler/indexer configuration, generated
-  sources or build inputs change. Zero stale files is not proof of an
+  or generated sources change. Zero stale files is not proof of an
   unchanged compiler view: freshness primarily uses file timestamps;
   `new_file_count` only sees newer files with extensions already indexed.
   Languages never indexed and deliberately excluded files can remain outside
   coverage even after refresh. If `new_file_count` is absent, refresh on new
   files rather than trusting the older binary's freshness count.
+- Dependency, lockfile, compiler/indexer configuration and other build-input
+  changes need more than freshness checks: `update_map` can reuse cached
+  SCIP output. For example, TypeScript cache keys omit `package-lock.json`
+  and `node_modules`. Within the caller's execution scope, build a fresh map
+  with `<swan-binary> map <repo> <new-empty-map-dir>` and confirm subsequent
+  queries use that exact map, preserving existing maps. Otherwise mark the
+  affected indexed answers unverified; refresh success alone is insufficient.
 - Batch coherent edits and refresh once before the next indexed impact query,
   rename/rewrite plan, or affected-test selection that depends on a changed
   graph. Avoid rebuilding after every edit; on-disk pattern searches and

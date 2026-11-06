@@ -1,0 +1,37 @@
+{
+  "date": "2026-11-06",
+  "status": "PASS",
+  "stage": 2,
+  "source_revision": "d9067d4e2aa42f131f9bc74f2ad813a1bd648242",
+  "library_revision": "59313e9da0b9f1cce8df83cabe53ed73fa92345c",
+  "binary_sha256": "8ccabdcaf95983b319609c54b7f413757cf0de1694306ae1c715e6b2f78554b7",
+  "environment": "CUA local:aya-workbench Ubuntu24.04.5 x86_64 GCC13.3 Goosev2026.3",
+  "native_library_checks": 136,
+  "old_matcher_with_new_regressions_exit": 1,
+  "skill_patterns": {
+    "passed": 24,
+    "total": 24,
+    "empty_variadic_canaries": [
+      "FIXED",
+      "FIXED"
+    ],
+    "javascript_label": "TRAP"
+  },
+  "real_runtime_smoke": {
+    "status": "PASS",
+    "languages": [
+      "python",
+      "typescript"
+    ],
+    "definition_and_reference": true,
+    "live_clean_error_fixed": true,
+    "trust_unchanged": true
+  },
+  "evidence_paths": [
+    "/home/cua/swan-package-m1RBGOcY/matcher-fix-dhq7zau9",
+    "/home/cua/swan-package-m1RBGOcY/matcher-swan-build.log",
+    "/home/cua/swan-package-m1RBGOcY/matcher-swan-selftest.log",
+    "/home/cua/swan-package-m1RBGOcY/swan-package-smoke-pqq60vcx"
+  ],
+  "scope": "Structural matcher integration; concurrency qualified separately. No production replacement or saved trust writes."
+}
