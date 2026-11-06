@@ -147,7 +147,7 @@ fn get_diagnostics(db: i64, pattern: const u8[:], rel: const u8[:], depth: i64, 
     out.append("\"diagnostics\":[");
     var n = 0;
     var errors = 0;
-    while sqlite::step(st, e) == 1 {
+    while step_checked(st, e) == 1 {
         if n > 0 { out.push(','); }
         n++;
         var s: u8[>..] = [];
@@ -188,7 +188,7 @@ fn get_diagnostics(db: i64, pattern: const u8[:], rel: const u8[:], depth: i64, 
     let sum = prepare_or_die(db, """
         SELECT count(*), sum(severity = 'error'), count(DISTINCT file) FROM diagnostics
         """);
-    if sqlite::step(sum, e) == 1 {
+    if step_checked(sum, e) == 1 {
         format(out, ",\"map_total\":{\"diagnostics\":", sqlite::col_int(sum, 0), ",\"errors\":",
                sqlite::col_int(sum, 1), ",\"files\":", sqlite::col_int(sum, 2), "}");
     }

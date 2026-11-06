@@ -473,3 +473,80 @@ The active installation and saved trust remain outside these source merges.
    refactoring semantics remain candidates, not completed features.
 3. Grammar-specific native packages and an importable LSP facade need a
    design decision supported by build measurements; see docs/packages.md.
+
+## 2026-11-06: ordered stages 1–3 evidence and Goose investigation
+
+This entry supersedes the earlier ordered-improvements progress statement
+that matcher work and concurrency execution were still pending.
+
+- Stage 1 merged in Swan PR #13 (`b569146`). The portable skill describes
+  actual structural/index/live coverage, refresh triggers/batching and
+  verification limits. Stage 2 merged in goose-treesitter PR #5 (`590107`)
+  and Swan PR #14 (`b3bd50c`); the matcher receipt is
+  `docs/evidence/swan-matcher-2026-11-06.json`.
+- Stage 3 is implemented and qualified for bounded Linux local-filesystem
+  checks, with Swan PR #15 still open at candidate
+  `ef03ba0e13e357316e318a2384b58c5ec0b222d3`. CUA binary SHA-256:
+  `597dd20e6b58919a703249e9f77c55783a2c2a04a7a8d8bd66739b7617b4a5f8`.
+  Passed 9/9 concurrency scenarios, five reader regressions, 36 local
+  package/native tests including eight locks, 24/24 skill patterns and real
+  Python/TypeScript definition/reference/live checks. Independent review
+  identified orphaned child writes and database-file symlink identity;
+  inherited lock descriptors and file-symlink refusal address those cases.
+- `docs/concurrency.md` records writer serialization, read snapshots,
+  persistent lockfiles, explicit contention/retry and possible server restart.
+  Concurrent stateful operations outside that contract, saved trust-list
+  races, Windows/macOS, network filesystems and power loss remain unqualified.
+  Source qualification is not a production replacement or a public release.
+- Stage 4 remains investigation: official Goose v2026.3 already supplies a
+  grammar and LSP source; the actual CUA `lsp --probe` returned
+  `goose lsp 3.17`. No Swan Goose adapter is implemented. Grammar generation,
+  live semantics/execution boundaries and full semantic-map export still
+  need their own acceptance checks.
+- Stage 5 completed on the same candidate: 120 generated files/language,
+  14 map calls; definitions/references, unchanged equality, incremental=fresh
+  equality for both languages and MCP checks passed. TypeScript cold/unchanged
+  median/edit/new-file times were 0.467/0.03148/0.464/0.515 s; Python was
+  1.566/0.16379/0.815/0.865 s. Database load was 6–23 ms versus 388–766 ms
+  reported indexer work. On 50,000 rows, 20 warmups plus 200 checked reader
+  calls per binary measured median 0.085969 ms before versus 0.168354 ms after
+  the concurrency change (0.082385 ms increase; new p95 0.21576 ms).
+  Database/source bytes were unchanged. No additional optimization is justified;
+  retain the correctness fix and existing reuse. CUA run references:
+  `swan-runtime-bigun36h/summary.json` and
+  `swan-reader-latency-y32vjttc/summary.json`.
+- The final isolated real-Python trust regression passed deliberate diagnostics
+  and interpreter markers false/true/false (`swan-verify-_azjgets`); the saved
+  trust file remained absent and unchanged. This does not qualify trust-list
+  concurrency. Next: finish PR #15 review/merge checks and preserve the bounded
+  qualification evidence. Active installations, saved trust and agent/module
+  configuration are unchanged.
+
+## 2026-11-06 — Review completion and fresh CUA qualification
+
+This supersedes the earlier stage-3 candidate's qualification for current
+source; its results remain historical. PR #15 includes the reviewed correction
+from `8223ea6` and lock-entry symlink refusal at `5d415961fbfc679207b3e12cf92bb4ef364d6ad9`.
+Successful foreground jobs explicitly unlock idle build-server copies;
+failure, timeout and parent death retain surviving writer ownership.
+The fresh-map skill instructions also specify an isolated registry, exact map
+verification and a direct-database CLI fallback (PR #13 comment 4493383118).
+
+The exact rebuilt CUA binary has SHA-256
+`05896de6f1d50cb0aaf4c50f81c24861b4198690a6f4fe24980701a3f70f480b`.
+All 41 local package/native tests, 14 skill unit tests, 13 native CUA tests,
+nine concurrency cases, five reader regressions, 24 fixture patterns and real
+Python/TypeScript maps/live diagnostics pass. The isolated trust probe again
+records interpreter execution false/true/false without changing saved trust.
+Fourteen mapping calls also preserve incremental-versus-fresh semantic equality.
+A benchmark launcher preflight failed for missing Bun on PATH; adding the
+already installed private runtime to that process's PATH passed the retry.
+
+Source and receipt: `docs/evidence/swan-review-completion-2026-11-06.json`.
+Raw CUA evidence was copied to the host at
+`/home/aya-hmw/aya/sandbox/swan-package-candidate-2026-11-06/swan-final-review-evidence-2026-11-06.tar.gz`.
+PR #15 tracks source integration. The active executable, trust list and module
+configuration still match their saved hashes; installing a rebuilt package
+remains a separate operation requiring approval. The saved trust-list race,
+Goose adapter implementation and broader platform qualification remain outside
+this completed review scope.

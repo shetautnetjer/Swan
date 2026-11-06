@@ -259,7 +259,7 @@ fn affected_tests(db: i64, ids: const u8[:], depth: i64) -> u8[>..] {
     sqlite::bind_int(st, 1, depth);
     var e: u8[>..] = [];
     var tests: u8[>..] = [];
-    while sqlite::step(st, e) == 1 {
+    while step_checked(st, e) == 1 {
         var f: u8[>..] = [];
         sqlite::col_text(st, 0, f);
         // Rust keeps unit tests in a `mod tests` inside the source file.
@@ -285,7 +285,7 @@ fn test_main(repo_arg: const u8[:], out_arg: const u8[:], target: const u8[:], r
         let st = prepare_or_die(db, "SELECT id FROM symbols WHERE def_file = ?1 AND in_repo = 1 AND kind NOT IN ('parameter', 'module')");
         sqlite::bind_text(st, 1, target);
         var e: u8[>..] = [];
-        while sqlite::step(st, e) == 1 { if ids.len > 0 { ids.push(','); } format(ids, sqlite::col_int(st, 0)); }
+        while step_checked(st, e) == 1 { if ids.len > 0 { ids.push(','); } format(ids, sqlite::col_int(st, 0)); }
         sqlite::finalize(st);
     } else {
         var ignored: u8[>..] = [];

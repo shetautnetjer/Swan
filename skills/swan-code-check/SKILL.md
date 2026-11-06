@@ -101,10 +101,20 @@ location; it does not register agent settings or an MCP connection.
 - Dependency, lockfile, compiler/indexer configuration and other build-input
   changes need more than freshness checks: `update_map` can reuse cached
   SCIP output. For example, TypeScript cache keys omit `package-lock.json`
-  and `node_modules`. Within the caller's execution scope, build a fresh map
-  with `<swan-binary> map <repo> <new-empty-map-dir>` and confirm subsequent
-  queries use that exact map, preserving existing maps. Otherwise mark the
-  affected indexed answers unverified; refresh success alone is insufficient.
+  and `node_modules`. Within the caller's execution scope, create a new private
+  registry root and build its sole map child with
+  `<swan-binary> map <repo> <private-root>/fresh`. Use canonical absolute paths.
+  Map discovery selects by repo-root matches, not creation time: launch a
+  private `<swan-binary> serve --maps <private-root>`, call
+  `use_repo {"path":"<repo>","build":false}` on it, and verify the returned
+  `root` is exactly `<repo>`, `map` is exactly `<private-root>/fresh/swan.db`,
+  and `built` is false. Send every subsequent `repo` call to this private
+  server; stateless wrappers must launch with the same private `--maps` root.
+  Preserve configured maps and server settings. If the host cannot route to
+  that private server, use the exact database directly, for example
+  `<swan-binary> query <private-root>/fresh/swan.db symbol <name> [relative_path]`.
+  Otherwise mark affected indexed answers unverified; refresh success alone
+  is insufficient.
 - Batch coherent edits and refresh once before the next indexed impact query,
   rename/rewrite plan, or affected-test selection that depends on a changed
   graph. Avoid rebuilding after every edit; on-disk pattern searches and

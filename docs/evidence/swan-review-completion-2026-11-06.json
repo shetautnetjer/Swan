@@ -1,0 +1,226 @@
+{
+  "date": "2026-11-06",
+  "stage": "isolated Linux qualification; source integration tracked by Swan PR15",
+  "source_commit": "5d415961fbfc679207b3e12cf92bb4ef364d6ad9",
+  "binary_sha256": "05896de6f1d50cb0aaf4c50f81c24861b4198690a6f4fe24980701a3f70f480b",
+  "automation_source_preserved": {
+    "commit": "5d415961fbfc679207b3e12cf92bb4ef364d6ad9",
+    "files": [
+      "native/swan_sys.c",
+      "src/writer.goose",
+      "src/index.goose",
+      "src/pipeline.goose"
+    ],
+    "comparison": "Production files exactly match final automated revision, retaining success-only release from 8223ea6 and adding O_NOFOLLOW lock-entry refusal in 5d41596."
+  },
+  "review_comments": {
+    "lock_lifetime": 4493568771,
+    "fresh_map_selection": 4493383118,
+    "registry_selection": "deliberately fail closed on busy/locked maps that could hide a nearer root",
+    "permissions": "advisory coordination in owned/trusted output directories; no hostile local-user isolation claim"
+  },
+  "native_baseline_reproduction": {
+    "baseline_head": "6de78db568227ae499631f7efe540120d6da2204",
+    "baseline_native_sha256": "ed130ff996f741b3ad1249b9317fd8f18749e8dafa22f93f775de961b29b3526",
+    "baseline_test_sha256": "edf3292e795178c967f3ca2b28f197b488ff58abbe91f272deadb162e1791ec6",
+    "before": {
+      "tests": 10,
+      "failures": 2,
+      "exit": 1,
+      "compatibility_change": "Removed only unused ctypes abandon declaration because baseline native API lacks it; selected old8 plus successful spawn/run completion cases."
+    },
+    "after": {
+      "tests": 12,
+      "failures": 0,
+      "exit": 0,
+      "additional_cases": "spawn foreground failure; run foreground failure and escaped-daemon timeout"
+    },
+    "final_file_sha256": {
+      "native/swan_sys.c": "531413f971845c47c104fe56e77a6d8de261b45e521e962d46046cb111f8acf4",
+      "src/writer.goose": "2ccf1e71e35e7cc66ed4a0df44f36b17951816c91ac5a0893f8833dd3e420fea",
+      "src/pipeline.goose": "d8d79d196aa1108dbb1d83fbd9136adfb1521f0b018f722a037adaaac6c756b9",
+      "tests/test_writer_lock.py": "020b524ff226027974fbef0ded2e281d2427840979248d10cf28811f271bac8b"
+    }
+  },
+  "native_baseline_log": {
+    "sha256": "3c2a06ef9df2091b5ea3dd333c58df70af9aaddc5f5ba0a93d4566e3dd957c16",
+    "text": "test_same_map_refused_and_stable_lock_file_reused (test_writer_lock.WriterLockTests.test_same_map_refused_and_stable_lock_file_reused)\nVerify exclusion and reuse of the same lock inode after normal release. ... ok\ntest_parent_aliases_cover_database_not_created_yet (test_writer_lock.WriterLockTests.test_parent_aliases_cover_database_not_created_yet)\nVerify parent-directory aliases share ownership before the database exists. ... ok\ntest_database_file_symlink_refused_before_mutation (test_writer_lock.WriterLockTests.test_database_file_symlink_refused_before_mutation)\nVerify a database-file symlink is refused without changing files or creating locks. ... ok\ntest_database_deletion_does_not_change_lock_identity (test_writer_lock.WriterLockTests.test_database_deletion_does_not_change_lock_identity)\nVerify deleting and recreating the database cannot bypass existing ownership. ... ok\ntest_independent_maps_can_have_independent_writers (test_writer_lock.WriterLockTests.test_independent_maps_can_have_independent_writers)\nVerify separate target maps permit simultaneous independent ownership. ... ok\ntest_process_death_releases_ownership (test_writer_lock.WriterLockTests.test_process_death_releases_ownership)\nVerify ownership is released when its sole holding process is killed. ... ok\ntest_spawn_indexer_keeps_lock_after_parent_death (test_writer_lock.WriterLockTests.test_spawn_indexer_keeps_lock_after_parent_death)\nExercise inherited ownership through the production indexer-spawn helper. ... ok\ntest_run_flattener_keeps_lock_after_parent_death (test_writer_lock.WriterLockTests.test_run_flattener_keeps_lock_after_parent_death)\nExercise inherited ownership through the production synchronous-run helper. ... ok\ntest_spawn_completion_releases_idle_service_lock (test_writer_lock.WriterLockTests.test_spawn_completion_releases_idle_service_lock)\nRelease inherited service copies after a successful swan_spawn job. ... FAIL\ntest_run_completion_releases_idle_service_lock (test_writer_lock.WriterLockTests.test_run_completion_releases_idle_service_lock)\nRelease inherited service copies after a successful swan_run job. ... FAIL\n\n======================================================================\nFAIL: test_spawn_completion_releases_idle_service_lock (test_writer_lock.WriterLockTests.test_spawn_completion_releases_idle_service_lock)\nRelease inherited service copies after a successful swan_spawn job.\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/tmp/swan-before-completion-70n8ie6s/tests/test_writer_lock.py\", line 415, in test_spawn_completion_releases_idle_service_lock\n    self.service_writer(\"spawn\")\n  File \"/tmp/swan-before-completion-70n8ie6s/tests/test_writer_lock.py\", line 380, in service_writer\n    self.own(database)\n  File \"/tmp/swan-before-completion-70n8ie6s/tests/test_writer_lock.py\", line 103, in own\n    self.assertGreater(handle, 0, error)\nAssertionError: 0 not greater than 0 : swan: another writer is in progress for /tmp/swan-native-lock-case-z05h3oxx/service-ueg8n5eq/swan.db; retry after it finishes\n\n======================================================================\nFAIL: test_run_completion_releases_idle_service_lock (test_writer_lock.WriterLockTests.test_run_completion_releases_idle_service_lock)\nRelease inherited service copies after a successful swan_run job.\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/tmp/swan-before-completion-70n8ie6s/tests/test_writer_lock.py\", line 419, in test_run_completion_releases_idle_service_lock\n    self.service_writer(\"run\")\n  File \"/tmp/swan-before-completion-70n8ie6s/tests/test_writer_lock.py\", line 380, in service_writer\n    self.own(database)\n  File \"/tmp/swan-before-completion-70n8ie6s/tests/test_writer_lock.py\", line 103, in own\n    self.assertGreater(handle, 0, error)\nAssertionError: 0 not greater than 0 : swan: another writer is in progress for /tmp/swan-native-lock-case-8znrjy0c/service-xxqjytk3/swan.db; retry after it finishes\n\n----------------------------------------------------------------------\nRan 10 tests in 0.424s\n\nFAILED (failures=2)\n"
+  },
+  "native_reconciled_log_sha256": "261d35a1fdce451778b3f7eeb6668947a09e71590f450ee109e3c8e29b597da3",
+  "local_tests": {
+    "package_and_native": 41,
+    "skill_selftest_units": 14,
+    "failures": 0,
+    "unit_log_sha256": "6127992d9aba52228f8cea34b51cfeefe111fd315e922ac76ad9bd3f5c04feb4"
+  },
+  "documentation": {
+    "functions_methods_classes_documented": 100,
+    "functions_methods_classes_examined": 100,
+    "files": 5,
+    "note": "Local AST count, not an assertion of the external review service's scoped metric. Four Python helper/harness files are behavior-equivalent to 6de78db after removing docstrings; writer tests also add regression behavior."
+  },
+  "runtime": {
+    "artifact_root": "/home/cua/swan-package-m1RBGOcY/review-lock-symlink-evidence",
+    "native_tests": 13,
+    "concurrency": {
+      "passed": 9,
+      "results": "swan-concurrency-6o6yrsya/results.json",
+      "sha256": "450aa0606d6f74957efab8c08a84140e13a1bcd524d34885a5448e389e14a8e8"
+    },
+    "readers": {
+      "passed": 5,
+      "results": "swan-readers-6hxumygi/reader-results.json",
+      "sha256": "8725f9fe9abb76c9c8b562c2ff2efb2d832bf1697a1881e3443d06b92910d03f"
+    },
+    "real_python_typescript": {
+      "status": "PASS",
+      "results": "swan-package-smoke-d7a50gez/result.json",
+      "sha256": "6c1795fc1cfe4ea38b09b679ab27046cd85e4a38e686801128d05e09b3254640"
+    },
+    "skill_patterns": {
+      "passed": 24,
+      "total": 24,
+      "empty_variadic_canaries": "both FIXED",
+      "javascript_label_canary": "TRAP"
+    },
+    "live_python_trust": {
+      "status": "PASS",
+      "repo_interpreter_executed": [
+        false,
+        true,
+        false
+      ],
+      "saved_trust_unchanged": true,
+      "control": "process-local SWAN_TRUST_BUILD=1 in disposable isolated control only",
+      "results": "swan-verify-cf1ecawd/result.json",
+      "sha256": "0ad8a2ba43a967ccec01a036dd96735b613a25aad1cdd2056ae22420253ac412"
+    },
+    "incremental_parity": {
+      "status": "PASS",
+      "map_calls": 14,
+      "files_per_language": 120,
+      "unchanged_rows_equal": true,
+      "incremental_equals_fresh": {
+        "typescript": true,
+        "python": true
+      },
+      "mcp_known_answers": true,
+      "results": "swan-runtime-51a_5c5i/summary.json",
+      "sha256": "789a09ded356290e501b64dc12bedf5e7e463f3cd0cdeb04dac76feee2c57a11",
+      "preflight_retry": "The preceding ccfc90ab run needed a launcher PATH correction. This final run used that process-local private runtime PATH and passed on its first invocation."
+    }
+  },
+  "archive": {
+    "name": "swan-final-review-evidence-2026-11-06.tar.gz",
+    "files": 187,
+    "bytes": 250485,
+    "sha256": "61bb85f4307ab337a5d5f3909057170806d9a32e204e7fdef54cef9c412fe3db"
+  },
+  "limits": [
+    "Local Linux filesystem and cooperating synchronous-output tools only.",
+    "Success means foreground indexers have finished shared output; arbitrary background output after reported success is outside qualification.",
+    "Failed/timed-out/abruptly interrupted jobs preserve inherited lock ownership.",
+    "Saved trust-list concurrency remains separate and unchanged.",
+    "No active executable, saved trust list, agent settings or production module configuration replaced.",
+    "Prior ef03 performance/reader-latency results remain historical measurements; they are not relabeled as final-revision measurements."
+  ],
+  "previous_qualification": {
+    "source_commit": "ccfc90ab963ff3fcdccca30a582aaa1100f5f596",
+    "binary_sha256": "6d40b16ff79fa515e0f1773139a64e7b882cec885636743494a57f5fc94315ec",
+    "archive": {
+      "name": "swan-review-completion-evidence-2026-11-06.tar.gz",
+      "sha256": "394027db7b46df919cab43a52e94754271b7b7fd4627cd59f387103e28cbd7ec",
+      "files": 188,
+      "bytes": 250505
+    },
+    "runtime": {
+      "artifact_root": "/home/cua/swan-package-m1RBGOcY/review-completion-evidence",
+      "native_tests": 12,
+      "concurrency": {
+        "passed": 9,
+        "results": "swan-concurrency-n0ynn9o2/results.json",
+        "sha256": "8e487e04b5eb3c4e39585e4c4fa2e01f5a8a654c3a820ebf751d99576f0c4850"
+      },
+      "readers": {
+        "passed": 5,
+        "results": "swan-readers-lq7ylwm9/reader-results.json",
+        "sha256": "8725f9fe9abb76c9c8b562c2ff2efb2d832bf1697a1881e3443d06b92910d03f"
+      },
+      "real_python_typescript": {
+        "status": "PASS",
+        "results": "swan-package-smoke-od_drx6v/result.json",
+        "sha256": "727ef3e7fba711a7e90bfad6d87d0c21b44da166839d16894ee6d8a777676377"
+      },
+      "skill_patterns": {
+        "passed": 24,
+        "total": 24,
+        "empty_variadic_canaries": "both FIXED",
+        "javascript_label_canary": "TRAP"
+      },
+      "live_python_trust": {
+        "status": "PASS",
+        "repo_interpreter_executed": [
+          false,
+          true,
+          false
+        ],
+        "saved_trust_unchanged": true,
+        "control": "process-local SWAN_TRUST_BUILD=1 in disposable isolated control only",
+        "results": "swan-verify-dsspqzeu/result.json",
+        "sha256": "b42d649483504f895b8cddb5ddce9b39f6b167ae1acc7ce17b3cf1864a2f0095"
+      },
+      "incremental_parity": {
+        "status": "PASS",
+        "map_calls": 14,
+        "files_per_language": 120,
+        "unchanged_rows_equal": true,
+        "incremental_equals_fresh": {
+          "typescript": true,
+          "python": true
+        },
+        "mcp_known_answers": true,
+        "results": "swan-runtime-_pr_g1nc/summary.json",
+        "sha256": "4f11e668f0cf632f32c85319af271c35985d5c83092931842db367ae02d07c9c",
+        "preflight_retry": "First invocation refused before mapping because bun was absent from launcher PATH. Retry added the candidate's existing .tools/runtime/bin to this process PATH; no dependencies installed or global configuration changed."
+      }
+    },
+    "native_reconciled": {
+      "bot_commit": "8223ea6c329e548076c930771e8eca7375a5a336",
+      "tests": 12,
+      "failures": 0,
+      "names": {
+        "success": "swan_writer_complete",
+        "failure": "swan_writer_unlock"
+      },
+      "note": "Production files exactly match bot commit; historical before/after logs use previous local helper names. All five bot new scenarios remain covered by grouped tests: spawn/run success, spawn/run failure, escaped-daemon run timeout; original eight tests preserved.",
+      "sha256": {
+        "native/swan_sys.c": "16aa48bf18dd1f2034567d5ac9342f1d8178e16cd2f38b51b549fff5198cf84a",
+        "src/writer.goose": "ba6ae21e09de623b6fd88e6fcd6a552919945aa4c09189d1e72a8cd4ff9b744a",
+        "src/index.goose": "2500847ec63e7fae1f602d4fbd695658edd2ceecb6d8555d396590691b40847b",
+        "src/pipeline.goose": "c4b3a615abd142db34aef1a2d4d9df382ba2ff7af819de7fa1417fa23c094d59",
+        "tests/test_writer_lock.py": "55349a964d810deac54a158acf4f73a76fd6a048c6c64ad8c2d6df2b2d77b3e1"
+      },
+      "git_blobs": {
+        "native/swan_sys.c": "46f4f4c1d312edc0a63a19728a6b36149f4b7061",
+        "src/writer.goose": "7bd1c6da120ddfb92e1f58255a2efe77485a56f7",
+        "src/index.goose": "dfe41d3c5f1ec93fb5323af028411ab660a518d5",
+        "src/pipeline.goose": "1b0d3bba75cc88dec327e34fb9fbdf8876eb4b12",
+        "tests/test_writer_lock.py": "22cbaab0b75e300668c13e72bbf2c005722d759c"
+      }
+    },
+    "note": "Historical qualification before automated O_NOFOLLOW lock-entry fix. Original evidence and helper-name reconciliation remain intact."
+  },
+  "final_native": {
+    "tests": 13,
+    "failures": 0,
+    "sha256": {
+      "native/swan_sys.c": "a0b400181d62595e44cb3bdf079787e4396c3c8a27a2e79f1ce8489dcd815cdc",
+      "src/writer.goose": "ba6ae21e09de623b6fd88e6fcd6a552919945aa4c09189d1e72a8cd4ff9b744a",
+      "src/index.goose": "2500847ec63e7fae1f602d4fbd695658edd2ceecb6d8555d396590691b40847b",
+      "src/pipeline.goose": "c4b3a615abd142db34aef1a2d4d9df382ba2ff7af819de7fa1417fa23c094d59",
+      "tests/test_writer_lock.py": "c75c83f145816455148a915ed253cc397d1390e9d8d551d653d0a739f4a51d92"
+    },
+    "lock_symlink_cases": "existing and dangling lock-entry symlinks refused; target content/existence preserved and existing target remains lockable"
+  },
+  "native_reconciled_log_sha256_note": "Hash above belongs to historical 12-test reconciliation, not the final 13-test suite."
+}

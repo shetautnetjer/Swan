@@ -102,7 +102,7 @@ fn resolve_target(db: i64, pattern: const u8[:], rel: const u8[:], err: u8[>..]&
     var e: u8[>..] = [];
     var n = 0;
     var names: u8[>..] = [];
-    while sqlite::step(st, e) == 1 {
+    while step_checked(st, e) == 1 {
         n++;
         var file: u8[>..] = [];
         sqlite::col_text(st, 4, file);
@@ -121,7 +121,7 @@ fn resolve_target(db: i64, pattern: const u8[:], rel: const u8[:], err: u8[>..]&
         FROM symbols WHERE id = ?1
         """);
     sqlite::bind_int(q, 1, t.id);
-    if sqlite::step(q, e) == 1 {
+    if step_checked(q, e) == 1 {
         t.def_line = sqlite::col_int(q, 0);
         t.def_col = sqlite::col_int(q, 1);
         if sqlite::col_int(q, 6) == 1 {
@@ -209,7 +209,7 @@ fn used_by(db: i64, id: i64, out: u8[>..]&) {
     var e: u8[>..] = [];
     var refs = 0;
     var files = 0;
-    if sqlite::step(st, e) == 1 { refs = sqlite::col_int(st, 0); files = sqlite::col_int(st, 1); }
+    if step_checked(st, e) == 1 { refs = sqlite::col_int(st, 0); files = sqlite::col_int(st, 1); }
     sqlite::finalize(st);
     format(out, ",\"used_by\":{\"references\":", refs, ",\"files\":", files,
            ",\"next\":\"get_callers on this symbol lists them; check those that depend on what changed\"}");
@@ -317,7 +317,7 @@ fn rename_symbol(db: i64, pattern: const u8[:], rel: const u8[:], new_name: cons
     let q = prepare_or_die(db, "SELECT name, name_path FROM symbols WHERE id = ?1");
     sqlite::bind_int(q, 1, t.id);
     var e: u8[>..] = [];
-    if sqlite::step(q, e) == 1 { sqlite::col_text(q, 0, old_name); sqlite::col_text(q, 1, old_path); }
+    if step_checked(q, e) == 1 { sqlite::col_text(q, 0, old_name); sqlite::col_text(q, 1, old_path); }
     sqlite::finalize(q);
     guard old_name != new_name else { out.append("new_name is the current name"); return false; }
 
@@ -334,7 +334,7 @@ fn rename_symbol(db: i64, pattern: const u8[:], rel: const u8[:], new_name: cons
     sqlite::bind_text(cf, 2, rel);
     var conflicts: u8[>..] = [];
     var nconf = 0;
-    while sqlite::step(cf, e) == 1 {
+    while step_checked(cf, e) == 1 {
         if nconf > 0 { conflicts.push(','); }
         nconf++;
         var s: u8[>..] = [];
@@ -366,7 +366,7 @@ fn rename_symbol(db: i64, pattern: const u8[:], rel: const u8[:], new_name: cons
     var starts: i64[>..] = [];
     var readable = false;
     var cur_stale = false;
-    while sqlite::step(sites_q, e) == 1 {
+    while step_checked(sites_q, e) == 1 {
         var file: u8[>..] = [];
         sqlite::col_text(sites_q, 0, file);
         if file != cur {
@@ -489,7 +489,7 @@ fn rename_symbol(db: i64, pattern: const u8[:], rel: const u8[:], new_name: cons
         }
         sites.clear();
     }
-    while sqlite::step(again, e) == 1 {
+    while step_checked(again, e) == 1 {
         var file: u8[>..] = [];
         sqlite::col_text(again, 0, file);
         if file != cur { flush(); cur.clear(); cur.append(file); }

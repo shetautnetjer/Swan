@@ -247,6 +247,23 @@ an active installation, grant repository trust or configure an agent. A built
 candidate and its qualification receipt are separate from an official release.
 The source-build instructions below retain the legacy full-tool bootstrap.
 
+**Concurrent maps:** [PR #15](https://github.com/shetautnetjer/Swan/pull/15)
+serializes map/index/refresh writers and keeps read-only database answers on
+complete snapshots. The reviewed implementation passed bounded Linux CUA checks,
+including successful build-server release and failed/interrupted child ownership.
+Busy errors can require retry or a server restart; keep persistent `.lock`
+files and serialize other stateful operations and saved trust changes.
+See [concurrency scope and exact staged-binary tests](docs/concurrency.md):
+
+```sh
+python3 -m unittest discover -s tests -p 'test_writer_lock.py' -v
+python3 tests/check_concurrency.py --binary /path/to/staged-swan/bin/swan --output-parent /path/to/disposable-output --rows 50000 --timeout 30
+python3 tests/test_map_readers.py --binary /path/to/staged-swan/bin/swan --output-parent /path/to/disposable-output --timeout 15
+```
+
+Run from the matching reviewed source checkout with an existing disposable
+output parent; these checks do not update the active installation.
+
 <!-- coderabbit-ai-generated:v1 -->
 
 <!-- coderabbit-ai-generated-section:v1:408c1072b178095036c667f595f53dd2aa9053552258c86a2411dc15c4baef78 -->

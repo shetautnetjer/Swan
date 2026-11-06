@@ -20,7 +20,7 @@ import .modules;
 import .live;
 import .structural;
 import treesitter from "shetautnetjer/goose-treesitter@59313e9da0b9f1cce8df83cabe53ed73fa92345c";   // tree-sitter and its grammars, built once and cached
-import sqlite from "shetautnetjer/goose-sqlite@80a4e71315ee75f606fd7bbfcf1a78bfc74d6d8d";   // explicit stdbool.h; builds with GCC 13 as well as newer defaults
+import sqlite from "shetautnetjer/goose-sqlite@c759de735ae936dcbc197bb9aae40e13565ef21c";   // open_existing never creates a missing map
 
 fn usage() {
     write_stderr("""
@@ -45,13 +45,21 @@ fn usage() {
 fn open_map(path: const u8[:]) -> i64 {
     guard file_exists(path) else { abort(str("swan: no index at ", path)); }
     var err: u8[>..] = [];
-    let db = sqlite::open(path, err);
+    let db = sqlite::open_existing(path, err);
     if db == 0 { abort(str("swan: cannot open ", path, ": ", err)); }
     return db;
 }
 
 fn open_db(path: const u8[:]) -> i64 {
     let db = open_map(path);
+    // CLI queries, like read-only MCP tools, use one database generation
+    // across freshness metadata and all statements that build their answer.
+    exec_or_die(db, "BEGIN;");
+    var version: u8[>..] = [];
+    meta_value(db, "schema_version", version);
+    if version != str(SCHEMA_VERSION) {
+        abort(str("swan: index schema ", version, ", this swan reads ", SCHEMA_VERSION, "; rebuild the map"));
+    }
     load_freshness(db);
     return db;
 }
@@ -119,6 +127,8 @@ fn main() {
         else if a[3] == "hierarchy" { get_type_hierarchy(db, a[4], rel, 3, 200, out); }
         else if a[3] == "pattern" { search_pattern(db, a[4], "", rel, 1000000, out); }
         else { usage(); }
+        exec_or_die(db, "COMMIT;");
+        close_db(db);
         print(out);
     } else if a[1] == "map" && a.len == 4 {
         var report: u8[>..] = [];

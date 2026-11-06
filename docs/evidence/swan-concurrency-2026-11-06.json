@@ -1,0 +1,76 @@
+{
+  "date": "2026-11-06",
+  "stage": "qualified candidate, not installed on production PC",
+  "source_revision": "ef03ba0e13e357316e318a2384b58c5ec0b222d3",
+  "binary_sha256": "597dd20e6b58919a703249e9f77c55783a2c2a04a7a8d8bd66739b7617b4a5f8",
+  "sqlite_revision": "c759de735ae936dcbc197bb9aae40e13565ef21c",
+  "sqlite_standalone_checks": 71,
+  "sqlite_step_done_after_first_row_error": "PASS",
+  "before": {
+    "source_revision": "d9067d4e2aa42f131f9bc74f2ad813a1bd648242",
+    "binary_sha256": "8ccabdcaf95983b319609c54b7f413757cf0de1694306ae1c715e6b2f78554b7",
+    "failures": [
+      "refresh-snapshots returned successful empty result",
+      "blocked-query returned successful empty result",
+      "temp-collision exited zero but published database missing symbols table",
+      "persistent-replace returned old A after completed B replacement"
+    ],
+    "evidence_directory": "/home/cua/swan-package-m1RBGOcY/swan-concurrency-v5hsqttc"
+  },
+  "after": {
+    "concurrency_cases": {
+      "held-reader": "PASS",
+      "held-writer": "PASS",
+      "refresh-snapshots": "PASS",
+      "blocked-query": "PASS",
+      "simultaneous-refresh": "PASS",
+      "interrupted-refresh": "PASS",
+      "temp-collision": "PASS",
+      "persistent-replace": "PASS",
+      "writer-entry-locks": "PASS"
+    },
+    "reader_cases": {
+      "external refresh freshness": "PASS",
+      "two consecutive Swan edits preserve freshness": "PASS",
+      "busy MCP and CLI errors plus same-server recovery": "PASS",
+      "missing selected map no-create and recovery": "PASS",
+      "schema mismatch and recovery": "PASS"
+    },
+    "native_writer_tests": 8,
+    "combined_package_native_unit_tests": 36,
+    "skill_patterns": {
+      "passed": 24,
+      "total": 24,
+      "empty_variadic_canaries": "FIXED"
+    },
+    "real_python_typescript_map_definition_reference_live_clean_error_fixed": "PASS",
+    "live_trust_probe": {
+      "untrusted_before_interpreter_executed": false,
+      "trusted_control_interpreter_executed": true,
+      "untrusted_after_interpreter_executed": false,
+      "real_diagnostic": "reportAssignmentType",
+      "saved_trust_unchanged": true
+    }
+  },
+  "environment": {
+    "os": "Ubuntu24.04.5",
+    "arch": "x86_64",
+    "glibc": "2.39",
+    "compiler": "Goosev2026.3 GCC13.3",
+    "target": "CUA local:aya-workbench"
+  },
+  "evidence_directories": [
+    "/home/cua/swan-package-m1RBGOcY/swan-concurrency-1ctndbb2",
+    "/home/cua/swan-package-m1RBGOcY/swan-readers-s47qt5d_",
+    "/home/cua/swan-package-m1RBGOcY/swan-package-smoke-4_t4o0ui",
+    "/home/cua/swan-package-m1RBGOcY/concurrency-skill-selftest",
+    "/home/cua/swan-package-m1RBGOcY/swan-verify-_azjgets"
+  ],
+  "limits": [
+    "local Linux filesystem, separate processes",
+    "read snapshots do not freeze source files",
+    "stateful/live/edit/diagnostic writers outside read-only snapshot whitelist",
+    "saved trust list race separate; serialize trust operations",
+    "not Windows/macOS/network-filesystem or power-loss qualification"
+  ]
+}

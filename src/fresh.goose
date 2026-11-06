@@ -15,7 +15,8 @@ var fresh_scip_time: i64 = 0;    // ns since the epoch; 0 when unknown
 var fresh_edited: i64 = 0;       // statement: a file's edited_mtime
 
 // Loads the map's root and SCIP time for `db`, the connection the server
-// answers from. Called again after update_map, which moves the SCIP time.
+// answers from. Reloaded each request: another process may have refreshed
+// or replaced the map. Swan's own edit mtimes are persisted in files.
 fn load_freshness(db: i64) {
     fresh_root.clear();
     fresh_scip_time = 0;
@@ -34,8 +35,8 @@ fn load_freshness(db: i64) {
 }
 
 // Lets go of the freshness state before its db closes: the prepared
-// statement belongs to that connection. swan serve calls this when it
-// switches repos.
+// statement belongs to that connection. swan serve calls this before
+// reopening the map for the next request.
 fn drop_freshness() {
     fresh_root.clear();
     fresh_scip_time = 0;
@@ -48,7 +49,7 @@ fn edited_mtime(file: const u8[:]) -> i64 {
     var err: u8[>..] = [];
     var t = -1;
     sqlite::bind_text(fresh_edited, 1, file);
-    if sqlite::step(fresh_edited, err) == 1 {
+    if step_checked(fresh_edited, err) == 1 {
         var v: u8[>..] = [];
         sqlite::col_text(fresh_edited, 0, v);
         if v.len > 0 { t = sqlite::col_int(fresh_edited, 0); }
@@ -87,7 +88,7 @@ fn new_files(db: i64, out: u8[>..]&) -> i64 {
     // Only files with rows: mark_edited (src/edit.goose) adds an empty row
     // for any file Swan edits or formats, which must not add its ending.
     let all = prepare_or_die(db, "SELECT file FROM files WHERE rows > 0");
-    while sqlite::step(all, err) == 1 {
+    while step_checked(all, err) == 1 {
         var f: u8[>..] = [];
         sqlite::col_text(all, 0, f);
         let e = file_ending(f);
@@ -105,7 +106,7 @@ fn new_files(db: i64, out: u8[>..]&) -> i64 {
         if e.len > 0 && find(endings, str("\n", e, "\n")) >= 0 && swan_mtime_ns(full) > fresh_scip_time {
             let rel = full[fresh_root.len..];
             sqlite::bind_text(known, 1, rel);
-            let mapped = sqlite::step(known, err) == 1;
+            let mapped = step_checked(known, err) == 1;
             sqlite::reset(known);
             if !mapped {
                 out.append(rel);

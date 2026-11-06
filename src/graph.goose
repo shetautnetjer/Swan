@@ -48,7 +48,7 @@ fn targets(db: i64, pattern: const u8[:], rel: const u8[:], out: u8[>..]&) -> u8
     json::format_key(out, "targets");
     out.push('[');
     targets_matched = 0;
-    while sqlite::step(st, err) == 1 {
+    while step_checked(st, err) == 1 {
         if ids.len > 0 { ids.push(','); out.push(','); }
         format(ids, sqlite::col_int(st, 0));
         symbol_json(st, out);
@@ -65,7 +65,7 @@ fn targets(db: i64, pattern: const u8[:], rel: const u8[:], out: u8[>..]&) -> u8
             WHERE c.name = '<init>' AND substr(c.scip, 1, length(t.scip)) = t.scip
             """, "#IDS#", ids);
         let cs = prepare_or_die(db, sql);
-        while sqlite::step(cs, err) == 1 { format(ids, ",", sqlite::col_int(cs, 0)); }
+        while step_checked(cs, err) == 1 { format(ids, ",", sqlite::col_int(cs, 0)); }
         sqlite::finalize(cs);
     }
     return ids;
@@ -111,7 +111,7 @@ fn get_callers(db: i64, pattern: const u8[:], rel: const u8[:], depth: i64, limi
     json::format_key(out, "callers");
     out.push('[');
     var n = 0;
-    while sqlite::step(st, err) == 1 {
+    while step_checked(st, err) == 1 {
         if n > 0 { out.push(','); }
         n++;
         symbol_json(st, out);
@@ -133,7 +133,7 @@ fn get_callers(db: i64, pattern: const u8[:], rel: const u8[:], depth: i64, limi
     let sum = prepare_or_die(db, "SELECT count(*), count(DISTINCT def_file) FROM temp.callers_found");
     var total = 0;
     var files = 0;
-    if sqlite::step(sum, err) == 1 { total = sqlite::col_int(sum, 0); files = sqlite::col_int(sum, 1); }
+    if step_checked(sum, err) == 1 { total = sqlite::col_int(sum, 0); files = sqlite::col_int(sum, 1); }
     sqlite::finalize(sum);
     let tf = prepare_or_die(db, "SELECT DISTINCT def_file FROM temp.callers_found ORDER BY def_file");
     out.append(",");
@@ -151,7 +151,7 @@ fn get_callers(db: i64, pattern: const u8[:], rel: const u8[:], depth: i64, limi
     json::format_key(out, "test_files");
     out.push('[');
     var t = 0;
-    while sqlite::step(tf, err) == 1 {
+    while step_checked(tf, err) == 1 {
         var file: u8[>..] = [];
         sqlite::col_text(tf, 0, file);
         if is_test_path(file) {
@@ -190,7 +190,7 @@ fn get_callees(db: i64, pattern: const u8[:], rel: const u8[:], limit: i64, out:
     json::format_key(out, "callees");
     out.push('[');
     var n = 0;
-    while sqlite::step(st, err) == 1 {
+    while step_checked(st, err) == 1 {
         if n > 0 { out.push(','); }
         n++;
         if sqlite::col_int(st, 9) == 1 {
@@ -255,7 +255,7 @@ fn hierarchy(db: i64, ids: const u8[:], down: bool, depth: i64, limit: i64, out:
     var err: u8[>..] = [];
     out.push('[');
     var n = 0;
-    while sqlite::step(st, err) == 1 {
+    while step_checked(st, err) == 1 {
         if n > 0 { out.push(','); }
         n++;
         if sqlite::col_int(st, 10) == 1 {
@@ -333,7 +333,7 @@ fn find_unused_symbols(db: i64, rel: const u8[:], include_tests: bool, limit: i6
     var n = 0;
     var total = 0;
     out.append("{\"unused\":[");
-    while sqlite::step(st, err) == 1 {
+    while step_checked(st, err) == 1 {
         var file: u8[>..] = [];
         sqlite::col_text(st, 4, file);
         if !include_tests && is_test_path(file) { continue; }

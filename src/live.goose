@@ -127,7 +127,7 @@ fn live_implementations(db: i64, pattern: const u8[:], rel: const u8[:], out: u8
     var line = 0;
     var col = 0;
     var err: u8[>..] = [];
-    if sqlite::step(st, err) == 1 { sqlite::col_text(st, 0, file); line = sqlite::col_int(st, 1) + 1; col = sqlite::col_int(st, 2) + 1; }
+    if step_checked(st, err) == 1 { sqlite::col_text(st, 0, file); line = sqlite::col_int(st, 1) + 1; col = sqlite::col_int(st, 2) + 1; }
     sqlite::finalize(st);
     guard file.len > 0 else { out.append("no definition of that symbol in the map"); return false; }
     var q: u8[>..] = [];
@@ -188,7 +188,7 @@ fn live_warm(db: i64) {
               FROM files) WHERE lang IS NOT NULL GROUP BY lang ORDER BY n DESC LIMIT 1
             """);
         var err: u8[>..] = [];
-        if sqlite::step(st, err) == 1 { sqlite::col_text(st, 0, want); best = sqlite::col_int(st, 1); }
+        if step_checked(st, err) == 1 { sqlite::col_text(st, 0, want); best = sqlite::col_int(st, 1); }
         sqlite::finalize(st);
         guard want.len > 0;
     }
@@ -201,7 +201,7 @@ fn live_warm(db: i64) {
         sqlite::bind_text(st, 1, pat);
         var err: u8[>..] = [];
         var file: u8[>..] = [];
-        if sqlite::step(st, err) == 1 { sqlite::col_text(st, 0, file); }
+        if step_checked(st, err) == 1 { sqlite::col_text(st, 0, file); }
         sqlite::finalize(st);
         if file.len > 0 {
             var q: u8[>..] = [];
