@@ -147,6 +147,32 @@ void gs_bld_append(gs_rref out, const void *data, size_t length) {
         self.assertFalse(Path(str(database) + ".lock").exists())
         self.assertFalse(Path(str(alias) + ".lock").exists())
 
+    def test_lock_file_symlinks_refused_without_touching_targets(self):
+        """Refuse existing and dangling lock symlinks without locking their targets."""
+        for existing in (True, False):
+            with self.subTest(existing=existing):
+                database = self.directory / f"map-{existing}.db"
+                target = self.directory / f"target-{existing}"
+                contents = b"unrelated file"
+                if existing:
+                    target.write_bytes(contents)
+                lock_file = Path(str(database) + ".lock")
+                lock_file.symlink_to(target)
+                handle, error = acquire(self.library, database)
+                if handle:
+                    self.handles.append(handle)
+                self.assertEqual(handle, 0, "writer followed a lock-file symlink")
+                self.assertIn("cannot open map writer lock", error)
+                self.assertTrue(lock_file.is_symlink())
+                self.assertFalse(database.exists())
+                if existing:
+                    self.assertEqual(target.read_bytes(), contents)
+                    import fcntl
+                    with target.open("rb") as stream:
+                        fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                else:
+                    self.assertFalse(target.exists())
+
     def test_database_deletion_does_not_change_lock_identity(self):
         """Verify deleting and recreating the database cannot bypass existing ownership."""
         database = self.directory / "swan.db"

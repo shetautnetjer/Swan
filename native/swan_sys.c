@@ -85,7 +85,9 @@ int64_t swan_writer_lock(swan_slice path, gs_rref err) {
         return 0;
     }
     snprintf(lock_path, sizeof lock_path, "%s.lock", canonical);
-    int fd = open(lock_path, O_RDWR | O_CREAT, 0666);
+    /* Refuse a symlink at the lock entry atomically, including dangling links.
+       Parent aliases remain supported through the canonical directory above. */
+    int fd = open(lock_path, O_RDWR | O_CREAT | O_NOFOLLOW, 0666);
     if (fd < 0) {
         append_cstr(err, "swan: cannot open map writer lock: ");
         append_cstr(err, strerror(errno));
