@@ -150,6 +150,14 @@ Every answer about a file that changed after the SCIP run carries
 
 Every tool also takes an optional `repo` (a path): it switches to that
 repo's map before answering, as `use_repo` would, and the choice persists.
+Tools accepting `repo` also advertise optional boolean `build`: pass
+`"build":false` on each request to forbid implicit map creation/rebuilding
+during selection. Omitted/true retains first-use building. A prior
+`use_repo(build:false)` does not constrain later calls. This is selection
+policy, not a read-only mode for explicit updates, checks, tests, edits or
+live analysis. Inspect the installed tool schema before relying on the field;
+older servers may ignore it. See [request build policy](docs/request-build-policy.md)
+for exact routing, legacy fallback and qualification.
 
 ## Platform support
 

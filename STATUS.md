@@ -550,3 +550,40 @@ configuration still match their saved hashes; installing a rebuilt package
 remains a separate operation requiring approval. The saved trust-list race,
 Goose adapter implementation and broader platform qualification remain outside
 this completed review scope.
+
+## 2026-11-06 — Independent review follow-up: request build policy
+
+Stage: isolated Linux candidate qualified; PR integration tracked by the
+request-build-policy change. Baseline is
+`019119335b44e7d8069a34851e67cd7472933da7` with unchanged library pins.
+The accepted first change advertises and enforces optional boolean `build`
+on every repository-selecting tool. False prevents implicit map building;
+malformed supplied values fail before selection or tool effects. The skill
+now checks installed schemas and retains a legacy fallback. See
+`docs/request-build-policy.md` for the contract and focused reproduction.
+
+Implementation `e0a22796ab0f1e0e190197b25940d456ad0465a0` built offline in CUA;
+binary SHA-256 is
+`e1411825179fec2009a0495e8fb3b270ca80f5c39f098f310a160be5f479e878`.
+All nine focused policy groups pass, covering 22 advertised selection tools
+and 24 malformed-policy requests. The old binary fails six policy groups;
+authorized build controls pass on both. Thirteen native lock tests, five
+reader cases, nine concurrency scenarios and 14 skill unit tests also pass.
+The focused test's initial lock-fixture error was corrected without changing
+the candidate binary; both runs and the final receipts are retained. See
+`docs/evidence/swan-request-build-policy-2026-11-06.json`. No new real-language
+or live-Python trust qualification is claimed for this selection-only change.
+
+The independent review also identified source-supported follow-up defects:
+cache metadata can advance before successful map publication; affected-test
+substring deduplication can omit a distinct suffix-related path; skipped
+Java checking can clear unchecked saved diagnostics. These need separate
+runtime reproductions and focused fixes, starting with cache recovery.
+Their resolution is not claimed by this selection-policy change.
+
+After those correctness repairs: clearer executed-test/partial-live/coverage
+reporting, strict bounded skill qualification, a current architecture reading
+guide, then representative measurements before performance changes. Preserve
+SQLite, external semantic engines, writer ownership and read snapshots.
+The active installation, saved trust and production configuration remain
+outside this source PR.

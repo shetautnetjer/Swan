@@ -1,0 +1,144 @@
+{
+  "implementation_commit": "e0a22796ab0f1e0e190197b25940d456ad0465a0",
+  "base_commit": "019119335b44e7d8069a34851e67cd7472933da7",
+  "binary_sha256": "e1411825179fec2009a0495e8fb3b270ca80f5c39f098f310a160be5f479e878",
+  "baseline_binary_sha256": "05896de6f1d50cb0aaf4c50f81c24861b4198690a6f4fe24980701a3f70f480b",
+  "serve_sha256": "a4a7ae04b4aa81face16c2bcd54d1270100e0f8ad01c771bc86fc019ada6dde6",
+  "harness_sha256": "67785f6f02594ec55f4e396f8f7c505f2b36fa5b8b0a1bac98089c442592b7a3",
+  "platform": "Linux-6.8.0-146-generic-x86_64-with-glibc2.39",
+  "results": {
+    "candidate": {
+      "path": "swan-build-policy-_ip7_jau/results.json",
+      "sha256": "1b854f099c2588251c6f0a88b51d795460d5adc6ee4628d24aa9bdc64f7a9ced",
+      "cases": [
+        {
+          "case": "positive_controls",
+          "status": "PASS"
+        },
+        {
+          "case": "schemas_and_all_tools",
+          "status": "PASS"
+        },
+        {
+          "case": "existing_and_stateless",
+          "status": "PASS"
+        },
+        {
+          "case": "deleted_map",
+          "status": "PASS"
+        },
+        {
+          "case": "incompatible_and_ancestor",
+          "status": "PASS"
+        },
+        {
+          "case": "locked_closer",
+          "status": "PASS"
+        },
+        {
+          "case": "names_and_duplicates",
+          "status": "PASS"
+        },
+        {
+          "case": "malformed_policy",
+          "status": "PASS"
+        },
+        {
+          "case": "explicit_update",
+          "status": "PASS"
+        }
+      ]
+    },
+    "baseline": {
+      "path": "swan-build-policy-inkzgcio/results.json",
+      "sha256": "04e670d844cabc06e02a5966fca1a5a8929ed31b8dc61a78571466e466348290",
+      "cases": [
+        {
+          "case": "positive_controls",
+          "status": "PASS"
+        },
+        {
+          "case": "schemas_and_all_tools",
+          "status": "FAIL"
+        },
+        {
+          "case": "existing_and_stateless",
+          "status": "FAIL"
+        },
+        {
+          "case": "deleted_map",
+          "status": "FAIL"
+        },
+        {
+          "case": "incompatible_and_ancestor",
+          "status": "FAIL"
+        },
+        {
+          "case": "locked_closer",
+          "status": "PASS"
+        },
+        {
+          "case": "names_and_duplicates",
+          "status": "FAIL"
+        },
+        {
+          "case": "malformed_policy",
+          "status": "FAIL"
+        },
+        {
+          "case": "explicit_update",
+          "status": "PASS"
+        }
+      ]
+    },
+    "readers": {
+      "path": "swan-readers-8zuuzsx1/reader-results.json",
+      "sha256": "8725f9fe9abb76c9c8b562c2ff2efb2d832bf1697a1881e3443d06b92910d03f"
+    },
+    "concurrency": {
+      "path": "swan-concurrency-_iitpdpc/results.json",
+      "sha256": "d8da77a4a34fd6407c3f7f5b2e1ee36d0ed9a13d383c8ff6b054207538b7a092"
+    }
+  },
+  "archive": {
+    "name": "swan-request-build-policy-evidence-2026-11-06.tar.gz",
+    "sha256": "1959dfa952107cdfdf4e0d6c8fa80da0c9ffdb5eca90480dae282dee7151f114",
+    "bytes": 86176,
+    "files": 276,
+    "scope": "bounded textual receipts/logs/transcripts; excludes binaries, databases and large fixture data",
+    "host_path": "/home/aya-hmw/aya/sandbox/swan-request-policy-2026-11-06/swan-request-build-policy-evidence-2026-11-06.tar.gz"
+  },
+  "date": "2026-11-06",
+  "stage": "isolated Linux qualification; pull request pending integration",
+  "toolchain": {
+    "goose": "v2026.3",
+    "gcc": "13.3.0",
+    "build": "scripts/build.sh --offline -v",
+    "cache": "Reused reviewed disposable CUA package cache; no downloads or system installs"
+  },
+  "checks": {
+    "policy_groups": 9,
+    "repo_selecting_tool_schemas": 22,
+    "malformed_policy_requests": 24,
+    "native_lock_tests": 13,
+    "reader_cases": 5,
+    "concurrency_scenarios": 9,
+    "skill_unit_tests": 14,
+    "skill_validator": "PASS",
+    "independent_source_and_harness_review": "No blocking issue found"
+  },
+  "baseline_reproduction": {
+    "passed": 3,
+    "failed": 6,
+    "positive_controls": "Both baseline and candidate execute marker indexer/flattener with omitted/true; explicit update_map remains active with false",
+    "negative_control": "Old binary launches marker tools on restricted ordinary repo calls; candidate refuses with unchanged markers/artifacts"
+  },
+  "harness_correction": "Initial candidate passed 8/9: the lock fixture opened/closed its database while the same process held a POSIX SQLite lock. Moved inventory hashing outside the transaction. Final same-binary rerun passes 9/9; baseline lock control then also passes. Initial artifacts retained.",
+  "limits": [
+    "Synthetic indexer/flattener qualification; real language tools and Python trust controls were not rerun for this selection-only change.",
+    "build:false only restricts implicit map selection/building, not explicit tool effects or live warm-up.",
+    "Legacy server schemas may ignore the new field; schema-aware clients and fallback are required.",
+    "No installed executable, saved trust, production module configuration or agent settings replaced.",
+    "Cache recovery, affected-test deduplication and skipped Java diagnostic preservation remain follow-up work."
+  ]
+}
