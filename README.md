@@ -247,9 +247,10 @@ an active installation, grant repository trust or configure an agent. A built
 candidate and its qualification receipt are separate from an official release.
 The source-build instructions below retain the legacy full-tool bootstrap.
 
-**Concurrent maps candidate:** [PR #15](https://github.com/shetautnetjer/Swan/pull/15)
+**Concurrent maps:** [PR #15](https://github.com/shetautnetjer/Swan/pull/15)
 serializes map/index/refresh writers and keeps read-only database answers on
-complete snapshots. It passed bounded Linux CUA checks and is not yet merged.
+complete snapshots. The reviewed implementation passed bounded Linux CUA checks,
+including successful build-server release and failed/interrupted child ownership.
 Busy errors can require retry or a server restart; keep persistent `.lock`
 files and serialize other stateful operations and saved trust changes.
 See [concurrency scope and exact staged-binary tests](docs/concurrency.md):

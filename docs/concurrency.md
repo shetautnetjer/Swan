@@ -1,16 +1,16 @@
 # Concurrent map access
 
-As of November 6, 2026, [PR #15](https://github.com/shetautnetjer/Swan/pull/15)
-is **open, not yet merged**. The reviewed contract below includes changes
-pending fresh runtime qualification. The historical pre-review
-results apply only to their exact Linux binary and disposable local-filesystem
-tests; they do not qualify the revised contract or establish production readiness.
+The implementation in [PR #15](https://github.com/shetautnetjer/Swan/pull/15)
+has bounded Linux qualification, including the review correction for persistent
+build servers. See the exact source and binary below. These disposable
+local-filesystem tests do not establish production readiness or replace an
+active installation.
 
 ## Reviewed contract and boundaries
 
-The revised lock-release behavior described here is implemented but awaits
-fresh runtime qualification; it is not a claim about the historically tested
-`ef03ba0` binary. Registry selection retains its conservative contention policy.
+The revised lock-release behavior is qualified below; it is not a claim about
+the historically tested `ef03ba0` binary. Registry selection retains its
+conservative contention policy.
 
 - `swan map`, direct `swan index`, and direct `swan refresh` share a
   nonblocking, per-database writer lock. The map pipeline holds it across
@@ -20,7 +20,9 @@ fresh runtime qualification; it is not a claim about the historically tested
 - Writer identity is the canonical parent directory plus database filename.
   Symlinked parent directories resolve to the same identity, including before
   the database exists. A database-file symlink is refused for writing; use
-  the real database path. Do not use alternate hard-link identities.
+  the real database path. Symlinks at the adjacent lock-file entry, including
+  dangling links, are also refused without following the target. Do not use
+  alternate hard-link identities.
 - The adjacent `swan.db.lock` file persists after release. **Its presence is
   not ownership, and it must not be deleted as a recovery step.** The kernel's
   advisory lock establishes ownership, not merely an open descriptor. Deleting
@@ -72,10 +74,38 @@ race; serialize trust changes. Windows/macOS, network filesystems, arbitrary
 hard-link aliases, threaded SQLite use and power-loss durability are also
 outside this qualification.
 
+## Review-completion qualification: November 6, 2026
+
+Source: `5d415961fbfc679207b3e12cf92bb4ef364d6ad9`.
+CUA Ubuntu 24.04 x86-64 binary SHA-256:
+`05896de6f1d50cb0aaf4c50f81c24861b4198690a6f4fe24980701a3f70f480b`.
+The production lock files preserve success-only release from `8223ea6` and
+the lock-entry symlink refusal in `5d41596`; independent review verified both.
+
+- The old close-only release failed both new successful-job regressions.
+  The final 13 native tests pass, including idle services after successful
+  spawn/run jobs, surviving writers after failures, an escaped daemon after
+  timeout, lock-entry symlink refusal, and the original parent-death cases.
+- All 41 local package/native unit tests and 14 skill self-test unit tests pass.
+- The rebuilt binary passes 9/9 concurrency scenarios, five reader regressions,
+  24/24 fixture patterns, and real Python/TypeScript definitions, references
+  and live clean/error/fixed diagnostics.
+- The isolated Python trust probe passes interpreter markers false/true/false,
+  with the trusted control enabled only in its disposable process. Saved
+  trust remains unchanged.
+- Fourteen map calls over 120 generated files per language preserve unchanged
+  rows and produce incremental maps equal to fresh maps, with known MCP answers.
+  A benchmark preflight initially refused a missing Bun on its launcher PATH;
+  a process-local PATH correction to the existing private runtime passed.
+
+See the [review-completion receipt](evidence/swan-review-completion-2026-11-06.json)
+for hashes, artifacts and explicit limits. Earlier performance numbers remain
+measurements of their recorded binary, not this rebuilt candidate.
+
 ## Historical pre-review qualification: November 6, 2026
 
-These results precede the reviewed success-release change above. Fresh
-qualification results for that change are pending.
+These results precede the reviewed success-release change above and are
+retained to distinguish the earlier implementation from the final qualification.
 
 Source: `ef03ba0e13e357316e318a2384b58c5ec0b222d3`.
 Built and exercised in the isolated Ubuntu 24.04 x86-64 CUA environment.

@@ -78,3 +78,14 @@ oracles, logs, tool hashes and provenance were retained in the test lab:
 
 These results supplement the [concurrency qualification](concurrency.md);
 they do not substitute for its interrupted-writer and contention tests.
+
+## Review-completion recheck
+
+After the lock-lifetime review fix, source `5d415961` / binary `05896de6…`
+passed a fresh 14-call mapping/refresh experiment with the same 120-file
+fixture design. Unchanged rows and incremental-versus-fresh equality passed
+for both languages, as did known MCP answers. The reader-latency experiment
+above was not rerun or relabeled. See the
+[review-completion receipt](evidence/swan-review-completion-2026-11-06.json)
+and its separately retained `swan-runtime-51a_5c5i/summary.json` for this
+later run. No additional performance optimization was introduced.

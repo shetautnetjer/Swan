@@ -47,15 +47,17 @@ redesigns. Material architecture changes reopen the design decision.
   24/24 skill patterns (both empty-variadic canaries FIXED; JS-label TRAP),
   and real Python/TypeScript definition/reference and live clean/error/fixed
   checks. See [matcher receipt](evidence/swan-matcher-2026-11-06.json).
-- **Stage 3 — qualified candidate, PR open:** [Swan PR #15](https://github.com/shetautnetjer/Swan/pull/15),
-  source `ef03ba0e13e357316e318a2384b58c5ec0b222d3`, built in CUA with SHA-256
-  `597dd20e6b58919a703249e9f77c55783a2c2a04a7a8d8bd66739b7617b4a5f8`.
-  Passed 9/9 concurrency scenarios, five focused reader regressions, 36 local
-  package/native tests (eight locks), 24 skill patterns and real Python/TypeScript
-  definitions/references/live checks. Independent review added inherited child
-  lock ownership and database-file symlink refusal; parent-directory aliases
-  remain supported. [Contract, limits and reproduction](concurrency.md).
-  This candidate is not yet merged or installed as a production replacement.
+- **Stage 3 — implemented and qualified:** [Swan PR #15](https://github.com/shetautnetjer/Swan/pull/15),
+  source `5d415961fbfc679207b3e12cf92bb4ef364d6ad9`, built in CUA with SHA-256
+  `05896de6f1d50cb0aaf4c50f81c24861b4198690a6f4fe24980701a3f70f480b`.
+  Passed 9/9 concurrency scenarios, five focused reader regressions, 41 local
+  package/native tests (13 native lock tests), 14 skill unit tests, 24 fixture
+  patterns and real Python/TypeScript definitions/references/live checks.
+  Review corrected idle build-server lock retention: successful completion
+  explicitly unlocks, while failure/timeout and parent death preserve child
+  ownership. Database-file symlinks remain refused; parent aliases work.
+  [Contract, limits and reproduction](concurrency.md). Integration status is
+  tracked by the linked PR; source qualification does not replace an installation.
 - **Stage 4 — investigation:** official Goose `v2026.3` source at
   [`8511ae34`](https://github.com/aardappel/goose/commit/8511ae34bdc9aabf77baaab80b4d659ea87835e2)
   already has a `tree-sitter/` grammar and compiler LSP in `src/lsp*.h`.
@@ -87,7 +89,8 @@ redesigns. Material architecture changes reopen the design decision.
   CUA run references: `swan-runtime-bigun36h/summary.json` and
   `swan-reader-latency-y32vjttc/summary.json`.
 - **Final isolated trust regression — passed:** real Python diagnostics and
-  interpreter markers false/true/false passed in `swan-verify-_azjgets`;
+  interpreter markers false/true/false passed on `5d415961` in
+  `review-lock-symlink-evidence/swan-verify-cf1ecawd`;
   the saved trust file remained absent and unchanged. This rechecks the
   tested live-Python path, not every execution path or trust-list concurrency.
 

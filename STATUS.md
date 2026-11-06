@@ -521,3 +521,32 @@ that matcher work and concurrency execution were still pending.
   concurrency. Next: finish PR #15 review/merge checks and preserve the bounded
   qualification evidence. Active installations, saved trust and agent/module
   configuration are unchanged.
+
+## 2026-11-06 — Review completion and fresh CUA qualification
+
+This supersedes the earlier stage-3 candidate's qualification for current
+source; its results remain historical. PR #15 includes the reviewed correction
+from `8223ea6` and lock-entry symlink refusal at `5d415961fbfc679207b3e12cf92bb4ef364d6ad9`.
+Successful foreground jobs explicitly unlock idle build-server copies;
+failure, timeout and parent death retain surviving writer ownership.
+The fresh-map skill instructions also specify an isolated registry, exact map
+verification and a direct-database CLI fallback (PR #13 comment 4493383118).
+
+The exact rebuilt CUA binary has SHA-256
+`05896de6f1d50cb0aaf4c50f81c24861b4198690a6f4fe24980701a3f70f480b`.
+All 41 local package/native tests, 14 skill unit tests, 13 native CUA tests,
+nine concurrency cases, five reader regressions, 24 fixture patterns and real
+Python/TypeScript maps/live diagnostics pass. The isolated trust probe again
+records interpreter execution false/true/false without changing saved trust.
+Fourteen mapping calls also preserve incremental-versus-fresh semantic equality.
+A benchmark launcher preflight failed for missing Bun on PATH; adding the
+already installed private runtime to that process's PATH passed the retry.
+
+Source and receipt: `docs/evidence/swan-review-completion-2026-11-06.json`.
+Raw CUA evidence was copied to the host at
+`/home/aya-hmw/aya/sandbox/swan-package-candidate-2026-11-06/swan-final-review-evidence-2026-11-06.tar.gz`.
+PR #15 tracks source integration. The active executable, trust list and module
+configuration still match their saved hashes; installing a rebuilt package
+remains a separate operation requiring approval. The saved trust-list race,
+Goose adapter implementation and broader platform qualification remain outside
+this completed review scope.

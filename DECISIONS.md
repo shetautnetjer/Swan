@@ -225,3 +225,23 @@ reported indexer work 388–766 ms, and the reader median increased by only
 answers passed. These measurements do not justify a new backend, daemon,
 parser, package split or speculative performance change; see
 `docs/improvements-2026-11-06.md` for fixture scope and exact observations.
+
+## 2026-11-06 — Release completed jobs while retaining failed-child ownership
+
+Superseding the close-only successful-release behavior of the earlier stage-3
+candidate, use `swan_writer_complete` only after successful cooperating jobs
+and map publication. Explicit `LOCK_UN` releases inherited copies held by idle
+build servers. Failure/timeout uses close-only `swan_writer_unlock`, while
+abrupt termination relies on OS descriptor cleanup; surviving child writers
+retain ownership. This does not promise protection against tools that report
+success before finishing shared output. Preserve the automated implementation
+at `8223ea6`, retain the lock-entry symlink refusal added in `5d41596`,
+and independently qualify that final source.
+
+Keep repository discovery fail-closed on busy/locked maps: an unreadable root
+could be a nearer match than a readable ancestor. Keep the advisory lock's
+owned/trusted-directory boundary explicit rather than claiming cross-user
+isolation. For dependency/configuration changes, the skill must select its
+fresh map through a private registry or exact-database CLI query; creation time
+does not determine map selection. See the review-completion receipt and
+`docs/concurrency.md` for final evidence and remaining limits.
