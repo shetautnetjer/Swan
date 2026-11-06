@@ -175,3 +175,148 @@ list. Record which OS/CPU and tool versions actually passed.
 The implementation scope and this proposal need approval before detailed
 port design or runtime changes. Documentation of the current support level
 is independent of that future work.
+
+## Installable Swan package and portable skill — proposal, 2026-11-06
+
+**Stage: PRD/HLD for approval.** The user requested a package that checks and
+installs dependencies and includes an agent skill. The following scope has
+not yet been implemented or accepted. The ordinary C-header build repair
+found during investigation is tracked separately from this new installer.
+
+Evidence: [fresh-build receipt](evidence/swan-install-2026-11-06.json), including
+both failing builds, the two experimental header patches, and passing checks.
+With both patches, the candidate built on GCC 13.3 and passed 24/24 skill
+pattern checks, 11 offline assertions, and all three real live-Python trust
+controls. This is a candidate assembled from fresh downloads plus two local
+patches, not an installer or an unmodified tagged-source success.
+
+### Problem and desired outcome (PRD)
+
+A new user should be able to install Swan into a folder they own, see which
+features are ready, and load its existing agent skill without editing
+Khamani/Aya-specific paths. The installer must distinguish missing tools
+from unsupported platforms and from language features the user did not select.
+
+Current evidence at `583e665`:
+
+- The copied binary works in Ubuntu 24.04 x86-64, including the offline demo
+  and real live-Python trust controls. This did not prove a source install.
+- A new clone with no copied compiler/cache/binary fetched checksum-verified
+  Goose v2026.3 and the pinned LSP submodule. GCC 13.3 then rejected
+  `native/swan_sys.c`: `bool`, `true`, and `false` are used without
+  `<stdbool.h>`. This is a narrow build defect, not a platform-layer design.
+- After correcting Swan's include in the disposable clone, the same GCC 13
+  error surfaced in `goose-sqlite@v0.1.2/src/gsq.c`. The owning package also
+  needs a reviewed header correction and a new immutable dependency reference;
+  editing a local compiler cache is only an experiment, not a distributable fix.
+- Fresh `npm ci` using the existing tools lockfile succeeded with Node
+  24.21.0. A lab-local Bun 1.3.14 installation also succeeded. Bun is needed
+  for mapping (`tools/scip-flatten.ts`), not just for Swan's tests.
+- `fetch-tools.sh` unconditionally fetches the heavyweight language tools;
+  Kotlin alone is documented as about 1.5 GB unpacked. It does not offer a
+  read-only dependency report or a minimal language selection.
+- `skills/swan-code-check/` is already the canonical skill. Its instructions,
+  self-test fallback executable and scratch default contain local Aya paths.
+
+Proposed first milestone: Linux x86-64, one user-owned installation tree,
+core runtime plus the existing locked Python/TypeScript tool set, and the
+portable existing skill. Additional adapters should remain available through
+explicit opt-in work; native Windows, macOS and ARM64 remain separate ports.
+Do not advertise a platform or adapter from a successful download alone.
+
+Non-goals: a new registry/package manager, daemon, MCP service, database,
+silent system-package changes, automatic repository trust, automatic agent
+configuration changes, and automatic replacement of an existing installation.
+Publishing a public release or installing into the operator's active setup
+is a separate action from building and testing a candidate.
+
+### Preferred approach and alternatives (HLD)
+
+Preserve Swan's existing `bin/`, `tools/`, `.tools/`, `data/` layout under
+one explicit user prefix. Executable-relative discovery remains the owner;
+a PATH launcher may point to the real executable, but an isolated test must
+copy the tree rather than symlink back into production. Do not move trust
+storage or change its format as part of packaging.
+
+Prepare a Linux release archive from a qualified build, with source revision,
+checksums, tool versions and licenses. Keep a documented source-build route
+for contributors. This is preferable to making every end user compile the
+native parsers; a source-only installer is the smaller fallback if release
+building cannot yet be qualified. An OS-specific package-manager release can
+follow later. Wrapping the present fetch-all script is rejected because it
+preserves the unwanted downloads and prerequisite failures.
+
+The installation workflow should:
+
+1. Inspect OS, CPU, executable compatibility and selected feature prerequisites.
+   Show the destination, detected tools, required downloads and unsupported
+   features before applying changes. A dry run has no downloads or writes.
+2. Reuse compatible dependencies after verifying their actual versions;
+   place permitted missing tool downloads under the chosen prefix, using
+   reviewed versions and checksums/lockfiles. Keep system prerequisites as
+   actionable instructions when a safe local installation is unavailable.
+   Never run sudo, change global PATH/configuration, or upgrade system tools
+   implicitly. Preserve existing npm integrity data and use a frozen install.
+3. Install only the selected profile. Keep the current small locked npm set
+   together initially instead of inventing a second dependency resolver.
+   Heavy JDK/Kotlin/CUDA/.NET/game-tool downloads are not the default.
+4. Refuse a nonempty installation destination by default. Build/download in
+   staging and expose a completed tree only after verification. A failed
+   attempt must leave the previous installation and all maps/trust untouched.
+   Automated upgrade/uninstall behavior is deferred until its data-preservation
+   and rollback rules are tested. New installations can be removed by deleting
+   only their new, explicitly identified prefix.
+5. Run the selected profile's real smoke checks and report each capability
+   as exercised, missing, unsupported or unselected. Print optional MCP/skill
+   registration instructions; do not edit an agent's configuration automatically.
+
+A proposed `swan doctor` command should be read-only: report resolved tool
+paths, versions, required versus optional dependencies and exact remediation.
+It must not download tools, index an arbitrary repository, invoke a project
+interpreter or grant trust merely to diagnose the installation. A package
+installation request authorizes only the selected dependencies and prefix.
+The precise CLI is subject to implementation review; these are not existing
+commands yet.
+
+Dependency checks must distinguish the core executable, indexing and each
+language capability. Python mapping needs Python, Node, the Python SCIP
+indexer and Bun; live Python also needs Pyright. Python lint/format/test tools
+are separate. Rust's analyzer download does not provide Cargo/rustc/rustfmt/
+Clippy. Java's SCIP launcher fetches jars on first use, so offline readiness
+requires a separate exercised check. The current CUDA setup has an unpinned
+curand package; do not claim the entire legacy bootstrap is reproducible.
+
+Update `skills/swan-code-check/` rather than create a competing skill:
+resolve the configured MCP server or an explicit/discovered executable,
+remove personal paths/identities from the shared workflow, retain the pattern
+pack, and make copied-skill self-tests work with the selected installation.
+If accepting bare command names, resolve them through PATH before the current
+file/executable validation. Keep host-specific examples as optional references.
+Trust remains the caller's explicit decision; tests execute repository code
+and require task authorization. Installation never grants repository trust.
+
+### Acceptance and stop conditions
+
+- A fresh Ubuntu clone/build with empty Goose cache passes; record the exact
+  patch, compiler, source/package refs and artifact hashes. No host cache copy.
+- A candidate installs into a new prefix, including a path with spaces, and
+  works from another working directory. No dependency on `~/aya` remains.
+- Missing/old required tools and unsupported platforms fail clearly; optional
+  unselected adapters do not make the selected profile fail. Doctor/dry-run
+  preserve files and trust. A fake repo interpreter is not executed by either.
+- Default installation omits heavyweight packs. Repeat/failed installs leave
+  unrelated files and previous installations unchanged; no global settings change.
+- The offline demo passes, real selected Python/TypeScript indexing produces
+  known definitions/references, and real diagnostics return intentional errors.
+- The live-Python marker controls are false/true/false with successful actual
+  diagnostics in all cases. Missing tools, empty responses and skips are not passes.
+- The existing skill's 24 pattern checks pass with the installed executable;
+  a copied skill works without the source checkout or personal defaults.
+- A clean independent review checks the exact candidate. Distribution status
+  stays separate from installation and runtime qualification. Saved-trust-list
+  concurrency remains explicitly unresolved unless separately fixed and tested.
+
+Stop on checksum/source mismatch, an unexpected write outside the selected
+prefix/test tree, a required system mutation, or any attempt to change a real
+trust list. Preserve failed evidence. Review this PRD/HLD and obtain approval
+before designing or implementing the new installer, doctor or skill behavior.

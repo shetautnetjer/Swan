@@ -375,6 +375,32 @@ branch fix/greptile-review:
   comparison, Markdown local-link/anchor checks and `git diff --check`.
   Full build/integration suites are not rerun for documentation-only edits.
 
+## 2026-11-06: fresh-install investigation and package proposal
+
+- A fresh Swan checkout at `583e665` in CUA's Ubuntu 24.04 x86-64 VM
+  fetched Goose v2026.3, the LSP submodule and native packages into a private
+  initially empty cache. No host Swan executable or compiled cache was copied.
+  The existing VM supplied GCC 13.3, Python 3.12.3 and Node 24.21.0.
+- Unmodified source failed: Swan's C helper omits `<stdbool.h>`. Correcting
+  it in the lab exposed the same defect in `goose-sqlite@v0.1.2/src/gsq.c`.
+  Two local include corrections produced a working candidate. The SQLite
+  change is experimental cache content, not a published package fix; both
+  fixes must reach their owning sources and the dependency pin before release.
+- Fresh locked npm installation and lab-local Bun 1.3.14 succeeded. Candidate
+  SHA-256: `2fe81c794cc411457015f9e58943b4d8c21ae0b32444aa5eeabbf3fe72b7f1e0`.
+  It passed 24/24 skill pattern checks, 11 offline assertions, and real Python
+  diagnostics with false/true/false repository-interpreter markers. Pattern
+  tests do not by themselves validate SCIP definition/reference correctness.
+- Source/logs/patches/results: `docs/evidence/swan-install-2026-11-06.json`.
+  Guest work retained at `/home/cua/swan-fresh-NHb1m01M`; the VM was returned
+  to its stopped state. Host installed Swan/configuration/trust remain untouched.
+- PRD/HLD appended to `docs/packages.md`: a user-space Linux x86-64 package,
+  dependency checker, selected tool installation, and a portable revision of
+  the existing skill. No new installer/doctor/skill behavior is implemented.
+  Next owner/action: Khamani approves or revises this scope; implementation then
+  fixes both source owners, builds the package, verifies the selected profiles
+  and copied skill, and obtains independent review before release acceptance.
+
 ## Remaining work
 
 1. Qualify real server adapters and indexers separately from the mock LSP
