@@ -70,3 +70,9 @@ This synthetic selection test does not qualify arbitrary external indexers,
 other platforms or the separate full-pipeline cache-recovery behavior.
 Recorded candidate results belong in the accompanying evidence receipt;
 source integration does not update an installed executable.
+
+The [November 6 receipt](evidence/swan-request-build-policy-2026-11-06.json)
+records nine passing policy groups on binary `e1411825…` from implementation
+`e0a22796`. The old binary fails six policy groups while both authorized-build
+controls and the preserved locked-map refusal pass. The candidate also passes
+13 native lock tests, five reader cases and nine concurrency scenarios.
