@@ -21,6 +21,7 @@ from check_concurrency import MCP, child_environment, connect, require
 
 
 def main():
+    """Exercise reader freshness, explicit errors, and recovery in a disposable fixture."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", type=Path, required=True)
     parser.add_argument("--output-parent", type=Path, required=True)
@@ -52,11 +53,13 @@ def main():
     results = []
 
     def command(name):
+        """Run an index or refresh command against the fixture and require success."""
         result = subprocess.run([str(binary), name, str(rows), str(database), str(repo)],
             capture_output=True, text=True, timeout=options.timeout, env=child_environment())
         require(result.returncode == 0, result.stdout + result.stderr)
 
     def metadata(key):
+        """Read one metadata value from the existing fixture database."""
         with closing(connect(database)) as connection:
             return connection.execute("SELECT value FROM meta WHERE key=?", (key,)).fetchone()[0]
 
@@ -65,12 +68,14 @@ def main():
     client = MCP(binary, database, directory, options.timeout)
 
     def call(name, arguments):
+        """Call an MCP tool and return its error flag and text payload."""
         answer = client.request("tools/call", {"name": name, "arguments": arguments})
         require("result" in answer, "unexpected protocol error: " + repr(answer))
         result = answer["result"]
         return result.get("isError", False), result["content"][0]["text"]
 
     def probe(stale=False):
+        """Validate the probe symbol and its expected freshness, then return the result."""
         failed, text = call("find_symbol", {"name_path_pattern": "probe", "include_body": True})
         require(not failed, text)
         found = json.loads(text)

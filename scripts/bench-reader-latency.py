@@ -24,25 +24,30 @@ import time
 
 
 def require(ok, message):
+    """Raise a benchmark failure when an acceptance condition is false."""
     if not ok:
         raise RuntimeError(message)
 
 
 def digest(path):
+    """Return the SHA-256 digest of an existing file's bytes."""
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def save(path, value):
+    """Write readable JSON evidence with a trailing newline."""
     path.write_text(json.dumps(value, indent=2, ensure_ascii=False) + "\n")
 
 
 def fingerprint(path):
+    """Capture file content and identity for before-and-after stability checks."""
     stat = path.stat()
     return {"sha256": digest(path), "inode": stat.st_ino, "device": stat.st_dev,
             "size": stat.st_size, "mtime_ns": stat.st_mtime_ns}
 
 
 def oracle(database, repository):
+    """Verify the 50,000-symbol fixture and derive its complete probe reply."""
     for suffix in ("-journal", "-wal", "-shm"):
         sidecar = Path(str(database) + suffix)
         require(not sidecar.exists(), f"fixture has SQLite sidecar {sidecar}; use a quiescent completed fixture")
@@ -73,12 +78,16 @@ def oracle(database, repository):
 
 
 def trial(helper, binary, database, directory, expected):
+    """Measure 200 validated queries after 20 warmups in one bounded session."""
     directory.mkdir()
     env = {name: value for name, value in os.environ.items() if name in ("PATH", "HOME", "LANG", "LC_ALL", "TZ")}
     env["SWAN_TRUST_BUILD"] = "0"
 
     class Client(helper.MCP):
+        """Adapt the demo MCP client for an isolated session and bounded cleanup."""
+
         def __init__(self):
+            """Start Swan with the fixture database, filtered environment and log."""
             self.stderr = (directory / "serve.stderr.log").open("wb")
             self.process = subprocess.Popen([str(binary), "serve", str(database)], cwd=directory, env=env,
                                             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self.stderr,
@@ -86,6 +95,7 @@ def trial(helper, binary, database, directory, expected):
             self.next_id, self.buffer, self.transcript = 0, b"", []
 
         def close(self):
+            """Close stdin, kill a hung process group, and check Swan's exit status."""
             if self.process.poll() is None:
                 try:
                     self.process.stdin.close()
@@ -106,6 +116,7 @@ def trial(helper, binary, database, directory, expected):
     times, warmups = [], []
 
     def expired(signum, frame):
+        """Abort the trial when its 120-second alarm fires."""
         raise TimeoutError("trial exceeded 120 seconds")
 
     previous_handler = signal.signal(signal.SIGALRM, expired)
@@ -154,6 +165,7 @@ def trial(helper, binary, database, directory, expected):
 
 
 def main():
+    """Validate the fixture, measure selected binaries and persist comparisons."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", type=Path, required=True, help="Exact candidate executable")
     parser.add_argument("--baseline", type=Path, help="Optional exact earlier executable; runs first")

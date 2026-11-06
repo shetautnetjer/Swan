@@ -29,15 +29,18 @@ import time
 
 
 class Inconclusive(RuntimeError):
+    """Signal that a required event or process barrier was not established."""
     pass
 
 
 def require(value, message):
+    """Raise an assertion with the supplied explanation when a check fails."""
     if not value:
         raise AssertionError(message)
 
 
 def child_environment():
+    """Disable live warmup and blanket repository trust for test children only."""
     environment = os.environ.copy()
     # A user's opted-in warmup must not turn a storage experiment into a live
     # language-server run. This affects only harness child processes.
@@ -47,7 +50,9 @@ def child_environment():
 
 
 class Child:
+    """Own a bounded subprocess, its output logs, and its stop/resume lifecycle."""
     def __init__(self, argv, directory, name, timeout):
+        """Launch the command in its own process group and retain separate output logs."""
         self.argv, self.timeout = list(map(str, argv)), timeout
         self.stdout_path = directory / (name + ".stdout")
         self.stderr_path = directory / (name + ".stderr")
@@ -59,6 +64,7 @@ class Child:
         self.stopped = False
 
     def stop(self):
+        """Confirm SIGSTOP through waitpid, or report a missed barrier as inconclusive."""
         if self.process.poll() is not None:
             raise Inconclusive("child completed before event-triggered SIGSTOP")
         try:
@@ -80,6 +86,7 @@ class Child:
         raise Inconclusive("could not establish stopped child barrier")
 
     def resume(self):
+        """Resume a stopped child while tolerating a process that has already exited."""
         if self.stopped:
             try:
                 os.kill(self.process.pid, signal.SIGCONT)
@@ -88,15 +95,18 @@ class Child:
             self.stopped = False
 
     def wait(self):
+        """Return the exit status or mark an expired process deadline inconclusive."""
         try:
             return self.process.wait(timeout=self.timeout)
         except subprocess.TimeoutExpired as exc:
             raise Inconclusive("child exceeded bounded wait: " + " ".join(self.argv)) from exc
 
     def text(self):
+        """Read both captured output streams, replacing undecodable bytes."""
         return self.stdout_path.read_text(errors="replace") + self.stderr_path.read_text(errors="replace")
 
     def close(self):
+        """Kill any surviving owned process group and close the output logs."""
         if self.process.poll() is None:
             try:
                 os.killpg(self.process.pid, signal.SIGKILL)
@@ -110,6 +120,7 @@ class Child:
 class Watch:
     """inotify identifies actual path creation/modification, not guessed delays."""
     def __init__(self, directory):
+        """Watch directory mutations through a nonblocking Linux inotify descriptor."""
         self.libc = ctypes.CDLL(None, use_errno=True)
         self.fd = self.libc.inotify_init1(os.O_NONBLOCK | os.O_CLOEXEC)
         if self.fd < 0:
@@ -120,6 +131,7 @@ class Watch:
             raise OSError(ctypes.get_errno(), "inotify_add_watch")
 
     def events(self, timeout=0):
+        """Return available filename/event-mask pairs after a bounded wait."""
         if not select.select([self.fd], [], [], timeout)[0]:
             return []
         data = os.read(self.fd, 65536)
@@ -132,6 +144,7 @@ class Watch:
         return result
 
     def stop_on(self, child, target, predicate, timeout):
+        """Stop the child on a matching event and recheck the condition after suspension."""
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             for name, _ in self.events(min(0.1, max(0, deadline - time.monotonic()))):
@@ -153,11 +166,14 @@ class Watch:
         raise Inconclusive("filesystem barrier was not reached: " + str(target))
 
     def close(self):
+        """Release the inotify descriptor."""
         os.close(self.fd)
 
 
 class MCP:
+    """Drive Swan over newline JSON-RPC with deadlines and retained transcripts."""
     def __init__(self, binary, database, directory, timeout):
+        """Start and initialize a server, cleaning it up if initialization fails."""
         self.log = (directory / "mcp.stderr").open("wb")
         self.process = subprocess.Popen([str(binary), "serve", str(database)],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self.log,
@@ -172,6 +188,7 @@ class MCP:
             raise
 
     def request(self, method, params):
+        """Send one request and validate its bounded response and matching identifier."""
         self.sequence += 1
         message = {"jsonrpc": "2.0", "id": self.sequence, "method": method, "params": params}
         self.process.stdin.write(json.dumps(message).encode() + b"\n")
@@ -192,6 +209,7 @@ class MCP:
         return result
 
     def probe(self):
+        """Return the probe symbol generation or an explicitly diagnosed lock refusal."""
         answer = self.request("tools/call", {"name": "find_symbol", "arguments": {
             "name_path_pattern": "probe", "include_body": False}})
         if "error" in answer or answer.get("result", {}).get("isError"):
@@ -203,6 +221,7 @@ class MCP:
         return rows[0]["relative_path"]
 
     def close(self):
+        """Save the transcript and stop the server, forcing termination if needed."""
         (self.directory / "mcp-transcript.json").write_text(json.dumps(self.transcript, indent=2) + "\n")
         if self.process.poll() is None:
             try:
@@ -221,11 +240,13 @@ class MCP:
 
 
 def connect(database):
+    """Open an existing SQLite map without creation or automatic lock waiting."""
     # No accidental database creation; timeout zero makes lock outcomes visible.
     return sqlite3.connect(database.as_uri() + "?mode=rw", uri=True, timeout=0)
 
 
 def active_journal(path):
+    """Check whether a rollback journal exists beyond its header-size threshold."""
     try:
         return path.stat().st_size > 512
     except FileNotFoundError:
@@ -233,6 +254,7 @@ def active_journal(path):
 
 
 def recoverable_journal(path):
+    """Require a nonempty rollback journal with the valid SQLite header magic."""
     try:
         with path.open("rb") as stream:
             # The valid rollback journal magic is written before database pages
@@ -243,6 +265,7 @@ def recoverable_journal(path):
 
 
 def snapshot(database):
+    """Check integrity and hash semantic rows within one consistent read transaction."""
     with closing(connect(database)) as connection:
         connection.execute("BEGIN")
         integrity = connection.execute("PRAGMA integrity_check").fetchall()
@@ -265,6 +288,7 @@ def snapshot(database):
 
 
 def fixture(directory, generation, count):
+    """Write synthetic SCIP rows for a named generation and return their directory."""
     rows = directory / ("rows-" + generation)
     rows.mkdir()
     filename = generation + ".ts"
@@ -282,7 +306,9 @@ def fixture(directory, generation, count):
 
 
 class Experiment:
+    """Run isolated concurrency cases and retain binary provenance and result evidence."""
     def __init__(self, options):
+        """Create a fresh workspace and synthetic input generations for the selected binary."""
         self.options, self.binary = options, options.binary.resolve(strict=True)
         options.output_parent.mkdir(parents=True, exist_ok=True)
         self.directory = Path(tempfile.mkdtemp(prefix="swan-concurrency-", dir=options.output_parent)).resolve()
@@ -295,16 +321,19 @@ class Experiment:
         self.baseline = self.directory / "baseline.db"
 
     def spawn(self, command, rows, db, directory, label):
+        """Start an index or refresh child and register it for bounded cleanup."""
         child = Child([self.binary, command, rows, db, self.repository], directory, label, self.options.timeout)
         self.children.append(child)
         return child
 
     def build(self, generation, db, directory, command="index", label=None):
+        """Build the requested generation and require a successful process exit."""
         child = self.spawn(command, self.rows[generation], db, directory, label or command + generation)
         require(child.wait() == 0, "baseline/retry failed: " + child.text())
         return child
 
     def case(self, name):
+        """Give a case its own directory and independent copy of the baseline map."""
         directory = self.directory / name
         directory.mkdir()
         database = directory / "swan.db"
@@ -312,17 +341,20 @@ class Experiment:
         return directory, database
 
     def equals(self, database, generation):
+        """Require the complete semantic snapshot to match a known generation."""
         actual = snapshot(database)
         require(actual == self.expected[generation], f"map is not complete generation {generation}: {actual}")
         return actual
 
     def explicit_refusal(self, child):
+        """Require nonzero exit and a contention diagnostic from a conflicting writer."""
         require(child.process.returncode is not None and child.process.returncode != 0,
                 "writer unexpectedly reported success while conflicting writer was paused")
         require(any(word in child.text().lower() for word in ("locked", "busy", "in progress", "another writer")),
                 "nonzero writer lacked explicit contention diagnostic: " + child.text())
 
     def prepare(self):
+        """Build reference generations and verify the rollback-journal test prerequisite."""
         for generation in "ABC":
             path = self.baseline if generation == "A" else self.directory / ("expected-" + generation + ".db")
             self.build(generation, path, self.directory)
@@ -334,6 +366,7 @@ class Experiment:
                 "harness requires rollback journal mode; observed " + repr(self.pragmas))
 
     def locked_refresh(self, lock):
+        """Hold a SQLite lock, verify safe refresh refusal, then verify a successful retry."""
         directory, database = self.case("held-" + lock)
         holder = connect(database)
         try:
@@ -353,6 +386,7 @@ class Experiment:
         return "explicit refusal preserved A; retry after releasing SQLite lock produced B"
 
     def refresh_snapshots(self):
+        """Check complete generations or explicit refusals while a refresh transaction runs."""
         directory, database = self.case("refresh-snapshots")
         client = MCP(self.binary, database, directory, self.options.timeout)
         watcher = Watch(directory)
@@ -411,6 +445,7 @@ class Experiment:
             client.close()
 
     def blocked_query(self):
+        """Require a blocked query to fail explicitly while preserving the original map."""
         directory, database = self.case("blocked-query")
         client = MCP(self.binary, database, directory, self.options.timeout)
         holder = connect(database)
@@ -435,6 +470,7 @@ class Experiment:
             self.equals(database, "A")
 
     def simultaneous_refresh(self):
+        """Pause one refresh and verify a competing writer refuses before a later retry."""
         directory, database = self.case("simultaneous-refresh")
         watcher = Watch(directory)
         first = self.spawn("refresh", self.rows["B"], database, directory, "B")
@@ -457,6 +493,7 @@ class Experiment:
             watcher.close()
 
     def interrupted_refresh(self):
+        """Kill a writer after observed database changes and verify journal recovery and retry."""
         directory, database = self.case("interrupted-refresh")
         watcher = Watch(directory)
         child = self.spawn("refresh", self.rows["B"], database, directory, "killed-B")
@@ -489,6 +526,7 @@ class Experiment:
             watcher.close()
 
     def temp_collision(self):
+        """Detect whether competing full builds can replace or publish another writer's temporary file."""
         directory, database = self.case("full-index-temp-collision")
         watcher = Watch(directory)
         temp = Path(str(database) + ".tmp")
@@ -535,6 +573,7 @@ class Experiment:
             watcher.close()
 
     def persistent_replace(self):
+        """Verify an existing MCP server observes a complete replacement database."""
         directory, database = self.case("persistent-full-replace")
         client = MCP(self.binary, database, directory, self.options.timeout)
         try:
@@ -548,6 +587,7 @@ class Experiment:
             client.close()
 
     def writer_entry_locks(self):
+        """Check shared writer entry locks, path aliases, independent targets, and release paths."""
         directory, database = self.case("writer-entry-locks")
         alias = directory / "alias"
         alias.symlink_to(directory, target_is_directory=True)
@@ -603,6 +643,7 @@ class Experiment:
         return "map/index/refresh and parent aliases share ownership; independent target proceeds; normal/abort release and nested pipeline pass"
 
     def run(self):
+        """Execute selected cases, retain each outcome, and return the aggregate result code."""
         print("Artifacts: " + str(self.directory), flush=True)
         try:
             self.prepare()
@@ -640,6 +681,7 @@ class Experiment:
         return 1 if any(r["status"] == "FAIL" for r in self.results) else (2 if any(r["status"] == "INCONCLUSIVE" for r in self.results) else 0)
 
     def save(self):
+        """Persist results with binary identity, fixture provenance, and qualification scope."""
         (self.directory / "results.json").write_text(json.dumps({
             "binary": str(self.binary), "sha256": hashlib.sha256(self.binary.read_bytes()).hexdigest(),
             "python_sqlite_version": sqlite3.sqlite_version,
@@ -653,6 +695,7 @@ class Experiment:
 
 
 def main():
+    """Validate the Linux experiment arguments and run the selected bounded cases."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", required=True, type=Path)
     parser.add_argument("--output-parent", required=True, type=Path)

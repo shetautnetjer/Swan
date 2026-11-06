@@ -1,11 +1,16 @@
 # Concurrent map access
 
 As of November 6, 2026, [PR #15](https://github.com/shetautnetjer/Swan/pull/15)
-is a **qualified candidate, not yet merged**. The qualification below applies
-to its exact Linux binary and disposable local-filesystem tests. It does not
-replace an active installation or establish production readiness.
+is **open, not yet merged**. The reviewed contract below includes changes
+pending fresh runtime qualification. The historical pre-review
+results apply only to their exact Linux binary and disposable local-filesystem
+tests; they do not qualify the revised contract or establish production readiness.
 
-## Contract and boundaries
+## Reviewed contract and boundaries
+
+The revised lock-release behavior described here is implemented but awaits
+fresh runtime qualification; it is not a claim about the historically tested
+`ef03ba0` binary. Registry selection retains its conservative contention policy.
 
 - `swan map`, direct `swan index`, and direct `swan refresh` share a
   nonblocking, per-database writer lock. The map pipeline holds it across
@@ -17,28 +22,35 @@ replace an active installation or establish production readiness.
   the database exists. A database-file symlink is refused for writing; use
   the real database path. Do not use alternate hard-link identities.
 - The adjacent `swan.db.lock` file persists after release. **Its presence is
-  not ownership, and it must not be deleted as a recovery step.** The OS lock
-  on its open descriptor establishes ownership. Deleting the file can let
-  competing writers lock different inodes under the same name.
-<!-- coderabbit-ai-generated:v1 -->
-
-<!-- coderabbit-ai-generated-section:v1:fa06c16c489d439cc55e05dc2ae3e93da769e4ae12d2d2413181c160bb1933df -->
-
-- Indexers and flatteners inherit the writer descriptor to protect shared
-  output if Swan dies. Failure, timeout and parent death retain ownership
-  until surviving children exit. Successful foreground jobs and map publication
-  explicitly unlock before closing, allowing idle build servers to keep their
-  descriptors without blocking a subsequent writer. This success boundary
-  assumes indexers finish output before reporting success; arbitrary background
-  writes after successful completion are outside this qualification.
-
-<!-- /coderabbit-ai-generated:v1 -->
+  not ownership, and it must not be deleted as a recovery step.** The kernel's
+  advisory lock establishes ownership, not merely an open descriptor. Deleting
+  the file can let competing writers lock different inodes under the same name.
+- Independent review identified the orphan-indexer case: a child can still
+  write shared output after its Swan parent dies. Exec'd indexers/flatteners
+  inherit the lock descriptor. On **success**, Swan explicitly releases the
+  lock after the cooperating foreground jobs have finished their shared
+  output, even if idle build-server descendants keep inherited descriptors.
+  On **failure or timeout**, Swan only closes its descriptor, leaving the lock
+  held by surviving children until their inherited descriptors close. Abrupt
+  parent death has the same retention behavior. A killed parent alone is not
+  evidence that a retry can proceed.
+- Participating tools must finish shared output before reporting foreground
+  success. The contract does not protect against an arbitrary detached
+  process that keeps writing that output after a successful foreground exit.
+  Use owned/trusted output directories and cooperating tools: this is
+  advisory coordination, not isolation from hostile local users or processes
+  that ignore the lock or manipulate its files.
 - A full index builds a separate database and publishes it by rename; refresh
   updates the existing database in a transaction. CLI queries and the MCP
   read-only tool whitelist hold a SQLite read transaction while constructing
   an answer. Persistent MCP processes reopen the selected path for subsequent
   requests, so completed replacements and refreshed freshness metadata become
   visible without retaining a disconnected old database inode.
+- Repository selection deliberately fails closed if a busy/locked registry
+  map could hide a nearer matching root. It must not silently select an
+  ancestor map or build a replacement as though the unreadable map were
+  absent. Retry after contention clears. This is a contention policy, not a
+  guarantee that every invalid or foreign database in the registry is reported.
 - These are **database-row snapshots**, not snapshots of source files on disk.
   Source reads, structural patterns and live diagnostics can see separately
   changing files; keep the existing freshness and coverage checks. The
@@ -60,7 +72,10 @@ race; serialize trust changes. Windows/macOS, network filesystems, arbitrary
 hard-link aliases, threaded SQLite use and power-loss durability are also
 outside this qualification.
 
-## Qualification: November 6, 2026
+## Historical pre-review qualification: November 6, 2026
+
+These results precede the reviewed success-release change above. Fresh
+qualification results for that change are pending.
 
 Source: `ef03ba0e13e357316e318a2384b58c5ec0b222d3`.
 Built and exercised in the isolated Ubuntu 24.04 x86-64 CUA environment.

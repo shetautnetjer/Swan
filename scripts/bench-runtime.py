@@ -25,24 +25,29 @@ import time
 
 
 def require(ok, message):
+    """Raise a benchmark failure when an acceptance condition is false."""
     if not ok:
         raise RuntimeError(message)
 
 
 def sha(path):
+    """Return a file's SHA-256 digest, or None when it is not a file."""
     return hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None
 
 
 def save(path, value):
+    """Write readable JSON evidence with a trailing newline."""
     path.write_text(json.dumps(value, indent=2, ensure_ascii=False) + "\n")
 
 
 def source_hashes(repository):
+    """Snapshot source file hashes keyed by repository-relative path."""
     return {str(p.relative_to(repository)): sha(p)
             for p in sorted(repository.rglob("*")) if p.is_file()}
 
 
 def fixture(repository, language, count):
+    """Generate linked synthetic modules and return their language suffix."""
     repository.mkdir()
     if language == "typescript":
         save(repository / "package.json", {"name": "swan-bench-ts", "version": "0.0.0", "private": True})
@@ -70,6 +75,7 @@ def fixture(repository, language, count):
 
 
 def canonical(database):
+    """Check SQLite integrity and read semantic rows without transient row IDs."""
     # Mirror tests/dump.py, with complete extents and occurrence flags. IDs and
     # timestamps are storage details; stable SCIP identities are the join keys.
     queries = {
@@ -92,6 +98,7 @@ def canonical(database):
 
 
 def known_answers(database, repository, suffix, count, edited=False, added=False):
+    """Verify fixture definitions, extents and calls, returning the MCP oracle."""
     with sqlite3.connect(database.as_uri() + "?mode=ro", uri=True) as db:
         db.row_factory = sqlite3.Row
         definitions = db.execute("""SELECT * FROM symbols WHERE in_repo=1
@@ -131,6 +138,7 @@ def known_answers(database, repository, suffix, count, edited=False, added=False
 
 
 def stop_session(process):
+    """Terminate only the map's private process session with bounded waits."""
     # Swan's synchronous helpers can create process groups within our private
     # session. Terminate those too on a timeout, never processes in other sessions.
     for sig in (signal.SIGTERM, signal.SIGKILL):
@@ -150,6 +158,7 @@ def stop_session(process):
 
 
 def measured_map(binary, repository, map_dir, stage, env, timeout, time_binary):
+    """Run one bounded map and retain its command, logs and timing evidence."""
     stage.mkdir()
     command = [str(binary), "map", str(repository), str(map_dir)]
     full = [str(time_binary), "-f", "%e\t%U\t%S\t%M\t%x", "-o", str(stage / "time.tsv"), *command]
@@ -184,6 +193,7 @@ def measured_map(binary, repository, map_dir, stage, env, timeout, time_binary):
 
 
 def mcp_check(helper_path, binary, database, folder, env, expected, edited):
+    """Check known definitions and references through the reviewed MCP client."""
     # Reuse the repository's existing bounded JSON client. Only construction is
     # overridden to pass this experiment's restricted environment and cwd.
     spec = importlib.util.spec_from_file_location("swan_demo_client", helper_path)
@@ -191,7 +201,10 @@ def mcp_check(helper_path, binary, database, folder, env, expected, edited):
     spec.loader.exec_module(helper)
 
     class Client(helper.MCP):
+        """Reuse the demo protocol client with this experiment's environment."""
+
         def __init__(self):
+            """Start Swan on the fixture database and retain its stderr log."""
             self.stderr = (folder / "serve.stderr.log").open("wb")
             self.process = subprocess.Popen([str(binary), "serve", str(database)], env=env, cwd=folder,
                                             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self.stderr)
@@ -219,6 +232,7 @@ def mcp_check(helper_path, binary, database, folder, env, expected, edited):
 
 
 def main():
+    """Run the disposable language benchmarks and retain validation evidence."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", type=Path, required=True, help="Exact existing candidate, in its complete Swan installation")
     parser.add_argument("--output-parent", type=Path, required=True, help="Parent of a new disposable experiment directory")
