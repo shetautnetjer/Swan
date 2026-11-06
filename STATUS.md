@@ -454,6 +454,17 @@ branch fix/greptile-review:
   remains the recorded `bae3873` artifact and predates this review fix; export
   a new candidate from the final reviewed revision before release.
 
+## 2026-11-06: ordered improvements approved
+
+The owner approved tests and merges for the sequence in
+`docs/improvements-2026-11-06.md`: skill coverage/refresh guidance, matcher
+correctness, concurrent-map qualification, Goose-language investigation, then
+measured optimization. Stage 1 now distinguishes structural/index/live
+coverage, batches refresh across coherent edits, checks branch/worktree and
+compiler-input changes, and reports actual verification limits. Skill format,
+relative links and whitespace checks pass; executable behavior is unchanged.
+The active installation and saved trust remain outside these source merges.
+
 ## Remaining work
 
 1. Qualify real server adapters and indexers separately from the mock LSP

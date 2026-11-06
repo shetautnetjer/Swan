@@ -52,6 +52,23 @@ location; it does not register agent settings or an MCP connection.
 - **Pass `"repo":"<repo>"` on every subsequent repository tool call**, even
   if a persistent server remembers `use_repo`. Stateless host wrappers start
   fresh processes; selection in an earlier call does not carry over.
+- Confirm the returned repo root and map path cover the intended worktree;
+  another branch's checkout is not interchangeable. Give a brief initial
+  coverage summary for the task's languages/files from the actual tool
+  schemas, `use_repo`/map report, `index_info`, and doctor when available.
+  Distinguish these modes rather than reporting one overall "supported":
+
+  | Mode | Evidence and boundary |
+  | --- | --- |
+  | Structural patterns | Advertised grammar plus an applicable search; reads on-disk syntax, not compiler-resolved references. Inspect `files_searched` and `skipped`. |
+  | Indexed symbols/references | Map report and a known-symbol/reference check; limited to files and languages the SCIP indexers actually included. |
+  | Live diagnostics/checks/tests | Installed adapter/runner plus the actual call result; availability alone does not prove execution or success. |
+
+  Mark unverified, skipped, failed or not-installed coverage explicitly.
+  Doctor's selected profile covers dependencies only; `unselected` does not
+  establish that an optional tool is absent. An existing map's empty
+  `skipped`/`report` does not prove every indexer ran. Do not invent a
+  capability API, or call an unsearched/unindexed area clean.
 - Read the map report and its `skipped` entries. Some indexers run the repo's
   build files, and a repo-local Python environment can execute repo code.
   **Never grant trust automatically.** Run `<swan-binary> trust <exact-repo>`
@@ -59,14 +76,32 @@ location; it does not register agent settings or an MCP connection.
   run its build code. Repository ownership or an agent's identity does not
   grant trust. Never enable the global `SWAN_TRUST_BUILD=1` override. If trust
   is absent, continue within the available coverage and report what skipped.
-- `index_info {"repo":"<repo>"}`: refresh when `stale_file_count > 0` or the
-  repo has commits since `refreshed_at`/`built_at`, using `update_map` within
-  the caller's execution scope. New files count in `new_file_count`; if that
-  field is absent, refresh on any new file because older maps can miss it.
-  Languages never indexed can remain outside freshness coverage.
 - Check a known symbol with `find_symbol` and confirm its file and line.
-  Before acting on references, compare their files with `rg -l <name>`;
-  mismatches require investigating stale or partial coverage.
+  Cross-check relevant references with a focused `rg -l <name>` search;
+  mismatches require investigating stale or partial coverage. Expand scope
+  when the evidence requires it, rather than repeating full-repo scans.
+
+## Refresh at task boundaries
+
+- Read `index_info {"repo":"<repo>"}` at task start and after a relevant
+  change batch, not before every lookup. Refresh with `update_map` within the
+  caller's execution scope when files are stale or added, or the repository
+  has changed since the map's `refreshed_at`/`built_at`.
+- Recheck repo/map identity after switching branches, revisions or worktrees.
+  Refresh before relying on indexed answers when that switch changes source,
+  or when dependencies, lockfiles, compiler/indexer configuration, generated
+  sources or build inputs change. Zero stale files is not proof of an
+  unchanged compiler view: freshness primarily uses file timestamps;
+  `new_file_count` only sees newer files with extensions already indexed.
+  Languages never indexed and deliberately excluded files can remain outside
+  coverage even after refresh. If `new_file_count` is absent, refresh on new
+  files rather than trusting the older binary's freshness count.
+- Batch coherent edits and refresh once before the next indexed impact query,
+  rename/rewrite plan, or affected-test selection that depends on a changed
+  graph. Avoid rebuilding after every edit; on-disk pattern searches and
+  supported live diagnostics can inspect intermediate changes. Read the
+  refresh result and verify the relevant known symbol/coverage again; a
+  completed refresh does not prove excluded files are now indexed.
 
 ## Editing and review
 
@@ -82,8 +117,10 @@ for exact argument names.
   if supported, or `check_errors` for the repo. `run_tests` with `name_path`
   or `relative_path` runs affected tests through the repo's runner. Checkers,
   live servers and tests execute code: stay within the caller's task
-  authorization and report unavailable or skipped coverage. Refresh stale
-  maps before relying on structural answers about changed files.
+  authorization and report unavailable or skipped coverage. Diagnostics and
+  map freshness are separate: successful live diagnostics or `check_errors`
+  does not refresh the reference graph, and refreshing the map does not prove
+  diagnostics or tests passed.
 - For a diff, inspect changed files (`git diff --name-only <base>...HEAD`),
   their symbols (`get_symbols_overview` or `get_symbol_at`) and callers beyond
   the diff, then diagnostics. For a security/quality sweep, run applicable
@@ -101,6 +138,12 @@ for exact argument names.
   runtime-by-name uses are outside compiler-resolved rename coverage.
 - `find_unused_symbols` returns candidates: entry points, code reached by
   name and build output such as `dist/` bundles can appear.
+
+At completion, report the actual repo/worktree and map used, observed map
+freshness and any refresh, checks/tests actually run and their results, and
+remaining language/file or adapter limitations. Tie "no findings/errors" to
+the inspected scope and successful checks; unavailable, skipped, stale or
+unverified coverage remains unknown.
 
 ## Pattern rules and self-test
 
@@ -124,6 +167,9 @@ The unchanged fixture and 24-pattern pack are checked by
   exit. `--out DIR` (or `SWAN_SELFTEST_OUT`) retains a new, empty output
   directory for inspection. The map is `DIR/map/swan.db`; the test requires
   that exact existing map and refuses to build a replacement during searches.
+  It selects the map once with `build:false` in its private persistent server,
+  then omits `repo` during searches to prevent implicit rebuilding. This is
+  specific to the self-test; normal host wrappers still pass `repo` each call.
   `--map-swan` may choose a separate builder, whose map must be compatible
   with the server binary. Never point the output at shared maps.
   Exit 0 means all 24 patterns match exactly; it does not qualify

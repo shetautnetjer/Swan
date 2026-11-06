@@ -186,3 +186,11 @@ binary-bound build receipt, checksums and third-party notices. The receipt is
 an attestation; real installation/runtime checks and independent review are
 required separately. Public release publication and production replacement
 are separate actions, not implied by the candidate build.
+
+## 2026-11-06 — Approve ordered improvements and reviewed source merges
+
+The owner approved the sequence and acceptance checks described in
+`docs/improvements-2026-11-06.md`, including tests and merging when ready.
+Keep focused changes in their owning repositories and preserve active
+installations, trust/configuration and package identities. Investigate and
+measure before introducing a new language adapter or changing architecture.
