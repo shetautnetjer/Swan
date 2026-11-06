@@ -68,6 +68,23 @@ if (run("python")) {
     inSyms.includes("report") && inSyms.includes("ShapeTests/test_square"), diag);
 }
 
+if (run("python-src")) {
+  // src layout: the package lives in src/geom, tests import it as geom. Swan
+  // runs scip-python from a root of links whose pyrightconfig.json puts src
+  // on the search path, so the test's import reaches the definition.
+  const w = "data/py-src-check";
+  sh(["rm", "-rf", w]);
+  sh(["mkdir", "-p", w]);
+  sh(["cp", "-r", "fixtures/tiny-py-src", `${w}/repo`]);
+  const report = sh(["bin/swan", "map", `${w}/repo`, `${w}/map`]);
+  const q = (...a: string[]) => JSON.parse(sh(["bin/swan", "query", `${w}/map/swan.db`, ...a]));
+  check("python-src: the map says it saw a src layout", report.includes("src layout"), report);
+  check("python-src: square_area is used by tests/test_area.py (import and call)",
+    sites(q("refs", "square_area")).sort().join(",") === "tests/test_area.py:1,tests/test_area.py:5", sites(q("refs", "square_area")));
+  check("python-src: the repo was not written to (no pyrightconfig.json appeared)",
+    !(await Bun.file(`${w}/repo/pyrightconfig.json`).exists()));
+}
+
 if (run("java")) {
   // scip-java with no build tool: Swan writes its scip-java.json outside the repo.
   const w = "data/java-check";

@@ -484,9 +484,32 @@ fn python_src_layout(repo: const u8[:], stamps: const u8[:]) -> bool {
     if file_exists(str(repo, "/pyrightconfig.json")) { return false; }
     var toml: u8[>..] = [];
     if read_file(str(repo, "/pyproject.toml"), toml) && find(toml, "[tool.pyright") >= 0 { return false; }
-    var yes = false;
-    each_split(stamps, '\n') { line => if starts_with(line, "src/") { yes = true; } };
-    return yes;
+    var has_src_py = false;
+    each_split(stamps, '\n') { line => if starts_with(line, "src/") { has_src_py = true; } };
+    guard has_src_py else { return false; }
+    // The packaging says the packages live under src (hatch packages =
+    // ["src/pkg"], setuptools where = ["src"] or package_dir = =src).
+    var declared = false;
+    for f in ["/pyproject.toml", "/setup.cfg", "/setup.py"] {
+        var t: u8[>..] = [];
+        if read_file(str(repo, f), t) &&
+           (find(t, "\"src\"") >= 0 || find(t, "'src'") >= 0 || find(t, "\"src/") >= 0 ||
+            find(t, "'src/") >= 0 || find(t, "=src") >= 0 || find(t, "= src") >= 0) { declared = true; }
+    }
+    guard declared else { return false; }
+    // A repo whose own code imports src.x uses src as a package (a namespace
+    // package needs no __init__.py); putting src on the path would rename
+    // its modules the other way.
+    var imports_src = false;
+    each_split(stamps, '\n') { line =>
+        let tab = find(line, "\t");
+        if !imports_src && tab > 0 {
+            var text: u8[>..] = [];
+            if read_file(str(repo, "/", line[..tab]), text) &&
+               (find(text, "from src.") >= 0 || find(text, "import src.") >= 0 || find(text, "import src\n") >= 0) { imports_src = true; }
+        }
+    };
+    return !imports_src;
 }
 
 // The project root scip-python runs from for such a repo, so the repo itself
