@@ -18,6 +18,7 @@ import std;
 import os;
 import dictionary;
 import sqlite;
+import .writer;
 
 let SCHEMA_VERSION = 9;
 
@@ -109,6 +110,16 @@ fn field_int(s: const u8[:]) -> i64 {
 
 // Appends a one-line account of what it did to `report`.
 fn index_main(dir: const u8[:], db_path: const u8[:], root: const u8[:], refresh: bool, report: u8[>..]&) {
+    var err: u8[>..] = [];
+    let writer = swan_writer_lock(db_path, err);
+    if writer == 0 { abort(err); }
+    index_main_locked(dir, db_path, root, refresh, report);
+    swan_writer_unlock(writer);
+}
+
+// map_main already owns this database's writer lock across indexer output and
+// flattening, so it enters here without trying to acquire that lock again.
+fn index_main_locked(dir: const u8[:], db_path: const u8[:], root: const u8[:], refresh: bool, report: u8[>..]&) {
     let t0 = clock();
     var text: u8[>..] = [];
     let a = text.len;
@@ -155,7 +166,7 @@ fn index_main(dir: const u8[:], db_path: const u8[:], root: const u8[:], refresh
     if !refresh && file_exists(tmp) { delete_file(tmp); }
     if refresh && !file_exists(db_path) { abort(str("swan refresh: no index at ", db_path, "; run swan index first")); }
     var err: u8[>..] = [];
-    let db = sqlite::open(path, err);
+    let db = if refresh { sqlite::open_existing(path, err) } else { sqlite::open(path, err) };
     if db == 0 { abort(str("swan: cannot open ", path, ": ", err)); }
     if refresh {
         var version: u8[>..] = [];
@@ -191,7 +202,7 @@ fn index_main(dir: const u8[:], db_path: const u8[:], root: const u8[:], refresh
         step_done(put_seen);
         var stored: u8[>..] = [];
         sqlite::bind_text(get_hash, 1, file);
-        if sqlite::step(get_hash, err) == 1 { sqlite::col_text(get_hash, 0, stored); }
+        if step_checked(get_hash, err) == 1 { sqlite::col_text(get_hash, 0, stored); }
         sqlite::reset(get_hash);
         if stored != fp {
             changed.insert(file, true);
@@ -213,7 +224,7 @@ fn index_main(dir: const u8[:], db_path: const u8[:], root: const u8[:], refresh
     var removed = 0;
     if refresh {
         let gone = prepare_or_die(db, "SELECT count(*) FROM files WHERE file NOT IN (SELECT file FROM temp.seen)");
-        if sqlite::step(gone, err) == 1 { removed = sqlite::col_int(gone, 0); }
+        if step_checked(gone, err) == 1 { removed = sqlite::col_int(gone, 0); }
         sqlite::finalize(gone);
         exec_or_die(db, """
             DELETE FROM occurrences WHERE file NOT IN (SELECT file FROM temp.seen);
@@ -246,7 +257,7 @@ fn index_main(dir: const u8[:], db_path: const u8[:], root: const u8[:], refresh
         if got { return got; }
         var db_id = -1;
         sqlite::bind_text(find_sym, 1, scip);
-        if sqlite::step(find_sym, err) == 1 { db_id = sqlite::col_int(find_sym, 0); }
+        if step_checked(find_sym, err) == 1 { db_id = sqlite::col_int(find_sym, 0); }
         sqlite::reset(find_sym);
         if db_id < 0 {
             var path: u8[>..] = [];
@@ -419,7 +430,7 @@ fn index_main(dir: const u8[:], db_path: const u8[:], root: const u8[:], refresh
     let cnt = prepare_or_die(db, "SELECT (SELECT count(*) FROM symbols), (SELECT count(*) FROM occurrences)");
     var n_syms = 0;
     var n_occ = 0;
-    if sqlite::step(cnt, err) == 1 { n_syms = sqlite::col_int(cnt, 0); n_occ = sqlite::col_int(cnt, 1); }
+    if step_checked(cnt, err) == 1 { n_syms = sqlite::col_int(cnt, 0); n_occ = sqlite::col_int(cnt, 1); }
     sqlite::finalize(cnt);
     meta("schema_version", str(SCHEMA_VERSION));
     if !refresh || root.len > 0 { meta("root", root); }

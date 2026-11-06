@@ -34,6 +34,7 @@ int64_t swan_mtime_ns(swan_slice path) {
    that extern fn. ---- */
 #include <errno.h>
 #include <fcntl.h>
+#include <sys/file.h>
 #include <poll.h>
 #include <signal.h>
 #include <stdlib.h>
@@ -42,6 +43,73 @@ int64_t swan_mtime_ns(swan_slice path) {
 #include <unistd.h>
 
 extern char **environ;
+
+/* The full pipeline writes intermediate files before opening SQLite. Lock a
+   stable adjacent file, shared with direct index/refresh, for that whole job.
+   Keep the file after release: unlinking it would let two writers lock two
+   different inodes. Exec'd indexers inherit the descriptor so killing Swan
+   cannot release ownership while its children still write shared output.
+   The handle is fd+1 so zero remains the failure value. */
+int64_t swan_writer_lock(swan_slice path, gs_rref err) {
+    char input[4096], canonical[4096], lock_path[4102];
+    if (path.len <= 0 || path.len >= (int64_t)sizeof input) {
+        append_cstr(err, "swan: invalid map path for writer lock");
+        return 0;
+    }
+    memcpy(input, path.data, (size_t)path.len);
+    input[path.len] = 0;
+    struct stat existing;
+    if (lstat(input, &existing) == 0 && S_ISLNK(existing.st_mode)) {
+        append_cstr(err, "swan: map database symlinks are not supported for writes; use its real file path");
+        return 0;
+    }
+    /* Resolve only the parent. Ownership must keep the same name while the
+       database is absent, deleted for a schema change, or atomically replaced. */
+    char *name = strrchr(input, '/');
+    const char *parent = ".";
+    if (name) {
+        *name++ = 0;
+        parent = input[0] ? input : "/";
+    } else {
+        name = input;
+    }
+    char directory[4096];
+    if (!realpath(parent, directory)) {
+        append_cstr(err, "swan: cannot resolve map directory for writer lock: ");
+        append_cstr(err, strerror(errno));
+        return 0;
+    }
+    int length = snprintf(canonical, sizeof canonical, "%s/%s", directory, name);
+    if (length < 0 || length >= (int)sizeof canonical) {
+        append_cstr(err, "swan: map path is too long for writer lock");
+        return 0;
+    }
+    snprintf(lock_path, sizeof lock_path, "%s.lock", canonical);
+    int fd = open(lock_path, O_RDWR | O_CREAT, 0666);
+    if (fd < 0) {
+        append_cstr(err, "swan: cannot open map writer lock: ");
+        append_cstr(err, strerror(errno));
+        return 0;
+    }
+    if (flock(fd, LOCK_EX | LOCK_NB) != 0) {
+        int cause = errno;
+        close(fd);
+        if (cause == EWOULDBLOCK || cause == EAGAIN) {
+            append_cstr(err, "swan: another writer is in progress for ");
+            append_cstr(err, canonical);
+            append_cstr(err, "; retry after it finishes");
+        } else {
+            append_cstr(err, "swan: cannot acquire map writer lock: ");
+            append_cstr(err, strerror(cause));
+        }
+        return 0;
+    }
+    return (int64_t)fd + 1;
+}
+
+void swan_writer_unlock(int64_t handle) {
+    if (handle > 0) close((int)(handle - 1));
+}
 
 static int64_t now_ms(void) {
     struct timespec ts;

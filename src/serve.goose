@@ -55,41 +55,116 @@ fn arg_bool_default(args: json::Node?, key: const u8[:], dflt: bool) -> bool {
 }
 
 var serve_db: i64 = 0;          // the map the tools answer about; 0 until a repo is selected
-var serve_map: u8[..4096];      // serve_db's file, so reselecting the same map is free
+var serve_map: u8[..4096];      // reopen this path at each tool request, including after replacement
 var serve_maps: u8[..4096];     // the registry root: a repo's map is <serve_maps>/<name>/swan.db
 var serve_warm = false;         // live_warm the new map on the next call: a switch itself stays fast
+var serve_root: u8[..4096];     // live state belongs to this repo/source, not a database inode
+var serve_source: u8[..4096];
+var serve_map_error: u8[..4096]; // contention during registry discovery is not an absent map
+var serve_snapshot = false;     // a read-only tool holds one database generation until its answer is built
+
+// These tools read the map only (get_callers uses a connection-local temp
+// table). Live answers, edits and commands that run writers are excluded.
+// The transaction covers database rows, not concurrent changes to source
+// files on disk; those still use the existing freshness checks.
+fn tool_reads_map(name: const u8[:], args: json::Node?) -> bool {
+    if (name == "find_implementations" || name == "get_diagnostics") && arg_bool(args, "live") { return false; }
+    return name == "use_repo" || name == "find_symbol" || name == "find_referencing_symbols" ||
+           name == "get_symbol_at" || name == "get_symbols_overview" || name == "get_callers" ||
+           name == "get_callees" || name == "find_implementations" || name == "get_type_hierarchy" ||
+           name == "find_unused_symbols" || name == "get_diagnostics" || name == "search_pattern" ||
+           name == "index_info";
+}
+
+fn map_covers(root: const u8[:], path: const u8[:]) -> bool {
+    return root.len > 0 && (path == root ||
+           (starts_with(path, root) && path.len > root.len && path[root.len] == '/'));
+}
 
 // A meta value from a map that may be damaged or foreign: unlike meta_value
 // (prepare_or_die), a missing meta table or a corrupt file returns false, so
 // one bad swan.db under the data root can't stop the server.
-fn meta_try(h: i64, key: const u8[:], out: u8[>..]&) -> bool {
-    var err: u8[>..] = [];
+fn meta_try(h: i64, key: const u8[:], out: u8[>..]&, err: u8[>..]&) -> bool {
     let st = sqlite::prepare(h, "SELECT value FROM meta WHERE key = ?1", err);
     guard st != 0 else { return false; }
     sqlite::bind_text(st, 1, key);
-    if sqlite::step(st, err) == 1 { sqlite::col_text(st, 0, out); }
+    let result = sqlite::step(st, err);
+    if result == 1 { sqlite::col_text(st, 0, out); }
     sqlite::finalize(st);
-    return true;
+    return result >= 0;
+}
+
+// Foreign/corrupt registry entries can still be skipped. A locked map may
+// be the requested repo's current map: never mistake it for an unmapped repo
+// and launch a build. SQLite's messages are retained in the tool error.
+fn map_access_error(err: const u8[:]) {
+    if serve_map_error.len == 0 && (find(err, "locked") >= 0 || find(err, "busy") >= 0) {
+        format(serve_map_error, "swan: cannot read map: ", err);
+    }
 }
 
 // One known map's identity, read from its meta; false for a map that can't be read.
 fn map_meta(db_path: const u8[:], root: u8[>..]&, symbols: u8[>..]&) -> bool {
     var err: u8[>..] = [];
-    let h = sqlite::open(db_path, err);
-    guard h != 0 else { return false; }
-    let ok = meta_try(h, "root", root) && meta_try(h, "symbols", symbols);
+    let h = sqlite::open_existing(db_path, err);
+    guard h != 0 else { map_access_error(err); return false; }
+    let ok = meta_try(h, "root", root, err) && meta_try(h, "symbols", symbols, err);
     sqlite::close(h);
+    if !ok { map_access_error(err); }
     return ok && root.len > 0;
 }
 
 fn map_schema_current(db_path: const u8[:]) -> bool {
     var err: u8[>..] = [];
-    let h = sqlite::open(db_path, err);
-    guard h != 0 else { return false; }
+    let h = sqlite::open_existing(db_path, err);
+    guard h != 0 else { map_access_error(err); return false; }
     var v: u8[>..] = [];
-    let ok = meta_try(h, "schema_version", v);
+    let ok = meta_try(h, "schema_version", v, err);
     sqlite::close(h);
+    if !ok { map_access_error(err); }
     return ok && v == str(SCHEMA_VERSION);
+}
+
+// A connection continues reading the old inode after a full index replaces
+// swan.db. Reopen the path before each request, so completed replacements and
+// refreshes (including scip_time and edited_mtime) are visible on the next
+// call. Failed opens/metadata reads are tool errors and never use the old map.
+fn serve_reopen(db_path: const u8[:], snapshot: bool, repo: const u8[:], out: u8[>..]&) -> bool {
+    var err: u8[>..] = [];
+    let h = sqlite::open_existing(db_path, err);
+    guard h != 0 else { format(out, "swan: cannot open map ", db_path, ": ", err); return false; }
+    if snapshot && !sqlite::exec(h, "BEGIN;", err) {
+        sqlite::close(h);
+        format(out, "swan: cannot start map read: ", err);
+        return false;
+    }
+    var version: u8[>..] = [];
+    var root: u8[>..] = [];
+    var source: u8[>..] = [];
+    let ok = meta_try(h, "schema_version", version, err) &&
+             meta_try(h, "root", root, err) && meta_try(h, "source", source, err);
+    if !ok || version != str(SCHEMA_VERSION) {
+        sqlite::close(h);
+        if !ok { format(out, "swan: cannot read map ", db_path, ": ", err); }
+        else { format(out, "swan: index schema ", version, ", this swan reads ", SCHEMA_VERSION, "; rebuild the map"); }
+        return false;
+    }
+    if repo.len > 0 && !map_covers(root, repo) {
+        sqlite::close(h);
+        format(out, "swan: map changed during repository selection; retry use_repo for ", repo);
+        return false;
+    }
+    if root != serve_root || source != serve_source {
+        live_stop();
+        serve_warm = true;
+    }
+    if serve_db != 0 { close_db(serve_db); }
+    serve_db = h;
+    serve_snapshot = snapshot;
+    load_freshness(serve_db);
+    serve_root.clear(); format(serve_root, root);
+    serve_source.clear(); format(serve_source, source);
+    return true;
 }
 
 // The map covering `abs`: its own root, or the nearest root above it, among
@@ -109,8 +184,7 @@ fn find_map(abs: const u8[:]) -> u8[>..] {
         // (open_db would abort the server); skip it.
         guard map_schema_current(dbf);
         guard map_meta(dbf, root, ignored);
-        let inside = root.len > 0 && root.len > best &&
-                     (abs == root || (starts_with(abs, root) && abs.len > root.len && abs[root.len] == '/'));
+        let inside = root.len > best && map_covers(root, abs);
         if inside { best = root.len; found.clear(); found.append(dbf); }
     };
     return found;
@@ -172,7 +246,7 @@ fn stale_count(db: i64) -> i64 {
     let fs = prepare_or_die(db, "SELECT file FROM files");
     var err: u8[>..] = [];
     var n: i64 = 0;
-    while sqlite::step(fs, err) == 1 {
+    while step_checked(fs, err) == 1 {
         var f: u8[>..] = [];
         sqlite::col_text(fs, 0, f);
         if is_stale(f) { n++; }
@@ -190,23 +264,27 @@ fn stale_count(db: i64) -> i64 {
 // `summary`: write use_repo's answer (counts and the freshness scan). A tool's
 // implicit `repo` switch passes false: its own answer replaces this one, and
 // the freshness scan stats every mapped file.
-fn repo_switch(path: const u8[:], build: bool, summary: bool, out: u8[>..]&) -> bool {
+fn repo_switch(path: const u8[:], build: bool, summary: bool, snapshot: bool, out: u8[>..]&) -> bool {
     guard path.len > 0 else { out.append("path is required"); return false; }
     var abs: u8[>..] = [];
     guard swan_realpath(path, abs) else { format(out, "no such path: ", path); return false; }
     guard is_dir(abs) else { format(out, "not a directory: ", abs); return false; }
     var db_path = find_map(abs);
+    guard serve_map_error.len == 0 else { out.append(serve_map_error); return false; }
     var built = false;
     var built_report: u8[>..] = [];
     if db_path.len == 0 {
         guard build else {
             // The same collision-safe dir an automatic build would use, so following
             // the hint never overwrites another repo's map of the same basename.
-            format(out, "no map for ", abs, ": run 'swan map ", abs, " ", map_dir_for(abs),
+            let dir = map_dir_for(abs);
+            guard serve_map_error.len == 0 else { out.append(serve_map_error); return false; }
+            format(out, "no map for ", abs, ": run 'swan map ", abs, " ", dir,
                    "' or call use_repo without build:false");
             return false;
         }
         let dir = map_dir_for(abs);
+        guard serve_map_error.len == 0 else { out.append(serve_map_error); return false; }
         guard map_main(abs, dir, built_report) else { out.append(built_report); return false; }
         db_path.append(str(dir, "/swan.db"));
         guard file_exists(db_path) else {
@@ -216,13 +294,10 @@ fn repo_switch(path: const u8[:], build: bool, summary: bool, out: u8[>..]&) -> 
         built = true;
     }
     let switched = db_path != serve_map;
-    if switched {       // a switch: live server off, old map closed, new one open
-        live_stop();
-        if serve_db != 0 { close_db(serve_db); }
-        serve_db = open_db(db_path);
+    guard serve_reopen(db_path, snapshot, abs, out) else { return false; }
+    if switched {
         serve_map.clear();      // format appends: without this the stored path grows and never matches
         format(serve_map, db_path);
-        serve_warm = true;
     }
     guard summary else { return true; }
     var root: u8[>..] = [];
@@ -360,7 +435,7 @@ fn call_tool(db: i64, name: const u8[:], args: json::Node?, out: u8[>..]&) -> bo
         guard root.len > 0 && dir.len > 0 else { out.append("the map does not record its repo; rebuild it with swan map"); return false; }
         var report: u8[>..] = [];
         let ok = if name == "update_map" { map_main(root, dir, report) } else { check_main(root, dir, report) };
-        if name == "update_map" { load_freshness(db); }     // the map has a new SCIP time
+        // The next tool request reopens the published map and its freshness.
         json::format_string(out, report);
         return ok;
     }
@@ -381,7 +456,8 @@ fn call_tool(db: i64, name: const u8[:], args: json::Node?, out: u8[>..]&) -> bo
 // arguments and use_repo still work, against <swan-home>/data.
 fn serve_main(db_path: const u8[:]) {
     format(serve_maps, swan_home(), "/data");
-    serve_db = open_db(db_path);
+    var err: u8[>..] = [];
+    if !serve_reopen(db_path, false, "", err) { abort(err); }
     format(serve_map, db_path);
     serve_loop();
 }
@@ -436,29 +512,37 @@ fn serve_loop() {
             for ch in trim(TOOLS) { if ch != '\n' { out.push(ch); } }   // one line per message
             out.append("}}");
         } else if method == "tools/call" {
+            serve_map_error.clear();
             var payload: u8[>..] = [];
             var tool_name: u8[>..] = [];    // owned: a tool may grow buffers the request's text could point into
             tool_name.append(arg_text(params, "name"));
             let targs = json::member(params, "arguments");
+            let snapshot = tool_reads_map(tool_name, targs);
             var ok = true;
             if tool_name == "use_repo" {
                 var p: u8[>..] = [];
                 p.append(arg_text(targs, "path"));
-                ok = repo_switch(p, arg_bool_default(targs, "build", true), true, payload);
+                ok = repo_switch(p, arg_bool_default(targs, "build", true), true, snapshot, payload);
             } else {
                 var rp: u8[>..] = [];
                 rp.append(arg_text(targs, "repo"));
                 if rp.len > 0 {
-                    ok = repo_switch(rp, true, false, payload);     // no summary: the tool's own answer follows
+                    ok = repo_switch(rp, true, false, snapshot, payload);     // no summary: the tool's own answer follows
+                } else if serve_map.len > 0 {
+                    ok = serve_reopen(serve_map, snapshot, "", payload);
                 }
                 if ok && serve_db == 0 {
-                    if tool_name == "index_info" { list_maps(payload); }
+                    if tool_name == "index_info" {
+                        list_maps(payload);
+                        if serve_map_error.len > 0 { payload.clear(); payload.append(serve_map_error); ok = false; }
+                    }
                     else { payload.append("no repo selected: call use_repo with a path, or pass repo"); ok = false; }
                 } else if ok {
                     if serve_warm { serve_warm = false; live_warm(serve_db); }
                     ok = call_tool(serve_db, tool_name, targs, payload);
                 }
             }
+            if serve_snapshot { exec_or_die(serve_db, "COMMIT;"); serve_snapshot = false; }
             out.append(",\"result\":{\"content\":[{\"type\":\"text\",\"text\":");
             json::format_string(out, payload);
             out.append("}],\"isError\":");
@@ -472,7 +556,7 @@ fn serve_loop() {
         out.push('\n');
         write_stdout(out);
         flush_stdout();
-        if is_init && !warmed { warmed = true; if serve_db != 0 { live_warm(serve_db); } }
+        if is_init && !warmed { warmed = true; if serve_db != 0 { serve_warm = false; live_warm(serve_db); } }
     }
     live_stop();
     if serve_db != 0 { close_db(serve_db); }

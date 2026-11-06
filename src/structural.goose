@@ -156,7 +156,7 @@ fn search_pattern(db: i64, pattern: const u8[:], lang: const u8[:], rel: const u
                         let st = prepare_or_die(db, "SELECT body_start, body_end, name_path FROM symbols WHERE def_file = ?1 AND body_start IS NOT NULL");
                         sqlite::bind_text(st, 1, f);
                         var err: u8[>..] = [];
-                        while sqlite::step(st, err) == 1 {
+                        while step_checked(st, err) == 1 {
                             spans.push(sqlite::col_int(st, 0)); spans.push(sqlite::col_int(st, 1)); spans.push(names.len);
                             sqlite::col_text(st, 2, names);
                             names.push('\n');

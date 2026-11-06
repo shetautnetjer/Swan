@@ -13,6 +13,7 @@ import json;
 import dictionary;
 import sqlite;
 import treesitter;
+import .writer;
 
 extern fn swan_realpath(path: const u8[:], out: u8[>..]&) -> bool;
 
@@ -569,8 +570,8 @@ fn dependents_of_changes(out: const u8[:], stamps: const u8[:], prev: const u8[:
     let db_path = str(out, "/swan.db");
     guard changed.len > 0 && file_exists(db_path) else { return dirty; }
     var err: u8[>..] = [];
-    let db = sqlite::open(db_path, err);
-    guard db != 0 else { return dirty; }
+    let db = sqlite::open_existing(db_path, err);
+    if db == 0 { abort(str("swan: cannot read dependency map: ", err)); }
     let st = prepare_or_die(db, """
         SELECT DISTINCT o.file FROM occurrences o JOIN symbols s ON s.id = o.symbol_id
         WHERE s.def_file = ?1 AND o.file != ?1 AND o.is_def = 0
@@ -578,7 +579,7 @@ fn dependents_of_changes(out: const u8[:], stamps: const u8[:], prev: const u8[:
     each_split(changed, '\n') { f =>
         guard f.len > 0;
         sqlite::bind_text(st, 1, f);
-        while sqlite::step(st, err) == 1 { sqlite::col_text(st, 0, dirty); dirty.push('\n'); }
+        while step_checked(st, err) == 1 { sqlite::col_text(st, 0, dirty); dirty.push('\n'); }
         sqlite::reset(st);
     };
     sqlite::finalize(st);
@@ -587,7 +588,6 @@ fn dependents_of_changes(out: const u8[:], stamps: const u8[:], prev: const u8[:
 }
 
 fn map_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> bool {
-    let t_start = clock();
     map_held.clear();
     let repo = abs_path(repo_arg);
     var mk: u8[>..] = [];
@@ -597,6 +597,17 @@ fn map_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> bo
     var ignored: u8[>..] = [];
     run_step("mkdir", mk, "", "", 10000, ignored);
     let out = abs_path(out_arg);
+    let writer = swan_writer_lock(str(out, "/swan.db"), report);
+    guard writer != 0 else { return false; }
+    let ok = map_main_locked(repo, out, report);
+    swan_writer_unlock(writer);
+    return ok;
+}
+
+// The public wrapper holds the writer lock for every shared output: cached
+// indexer files, flattened rows, schema replacement and final database update.
+fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&) -> bool {
+    let t_start = clock();
     let home = swan_home();
     let bin = str(home, "/tools/node_modules/.bin/");
     var l = detect(repo);
@@ -614,9 +625,11 @@ fn map_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> bo
     let old_db = str(out, "/swan.db");
     if file_exists(old_db) {
         var e: u8[>..] = [];
-        let h = sqlite::open(old_db, e);
+        let h = sqlite::open_existing(old_db, e);
+        if h == 0 { abort(str("swan: cannot inspect map schema: ", e)); }
         var v: u8[>..] = [];
-        if h != 0 { meta_value(h, "schema_version", v); sqlite::close(h); }
+        meta_value(h, "schema_version", v);
+        sqlite::close(h);
         if v != str(SCHEMA_VERSION) {
             format(report, "map schema ", if v.len > 0 { v[..] } else { "?" }, " is older than ", SCHEMA_VERSION, ": rebuilding\n");
             for f in ["/swan.db", "/index-manifest.tsv", "/python-pieces.tsv", "/python-files.tsv"] { delete_file(str(out, f)); }
@@ -1088,7 +1101,7 @@ fn map_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> bo
         // and checked live: an empty map records the repo for search_pattern
         // and the rest.
         for t in ["symbols.tsv", "extents.tsv", "relationships.tsv", "occurrences.tsv"] { write_file(str(out, "/", t), ""); }
-        index_main(out, str(out, "/swan.db"), repo, false, report);
+        index_main_locked(out, str(out, "/swan.db"), repo, false, report);
         if l.kt || l.other.len > 0 {
             format(report, "\n", if l.kt { "kotlin " } else { "" }, l.other,
                    ": no SCIP indexer ran for these; search_pattern and rewrite_pattern work on them, and live diagnostics where their server is set up");
@@ -1203,7 +1216,7 @@ fn map_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> bo
     let t_flat = clock();
     guard run_step("flatten", fl, home, child_env(l, ""), 600000, o) == 0 else { format(report, "flatten failed"); return false; }
     format(report, "flatten: ", ((clock() - t_flat) * 1000.0) as i64, " ms\n");
-    index_main(out, db, repo, file_exists(db), report);
+    index_main_locked(out, db, repo, file_exists(db), report);
     format(report, "\nswan map: ", ((clock() - t_start) * 1000.0) as i64, " ms in all, up to ", limit, " indexers at once");
     if !ok { report.append("\n(some indexers failed; see above)"); }
     return ok;

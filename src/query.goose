@@ -46,7 +46,7 @@ fn meta_value(db: i64, key: const u8[:], out: u8[>..]&) {
     let st = prepare_or_die(db, "SELECT value FROM meta WHERE key = ?1");
     sqlite::bind_text(st, 1, key);
     var err: u8[>..] = [];
-    if sqlite::step(st, err) == 1 { sqlite::col_text(st, 0, out); }
+    if step_checked(st, err) == 1 { sqlite::col_text(st, 0, out); }
     sqlite::finalize(st);
 }
 
@@ -107,7 +107,7 @@ fn find_symbol(db: i64, pattern: const u8[:], rel: const u8[:], substring: bool,
     var starts: i64[>..] = [];
     var n = 0;
     out.push('[');
-    while sqlite::step(st, err) == 1 {
+    while step_checked(st, err) == 1 {
         if n > 0 { out.push(','); }
         n++;
         symbol_json(st, out);
@@ -181,7 +181,7 @@ fn find_referencing_symbols(db: i64, pattern: const u8[:], rel: const u8[:], lim
     var loaded_stale = false;
     var n = 0;
     out.push('[');
-    while sqlite::step(st, err) == 1 {
+    while step_checked(st, err) == 1 {
         if n > 0 { out.push(','); }
         n++;
         out.append("{");
@@ -194,7 +194,7 @@ fn find_referencing_symbols(db: i64, pattern: const u8[:], rel: const u8[:], lim
         sqlite::bind_int(refs, 2, limit);
         sqlite::bind_int(refs, 3, if members { 1 } else { 0 });
         var k = 0;
-        while sqlite::step(refs, err) == 1 {
+        while step_checked(refs, err) == 1 {
             if k > 0 { out.push(','); }
             k++;
             var file: u8[>..] = [];
@@ -267,7 +267,7 @@ fn get_symbols_overview(db: i64, rel: const u8[:], out: u8[>..]&) {
     var err: u8[>..] = [];
     var n = 0;
     out.push('[');
-    while sqlite::step(st, err) == 1 {
+    while step_checked(st, err) == 1 {
         if n > 0 { out.push(','); }
         n++;
         symbol_json(st, out);
@@ -281,7 +281,7 @@ fn index_info(db: i64, out: u8[>..]&) {
     var err: u8[>..] = [];
     var n = 0;
     out.push('{');
-    while sqlite::step(st, err) == 1 {
+    while step_checked(st, err) == 1 {
         if n > 0 { out.push(','); }
         n++;
         var k: u8[>..] = [];
@@ -296,7 +296,7 @@ fn index_info(db: i64, out: u8[>..]&) {
     let fs = prepare_or_die(db, "SELECT file FROM files ORDER BY file");
     var stale = 0;
     var listed: u8[>..] = [];
-    while sqlite::step(fs, err) == 1 {
+    while step_checked(fs, err) == 1 {
         var f: u8[>..] = [];
         sqlite::col_text(fs, 0, f);
         if is_stale(f) {
@@ -352,7 +352,7 @@ fn get_symbol_at(db: i64, rel: const u8[:], line: i64, col: i64, out: u8[>..]&) 
         sqlite::bind_int(st, 3, col - 1);
         sqlite::bind_int(st, 4, if any_on_line { 1 } else { 0 });
         var n = 0;
-        while sqlite::step(st, e2) == 1 {
+        while step_checked(st, e2) == 1 {
             if n > 0 { out.push(','); }
             n++;
             if sqlite::col_int(st, 9) == 1 {
