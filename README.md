@@ -239,6 +239,14 @@ installation; this limitation was not fixed by PR #11.
 
 ## Use
 
+**Linux package candidate:** the dependency-aware installer and portable agent
+skill are described in [Install the Linux package](docs/install.md). It supports
+a new user-owned prefix, `core` or `python-typescript` profiles, verified local
+runtime downloads, and a read-only `swan doctor` command. It does not replace
+an active installation, grant repository trust or configure an agent. A built
+candidate and its qualification receipt are separate from an official release.
+The source-build instructions below retain the legacy full-tool bootstrap.
+
 <!-- coderabbit-ai-generated:v1 -->
 
 <!-- coderabbit-ai-generated-section:v1:408c1072b178095036c667f595f53dd2aa9053552258c86a2411dc15c4baef78 -->

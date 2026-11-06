@@ -403,6 +403,15 @@ branch fix/greptile-review:
 
 ## Remaining work
 
+The 2026-11-06 package proposal above was approved for implementation and CUA
+testing. The candidate now implements archive export, a staged new-prefix
+installer, read-only doctor, private Node/Bun discovery, and a portable revision
+of the existing skill. SQLite's header fix is in its owning repository and
+Swan pins `80a4e713`; the Swan header fix is also in source. Local verification
+currently passes 18 installer/doctor checks, 10 archive checks and 7 skill
+portability checks. Exact installed-runtime qualification follows separately;
+these test counts are not an official release or a production replacement.
+
 1. Qualify real server adapters and indexers separately from the mock LSP
    and synthetic-row tests; existing integrations need their full toolchains.
 2. Dependency listing, git churn, broader language coverage and stronger

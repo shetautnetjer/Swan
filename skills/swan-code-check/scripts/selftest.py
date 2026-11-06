@@ -11,11 +11,14 @@ Also reports the known-bug canaries as PRESENT, FIXED or CHANGED.
 Usage: python3 -I selftest.py [--swan PATH] [--map-swan PATH] [--out DIR]
 """
 import argparse
+from contextlib import contextmanager
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent.parent
@@ -36,8 +39,8 @@ def tag_lines():
 
 
 class Swan:
-    def __init__(self, swan, db):
-        self.p = subprocess.Popen([swan, "serve", str(db)], stdin=subprocess.PIPE,
+    def __init__(self, swan, maps):
+        self.p = subprocess.Popen([swan, "serve", "--maps", str(maps)], stdin=subprocess.PIPE,
                                   stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
         self.n = 0
         self.rpc("initialize", {"protocolVersion": "2025-06-18", "capabilities": {},
@@ -58,7 +61,8 @@ class Swan:
 
     def search(self, lang, pattern):
         r = self.rpc("tools/call", {"name": "search_pattern",
-                                    "arguments": {"pattern": pattern, "language": lang}})
+                                    "arguments": {"repo": str(FIXTURE), "pattern": pattern,
+                                                  "language": lang}})
         text = r.get("result", {}).get("content", [{}])[0].get("text", "")
         try:
             d = json.loads(text)
@@ -80,26 +84,53 @@ def hits(d, by_line):
     return out
 
 
-def default_swan():
-    """The checkout's own bin/swan when this script runs from a Swan checkout
-    (skills/swan-code-check/scripts/), else the host install."""
-    checkout = Path(__file__).resolve().parents[3] / "bin" / "swan"
-    if checkout.is_file():
-        return str(checkout)
-    return os.path.expanduser("~/aya/sandbox/swan/bin/swan")
+def resolve_swan(candidate=None):
+    """Resolve an explicit binary, SWAN_BINARY, then swan on PATH.
+
+    A selected but invalid binary is an error: silently falling back could
+    test a different installation from the one the caller requested.
+    """
+    candidate = os.path.expanduser(candidate or os.environ.get("SWAN_BINARY") or "swan")
+    executable = shutil.which(candidate)
+    if executable is None or not (os.path.isfile(executable) and os.access(executable, os.X_OK)):
+        raise ValueError(f"swan binary not found or not executable: {candidate} "
+                         "(pass --swan PATH, set SWAN_BINARY, or add swan to PATH)")
+    return str(Path(executable).resolve())
+
+
+@contextmanager
+def output_directory(requested=None):
+    """Allocate disposable output, or retain an explicitly chosen empty dir."""
+    if requested:
+        folder = Path(requested).expanduser().resolve()
+        folder.mkdir(parents=True, exist_ok=True)
+        if any(folder.iterdir()):
+            raise ValueError(f"self-test output must be a new or empty directory: {folder}")
+        yield folder
+    else:
+        with tempfile.TemporaryDirectory(prefix="swan-skill-selftest-") as folder:
+            yield Path(folder).resolve()
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--swan", default=default_swan())
+    ap.add_argument("--swan", help="binary path or command (default: SWAN_BINARY, then swan on PATH)")
     ap.add_argument("--map-swan", help="binary that builds the fixture map (default: --swan)")
-    ap.add_argument("--out", default=os.environ.get("SWAN_SELFTEST_OUT") or os.path.expanduser("~/.cache/aya/tmp/swan-skill-selftest"))
+    ap.add_argument("--out", default=os.environ.get("SWAN_SELFTEST_OUT"),
+                    help="retain a new/empty output directory (default: disposable temporary directory)")
     a = ap.parse_args()
-    for b in {a.swan, a.map_swan or a.swan}:
-        if not (os.path.isfile(b) and os.access(b, os.X_OK)):
-            raise SystemExit(f"swan binary not found or not executable: {b} (build it with scripts/build.sh, or pass --swan PATH)")
+    try:
+        a.swan = resolve_swan(a.swan)
+        a.map_swan = resolve_swan(a.map_swan) if a.map_swan else a.swan
+        with output_directory(a.out) as out:
+            print(f"Self-test output: {out}" + (" (retained)" if a.out else " (disposable)"))
+            return run(a.swan, a.map_swan, out)
+    except ValueError as error:
+        ap.error(str(error))
 
-    built = subprocess.run([a.map_swan or a.swan, "map", str(FIXTURE), a.out], capture_output=True, text=True)
+
+def run(binary, map_binary, out):
+    built = subprocess.run([map_binary, "map", str(FIXTURE), str(out / "map")], capture_output=True, text=True)
     if built.returncode != 0:
         print(built.stdout[-800:], built.stderr[-800:])
         raise SystemExit("swan map failed")
@@ -107,7 +138,7 @@ def main():
     tags = tag_lines()
     by_line = {v: k for k, v in tags.items()}
     pack = json.loads(PACK.read_text())
-    swan = Swan(a.swan, Path(a.out) / "swan.db")
+    swan = Swan(binary, out)
     fails = 0
     try:
         for e in pack["patterns"]:
@@ -138,8 +169,8 @@ def main():
     finally:
         swan.close()
     print(f"\n{len(pack['patterns']) - fails}/{len(pack['patterns'])} patterns match the fixture exactly")
-    sys.exit(1 if fails else 0)
+    return 1 if fails else 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

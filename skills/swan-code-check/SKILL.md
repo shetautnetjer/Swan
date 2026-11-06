@@ -1,126 +1,127 @@
 ---
 name: swan-code-check
 description: >-
-  Use Swan, the local compiler-accurate code map (MCP server `swan`), whenever
-  you touch code in a repo or review one: before editing a shared function,
-  class or type (who uses it, what breaks, which tests to run), after editing
-  (live compiler errors, only the affected tests), when reviewing a diff or PR
-  (impact plus a validated security/quality pattern sweep), before handing
-  coding to another agent (blast radius and tests go in its prompt), for
-  renames, implementations, dead code. TS/JS, Python, Rust, Java, Kotlin,
-  C/C++/CUDA, C#, Lua, GDScript, shaders. Trigger on "who calls", "what
-  breaks", "impact", "find usages", "code review", "security review", "find
-  errors", "rename", "unused code", or any non-trivial code edit.
+  Use Swan for compiler-indexed symbol lookup, references, change impact,
+  diagnostics, targeted tests, structural pattern search and planned renames
+  when editing or reviewing a code repository. Use the existing Swan
+  connection or installation; report incomplete indexing and missing tools.
 ---
 
 # Swan code check
 
-Swan answers "where is it, who uses it, what breaks, which tests" from the
-compiler's own index (SCIP) in milliseconds, plus live diagnostics, targeted
-tests and syntax-tree pattern search. Ask Swan before grep for structure; use
-`rg` to cross-check completeness.
+Swan answers "where is it, who uses it, what breaks, which tests" from a
+compiler-produced SCIP map, with live diagnostics and syntax-tree pattern
+search. Use `rg` to cross-check completeness. Available languages and live
+features depend on the installed indexers, checkers and language servers.
 
-This file's single source is the Swan repo (`skills/swan-code-check/`); see
-`PROVENANCE.md` there for how installed copies follow it.
+This directory is maintained in the Swan repository at
+`skills/swan-code-check/`; see [PROVENANCE.md](PROVENANCE.md).
 
-- Binary `~/aya/sandbox/swan/bin/swan`; maps in `~/aya/sandbox/swan/data/<name>/swan.db`.
-- Swan is Khamani's project, maintained with Aya (repo `~/aya/sandbox/swan`,
-  github shetautnetjer/Swan). The maps are shared: don't delete them.
-- Register it as `swan serve --maps ~/aya/sandbox/swan/data`: one server,
-  every map. Every tool takes an optional `repo` (a path in the repo); a call
-  without one fails loudly ("no repo selected") instead of answering about
-  some other repo.
+## Find the available Swan
 
-## Calling Swan (by host)
+1. Discover a **configured Swan MCP connection** in the host's available
+   tools and read its actual tool schemas. Use its advertised names and
+   arguments; tool discovery and MCP naming differ by agent. Do not assume
+   another agent's CLI or API exists, or install/configure a server as part
+   of using this skill.
+2. If no connection is available, use an explicitly supplied executable,
+   `SWAN_BINARY`, or `swan` on `PATH`. Resolve a command name with the host's
+   executable lookup before treating it as a file path. Use the exact
+   installation's binary throughout; a checkout, package prefix and `PATH`
+   can contain different versions. The bundled self-test follows this rule.
+3. With a packaged binary, run that exact executable's
+   `doctor --profile core --json`, or `doctor --profile python-typescript --json`
+   for this skill's fixture. Doctor reports dependency availability; it does
+   not prove a repository is indexed or a language feature works. Read any
+   missing dependencies and the map report before claiming readiness. If an
+   older binary has no `doctor`, report that limitation and inspect its
+   actual command help and build output.
 
-- **Claude Code (Jabari):** tools are `mcp__swan__*` (if deferred, load them
-  with ToolSearch `+swan`). One server stays up for the session, so `use_repo`
-  carries over between calls.
-- **Letta / AEON (Aya):** `letta mcp call mcp__swan__<tool> --args '<json>'`.
-  Each call starts a fresh server, so a `use_repo` switch does not carry over:
-  **pass `"repo": "<path in the repo>"` on every call.** Batch questions into
-  fewer calls (`depth`, `max_results`); each call costs about 0.5 s of CLI start.
-- **No MCP:** `swan query <db> symbol|refs|callers|callees|impls|unused|diag|pattern <arg> [relative_path]`.
+CLI fallback: `<swan-binary> query <db> symbol|refs|callers|callees|impls|unused|diag|pattern <arg> [relative_path]`.
+A new stdio MCP process can be launched with
+`<swan-binary> serve --maps <explicit-map-root>` when the caller has authorized
+that execution. Choose a writable map directory; preserve existing maps.
+The package includes this skill for copying to the caller's chosen skill
+location; it does not register agent settings or an MCP connection.
 
-## 1. Start (once per repo per task)
+## Start once per repo per task
 
-1. `use_repo {"path": "<repo>"}`: picks the repo's map, building one on first
-   use. Indexers that run the repo's own build files (Gradle for Kotlin/Java,
-   Python virtualenvs) wait for `swan trust <repo>`; the answer's `skipped`
-   says which. Trusting runs those build files: Aya decides for Khamani's own
-   repos; other agents say what was skipped and ask Khamani. Pattern search
-   works without an index.
-2. `index_info {"repo"}`: refresh when `stale_file_count > 0` **or when the
-   repo has commits since `refreshed_at`/`built_at`**. Files added after a
-   build show in `stale_files` and count in both `stale_file_count` and
-   `new_file_count` (Swan #9, 839c4b0, live since 2026-11-01); files in a
-   language the map never indexed don't count. If `new_file_count` is missing, the
-   binary predates #9 and new files are invisible, so refresh on any new file.
-   - Small repo: `update_map {"repo"}`.
-   - Large repo (AEON, ~2.4k files) from a shell, one build at a time
-     (`pgrep -f "swan map"` first), memory-capped:
-     `systemd-run --user --scope -q -p MemoryMax=8G ~/aya/sandbox/swan/bin/swan map <repo> ~/aya/sandbox/swan/data/<name>`
-     (AEON ~13 s, evolve ~2 s). `<name>` is the map dir `use_repo` reported.
-3. Known-answer check: `find_symbol` on a symbol you can see, confirm file and
-   line. Before acting on a reference list, compare its files once with
-   `rg -l <name>`; a mismatch means a stale or partial map.
+- Resolve the target repository's absolute path. Call
+  `use_repo {"path":"<repo>"}`; use `"build":false` when only an existing
+  map may be read. First-use building writes a map and can run indexers.
+- **Pass `"repo":"<repo>"` on every subsequent repository tool call**, even
+  if a persistent server remembers `use_repo`. Stateless host wrappers start
+  fresh processes; selection in an earlier call does not carry over.
+- Read the map report and its `skipped` entries. Some indexers run the repo's
+  build files, and a repo-local Python environment can execute repo code.
+  **Never grant trust automatically.** Run `<swan-binary> trust <exact-repo>`
+  only with the user's explicit authorization to trust that repository and
+  run its build code. Repository ownership or an agent's identity does not
+  grant trust. Never enable the global `SWAN_TRUST_BUILD=1` override. If trust
+  is absent, continue within the available coverage and report what skipped.
+- `index_info {"repo":"<repo>"}`: refresh when `stale_file_count > 0` or the
+  repo has commits since `refreshed_at`/`built_at`, using `update_map` within
+  the caller's execution scope. New files count in `new_file_count`; if that
+  field is absent, refresh on any new file because older maps can miss it.
+  Languages never indexed can remain outside freshness coverage.
+- Check a known symbol with `find_symbol` and confirm its file and line.
+  Before acting on references, compare their files with `rg -l <name>`;
+  mismatches require investigating stale or partial coverage.
 
-## 2. Before editing (or briefing another coding agent)
+## Editing and review
 
-- `get_callers {"repo","name_path","depth":2}`: `summary.files` is the blast
-  radius; `summary.test_files` go into the test run and the coder's prompt.
-- `find_implementations` for interfaces, base classes, overridable methods.
-- `get_callees` shows what a symbol depends on, with dependency package versions.
-- An `ambiguous` answer needs the exact path (`/Store/add`) or `relative_path`.
+All examples below also require `repo` as above. Read the advertised schema
+for exact argument names.
 
-## 3. After editing
+- Before changing a shared symbol, use `get_callers` with `name_path` and
+  `depth:2`. `summary.files` is the impact radius; `summary.test_files` guide
+  validation and any coding handoff. Use `find_implementations` for
+  interfaces/base classes and `get_callees` for dependencies. Disambiguate
+  with an exact name path such as `/Store/add` or `relative_path`.
+- After editing, request `get_diagnostics` with `relative_path` and `live:true`
+  if supported, or `check_errors` for the repo. `run_tests` with `name_path`
+  or `relative_path` runs affected tests through the repo's runner. Checkers,
+  live servers and tests execute code: stay within the caller's task
+  authorization and report unavailable or skipped coverage. Refresh stale
+  maps before relying on structural answers about changed files.
+- For a diff, inspect changed files (`git diff --name-only <base>...HEAD`),
+  their symbols (`get_symbols_overview` or `get_symbol_at`) and callers beyond
+  the diff, then diagnostics. For a security/quality sweep, run applicable
+  entries in [references/patterns.json](references/patterns.json) through
+  `search_pattern`, passing `language` and the intended `relative_path`.
+  Cross-check with
+  `rg -n 'shell:\s*true|rejectUnauthorized:\s*false|NODE_TLS_REJECT_UNAUTHORIZED|verify\s*=\s*False'`.
+  A hit is a lead to read, not a finding. Report findings with file:line and
+  the relevant Swan evidence; disclose incomplete coverage.
+- `rename_symbol` and `rewrite_pattern` plan first (omit `apply` or use false).
+  Read the plan before applying. Apply only edits covered by the caller's
+  task authorization; a review-only request does not authorize mutation.
+  Other editing tools, formatting and deletion have the same scope boundary.
+  Stale-file refusal requires refresh and replanning. Strings, comments and
+  runtime-by-name uses are outside compiler-resolved rename coverage.
+- `find_unused_symbols` returns candidates: entry points, code reached by
+  name and build output such as `dist/` bundles can appear.
 
-- `get_diagnostics {"repo","relative_path","live":true}` per touched file
-  (real language server, 0.4–4 s), or `check_errors {"repo"}` for everything.
-- `run_tests {"repo","name_path"}` (or `relative_path`) runs only the tests
-  that reach the change, with the repo's own runner (pytest, bun/vitest, cargo).
-- Answers about edited files carry `stale: true`; refresh (`update_map`)
-  before more structural questions about them.
+## Pattern rules and self-test
 
-## 4. Reviewing a diff or PR
+The unchanged fixture and 24-pattern pack are checked by
+`scripts/selftest.py`.
 
-1. `git diff --name-only <base>...HEAD`; `get_symbols_overview` per changed
-   file (or `get_symbol_at` on hunk lines).
-2. `get_callers {"depth":2}` per changed shared symbol; read the callers the
-   diff didn't touch (that's where regressions hide).
-3. `get_diagnostics {"live":true}` on changed files.
-4. Pattern sweep: every entry in `references/patterns.json` via
-   `search_pattern {"repo","pattern","language","relative_path"}`, plus
-   `rg -n 'shell:\s*true|rejectUnauthorized:\s*false|NODE_TLS_REJECT_UNAUTHORIZED|verify\s*=\s*False'`.
-   A hit is a lead to read, not a finding.
-5. Report each finding with file:line and the Swan evidence (callers, test files).
-
-## Pattern rules (verified by `scripts/selftest.py`)
-
-- Patterns are complete code in the target language; pass `language`.
-  Fragments mislead silently: `shell: true` alone parses as a JS label and
-  matches nothing anywhere; `{ a: 1, $$$ }` at statement start parses as a
-  block. **`files_searched: 0` means "didn't apply", never "clean".**
-- Wildcards inside template literals don't match: search `execSync($$$)` and
-  read the first argument.
-- Matcher bug (open as of Swan 839c4b0): a `$$$` beside a comma must match at
-  least one node, though the docs say none is fine. `os.system($X, $$$)`
-  misses `os.system(x)`; `{ $$$, shell: true }` misses `{ shell: true }`. The
-  pack carries both variants; for a new pattern, write both variants or add an
-  `rg` check. The self-test's canaries say PRESENT until the goose-treesitter
-  fix lands, then FIXED.
-- New pattern: add a tagged line to `fixture/sec.*` and an entry to
-  `patterns.json`, then, from the skill directory, `python3 -I scripts/selftest.py` (exit 0 = every
-  pattern hits exactly its tags; `--swan PATH` picks the binary,
-  `SWAN_SELFTEST_OUT` or `--out` the scratch dir).
-
-## Editing tools and limits
-
-- `rename_symbol` and `rewrite_pattern` plan first (no `apply`); apply only
-  after reading the plan. Both refuse stale files. Strings, comments and
-  run-time-by-name uses are not covered.
-- On AEON keep Swan read-only (no apply, rename, rewrite, format) unless
-  Khamani okays edits.
-- `find_unused_symbols` gives candidates only: entry points, code reached by
-  name and build output such as `dist/` bundles appear too.
-- Swan answers from the map: changed or new files are only right after a refresh.
+- Use complete code patterns and pass `language`. `shell: true` alone parses
+  as a JS label; `{ a: 1, $$$ }` at statement start parses as a block.
+  **`files_searched:0` means "didn't apply", never "clean".**
+- Wildcards inside template literals do not match: search `execSync($$$)`
+  and read the first argument.
+- Known matcher canaries track the empty-`$$$`-beside-a-comma issue observed
+  in Swan 839c4b0: `os.system($X, $$$)` misses `os.system(x)` and
+  `{ $$$, shell: true }` misses `{ shell: true }`. Keep both variants or an
+  `rg` check. The self-test reports PRESENT, FIXED or CHANGED; the JS-label
+  canary reports TRAP. These are observations to verify on the chosen binary.
+- For new patterns, add tagged fixture lines and a pack entry, then run
+  `python3 -I <skill-directory>/scripts/selftest.py --swan <exact-binary>`.
+  Omit `--swan` to use `SWAN_BINARY`, then `swan` on `PATH`.
+  The default output is a new disposable temporary directory, removed at
+  exit. `--out DIR` (or `SWAN_SELFTEST_OUT`) retains a new, empty output
+  directory for inspection. The map is `DIR/map/swan.db`. Never point it at
+  shared maps. Exit 0 means all 24 patterns match exactly; it does not qualify
+  live diagnostics or index completeness for another repository.

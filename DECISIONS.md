@@ -166,3 +166,23 @@ The platform work in `docs/packages.md` is a proposal pending approval;
 this decision authorizes accurate documentation, not a new platform port.
 The live-Python trust fix is already in source and the inspected installed
 Linux executable; no redundant rebuild is required to document it.
+
+## 2026-11-06 — Approve a Linux package and portable existing skill
+
+The user approved the PRD/HLD in `docs/packages.md` for implementation and
+testing in CUA. Preserve the existing executable-relative tree and trust
+storage. Build a candidate archive and standalone Python installer for a new
+user-owned Linux x86-64 prefix; `core` avoids optional runtime downloads,
+and `python-typescript` selects the existing frozen npm tools plus compatible
+system or pinned private Node/Bun. System Python remains an explicit prerequisite.
+
+Reuse `skills/swan-code-check/` and its corpus, removing machine/personal
+defaults. Add read-only dependency reporting and keep automatic trust grants,
+global system changes, agent configuration changes, upgrades, new registries
+and platform ports out of this milestone. Both build-header defects are fixed
+in their owning sources; Swan pins the corrected SQLite commit rather than
+patching a compiler cache. A release export needs a clean source revision,
+binary-bound build receipt, checksums and third-party notices. The receipt is
+an attestation; real installation/runtime checks and independent review are
+required separately. Public release publication and production replacement
+are separate actions, not implied by the candidate build.

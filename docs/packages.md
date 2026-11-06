@@ -178,10 +178,13 @@ is independent of that future work.
 
 ## Installable Swan package and portable skill — proposal, 2026-11-06
 
-**Stage: PRD/HLD for approval.** The user requested a package that checks and
-installs dependencies and includes an agent skill. The following scope has
-not yet been implemented or accepted. The ordinary C-header build repair
-found during investigation is tracked separately from this new installer.
+**Approved for implementation on 2026-11-06.** The user approved building and
+testing this Linux package and portable skill in CUA. The original proposal
+below is preserved as the design baseline. Native Windows/macOS/ARM64 ports,
+public release publication and changes to the active installation remain
+outside this approval. Implementation details and commands are in
+[the installation guide](install.md); actual qualification is recorded in
+`STATUS.md` with exact receipts, not inferred from this approval.
 
 Evidence: [fresh-build receipt](evidence/swan-install-2026-11-06.json), including
 both failing builds, the two experimental header patches, and passing checks.
@@ -318,5 +321,6 @@ and require task authorization. Installation never grants repository trust.
 
 Stop on checksum/source mismatch, an unexpected write outside the selected
 prefix/test tree, a required system mutation, or any attempt to change a real
-trust list. Preserve failed evidence. Review this PRD/HLD and obtain approval
-before designing or implementing the new installer, doctor or skill behavior.
+trust list. Preserve failed evidence. The PRD/HLD approval above permits the
+installer, doctor and portable-skill implementation; material scope changes
+require a new decision.
