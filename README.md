@@ -202,13 +202,21 @@ git merge-base --is-ancestor 821474fe12e06aaefd96580a4903ab8aba08568e HEAD
 # Exit 0 means this source history includes the fix; it says nothing about bin/swan.
 ```
 
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:4a5b46aca3b744b82d0a1b7cd5e11e1e8c6c563b220004ff37c8fb0f836806ac -->
+
 [The regression test](tests/trust_check.ts) checks that the untrusted live
-server answers without executing a planted interpreter, and that a trusted
-control does execute it. It skips live Python checks if Pyright is missing;
+reply contains a `result` field without executing a planted interpreter,
+and that a trusted control does execute it. The `result` assertion does not
+establish successful diagnostics: MCP tool errors also contain that field.
+It skips live Python checks if Pyright is missing;
 a skip is not evidence that this protection works. Run the test only in a
 separate installation with its own executable, dependencies and `data/`.
 It can write and restore that installation's entire trust list. The full
 `scripts/test.sh` also rebuilds its executable.
+
+<!-- /coderabbit-ai-generated:v1 -->
 
 A separate installed-binary check on November 6, 2026 used real Pyright
 1.1.414 and a byte-identical isolated executable copy: untrusted, trusted
@@ -231,7 +239,12 @@ installation; this limitation was not fixed by PR #11.
 
 ## Use
 
-The documented bootstrap needs Bash, Git, a C toolchain, Node.js/npm, Bun,
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:408c1072b178095036c667f595f53dd2aa9053552258c86a2411dc15c4baef78 -->
+
+The documented bootstrap needs Bash, Git, a C toolchain, Node.js >=22.22.2
+with npm, Bun,
 Python 3, uv (used to create the tool virtualenvs), and the download/archive utilities used by
 `scripts/fetch-tools.sh` (including curl, tar, unzip and SHA checksum tools).
 It fetches pinned language tools into this checkout. The first Goose build
@@ -239,6 +252,8 @@ can fetch the pinned SQLite and tree-sitter packages. Individual language
 adapters have additional requirements; the full integration suite exercises
 those external tools. These are setup requirements, not proof of a clean
 installation on every Linux distribution.
+
+<!-- /coderabbit-ai-generated:v1 -->
 
 ```bash
 git clone --recurse-submodules https://github.com/shetautnetjer/Swan   # lsp/ is the goose-lsp submodule
