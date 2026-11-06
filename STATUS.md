@@ -1,6 +1,6 @@
 # Swan status
 
-as_of: 2026-10-27
+as_of: 2026-11-06
 
 This is a chronological development log. Earlier "not done" statements,
 private-repo timings and "all tests pass" entries describe their original
@@ -353,6 +353,27 @@ branch fix/greptile-review:
 - Cross-checked on the live maps against an independent Python walk:
   evolve has 5 new files (the #16 merge), AEON 0. `index_info` on AEON
   (2,716 files walked) takes 7 ms.
+
+## 2026-11-06: live-Python fix verified; platform support documented
+
+- PR #11 (`821474f`, merged November 2) already contains the live virtualenv
+  trust guard. The installed Linux executable was independently checked on
+  November 6 using real Pyright 1.1.414: untrusted, process-only trusted
+  control, then fresh untrusted sessions returned the deliberate type error;
+  only the trusted control ran the planted interpreter. Production binary,
+  module configuration and trust-list hashes stayed unchanged. No rebuild
+  or production configuration change was needed for this documentation work.
+- README now identifies the fix, source-versus-binary distinction, safe test
+  isolation, global trust override and unresolved trust-list concurrency
+  concern. It also states Linux x86-64 implementation scope, setup/layout
+  requirements and the unqualified Windows/macOS/ARM64 targets.
+- `docs/packages.md` contains a portability proposal and target acceptance
+  checks. No host port is implemented or approved by this documentation
+  change. Next: review the proposal before detailed design or implementation;
+  qualify clean-machine Linux setup before making broader support claims.
+- This change affects documentation only. Verification: source/evidence
+  comparison, Markdown local-link/anchor checks and `git diff --check`.
+  Full build/integration suites are not rerun for documentation-only edits.
 
 ## Remaining work
 

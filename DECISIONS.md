@@ -154,3 +154,15 @@ pipelines gate their own jobs the same way and report what they skipped.
 SWAN_TRUST_BUILD=1 trusts every repo (tests, CI). The MCP server has no
 trust tool, so a repo's contents cannot get an agent to trust it. Test
 runners stay ungated: running tests is an explicit request to run the code.
+
+## 2026-11-06 — Describe platform evidence separately from portability goals
+
+The public README must distinguish implemented/tested Linux x86-64 behavior
+from Windows, macOS, WSL2 and ARM64 targets that have not been qualified.
+Goose compiler distributions or MCP compatibility alone do not establish
+Swan host support. Keep machine-specific paths out of public setup
+requirements and preserve the existing installation and package boundaries.
+The platform work in `docs/packages.md` is a proposal pending approval;
+this decision authorizes accurate documentation, not a new platform port.
+The live-Python trust fix is already in source and the inspected installed
+Linux executable; no redundant rebuild is required to document it.
