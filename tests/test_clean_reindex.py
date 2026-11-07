@@ -73,7 +73,10 @@ else: raise RuntimeError(mode)
 
 
 class CleanChecks(PolicyChecks):
+    """Qualify native clean publication and recovery with disposable synthetic tools."""
+
     def __init__(self, options):
+        """Prepare the private binary copy, synthetic tools and isolated trust fixture."""
         super().__init__(options)
         (self.prefix / 'sentinel.py').write_text(SENTINEL)
         tsc = self.prefix / 'tools/node_modules/.bin/tsc'
@@ -87,11 +90,13 @@ class CleanChecks(PolicyChecks):
         (self.prefix / 'tools/modules.json').write_text('{}\n')
 
     def control(self, mode='', generation=None):
+        """Select the synthetic child behavior and optional output generation."""
         (self.prefix / 'control').write_text(mode)
         if generation is not None:
             (self.prefix / 'generation').write_text(generation)
 
     def map(self, repo, out, clean=False, success=True):
+        """Run the native mapper, retain its log and assert the expected exit outcome."""
         command = [str(self.binary), 'map', str(repo), str(out)] + (['--clean'] if clean else [])
         result = subprocess.run(command, env=self.environment, capture_output=True, text=True, timeout=self.options.timeout)
         self.serial += 1
@@ -100,11 +105,13 @@ class CleanChecks(PolicyChecks):
         return result
 
     def signature(self, client, repo):
+        """Read the single probe symbol's generation through the persistent MCP client."""
         rows = client.good('find_symbol', {'repo': str(repo), 'build': False, 'name_path_pattern': 'probe'})
         require(len(rows) == 1, repr(rows))
         return rows[0]['signature']
 
     def cached_layers_and_reader(self):
+        """Prove clean replaces reused TS layers while preserving reader and lock identity."""
         folder, registry = self.context('layers-reader')
         repo = self.repository(folder, 'typescript')
         for n in range(11): (repo / f'extra{n}.ts').write_text(f'export const extra{n} = {n};\n')
@@ -150,6 +157,7 @@ class CleanChecks(PolicyChecks):
         return 'real TS delta plan discarded; all chunks/listing rerun; fresh DB replaced; persistent reader and lock identity preserved'
 
     def failed_output_and_recovery(self):
+        """Retain the old database on failed or missing output and force ordinary recovery."""
         folder, registry = self.context('failures')
         repo = self.repository(folder, 'mixed')
         (repo / 'probe.py').write_text('def probe(): return 1\n')
@@ -172,6 +180,7 @@ class CleanChecks(PolicyChecks):
         return 'partial indexer failure, successful no-output indexer/flattener and flatten failure preserve old DB; ordinary retry rebuilds'
 
     def python_pieces(self):
+        """Require clean rebuild to rerun every unchanged Python piece after a reuse control."""
         folder, registry = self.context('python-pieces')
         repo = folder / 'repos/python'
         repo.mkdir(parents=True)
@@ -191,6 +200,7 @@ class CleanChecks(PolicyChecks):
         return f'{count} unchanged Python pieces rerun by clean'
 
     def malformed_rows_and_recovery(self):
+        """Reject malformed rows before publication and retain empty-output compatibility."""
         folder, registry = self.context('malformed-rows')
         repo = self.repository(folder, 'rows')
         out = registry / 'rows'
@@ -226,6 +236,7 @@ class CleanChecks(PolicyChecks):
         return 'malformed shapes/numbers/roles/flags rejected before publication; caches remain invalidated; same reader recovers; empty output stays valid'
 
     def target_and_mcp(self):
+        """Reject invalid policy and map identity before effects, then recover on the same server."""
         folder, registry = self.context('target-policy')
         repo = self.repository(folder, 'selected')
         out = registry / 'selected'
@@ -275,6 +286,7 @@ class CleanChecks(PolicyChecks):
         return 'strict schema/value checks precede selection; missing, ancestor, wrong-root and moved-map targets refused; exact MCP rebuild succeeds'
 
     def interrupted_writer(self):
+        """Verify a surviving child keeps the stable writer lock after its parent is interrupted."""
         folder, registry = self.context('interruption')
         repo = self.repository(folder, 'held')
         out = registry / 'held'
@@ -327,6 +339,7 @@ class CleanChecks(PolicyChecks):
             log.close()
 
     def run(self):
+        """Run isolated scenarios, close clients and retain the receipt even after failures."""
         print('Artifacts: ' + str(self.directory), flush=True)
         try:
             for operation in (self.cached_layers_and_reader, self.failed_output_and_recovery,
@@ -346,6 +359,7 @@ class CleanChecks(PolicyChecks):
 
 
 def main():
+    """Parse the explicit binary/output scope and exit nonzero if a scenario fails."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--binary', required=True, type=Path)
     parser.add_argument('--output-parent', required=True, type=Path)

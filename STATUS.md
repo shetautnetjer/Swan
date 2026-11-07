@@ -667,3 +667,14 @@ outside this source PR.
   source immutability during arbitrary builds or power-loss durability.
   No installation, live map refresh or trust/configuration change is claimed
   by this source commit. See [clean-rebuild details](docs/clean-reindex.md).
+
+## 2026-11-07: clean-rebuild test documentation follow-up
+
+Added missing docstrings only to the maintained `tests/test_clean_reindex.py`;
+all 13 class/function definitions are documented. Its AST matches `890c7e5`
+after removing docstrings and source locations. All six clean scenarios
+passed against unchanged binary
+`0a42c9dec9a9f5bcfb0ec9037a68a28cd908d5b7f5d3463466c1d339b882a3eb`.
+Native code, skills and existing tests were untouched. Earlier Cua archives,
+qualification packets and manifests retain their original bytes and do not
+include this later test-documentation follow-up.
