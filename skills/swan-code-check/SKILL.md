@@ -119,7 +119,26 @@ location; it does not register agent settings or an MCP connection.
 - Dependency, lockfile, compiler/indexer configuration and other build-input
   changes need more than freshness checks: `update_map` can reuse cached
   SCIP output. For example, TypeScript cache keys omit `package-lock.json`
-  and `node_modules`. Within the caller's execution scope, create a new private
+  and `node_modules`. When indexing is authorized and the actual `update_map`
+  schema advertises boolean `clean`, first select with `use_repo` and
+  `build:false`, verify the exact canonical `root` and expected `map`, then
+  call `update_map {"repo":"<exact-repo-root>","build":false,"clean":true}`.
+  The CLI equivalent is `<swan-binary> map <exact-repo-root> <exact-map-dir>
+  --clean`. Clean rebuild reruns the eligible indexers, discards cached merge
+  layers, and publishes a new database only after success. It preserves the
+  existing trust policy; skipped/unavailable language coverage still needs
+  inspection. It does not grant build authorization: `build:false` prevents
+  implicit selection builds, not this explicit indexing action.
+- Clean rebuild is scoped to that map, never the registry. Keep the map's
+  directory and `swan.db.lock`; never wipe the registry, saved trust, or agent
+  settings. Failure or interruption before publication retains the old
+  database but invalidates reusable generated outputs. Report the failed
+  refresh; old answers are not thereby qualified as current. Retry only after
+  the writer and any surviving indexer have released the lock. Check the
+  returned root/map, known symbol and coverage after successful rebuild.
+  The source repository's `docs/clean-reindex.md` records the detailed contract.
+- If `clean` is unavailable, the old map's identity cannot be verified, or the
+  caller authorizes only a private candidate, create a new private
   registry root and build its sole map child with
   `<swan-binary> map <repo> <private-root>/fresh`. Use canonical absolute paths.
   Map discovery selects by repo-root matches, not creation time: launch a

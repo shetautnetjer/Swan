@@ -938,7 +938,59 @@ fn dependents_of_changes(out: const u8[:], stamps: const u8[:], prev: const u8[:
     return dirty;
 }
 
-fn map_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> bool {
+// Clean publication must not treat a successful but malformed flattener as a
+// complete replacement. Match tools/scip-flatten.ts's row contract before the
+// existing permissive native reader runs. Empty files/lines are valid, and the
+// historical five-column symbol row remains valid (the sixth is optional docs).
+fn clean_row_number(field: const u8[:]) -> bool {
+    guard field.len > 0 else { return false; }
+    for c in field { if c < '0' || c > '9' { return false; } }
+    let value, ok = parse_int(field);
+    return ok && value >= 0;
+}
+
+fn clean_row_valid(name: const u8[:], line: const u8[:]) -> bool {
+    let f = split(line, '\t');
+    if name == "symbols.tsv" {
+        return (f.len == 5 || f.len == 6) && f[0].len > 0 && clean_row_number(f[2]);
+    }
+    if name == "relationships.tsv" {
+        guard f.len == 4 && f[0].len > 0 && f[1].len > 0 && f[2].len > 0 && f[3].len > 0 else { return false; }
+        for flag in split(f[3], ',') {
+            if flag != "impl" && flag != "ref" && flag != "type" && flag != "def" { return false; }
+        }
+        return true;
+    }
+    let expected = if name == "extents.tsv" { 6 } else { 7 };
+    guard f.len == expected && f[0].len > 0 && f[1].len > 0 else { return false; }
+    for i in 2..6 { if !clean_row_number(f[i]) { return false; } }
+    let sl = field_int(f[2]); let sc = field_int(f[3]);
+    let el = field_int(f[4]); let ec = field_int(f[5]);
+    guard el > sl || (el == sl && ec >= sc) else { return false; }
+    return name == "extents.tsv" || f[6] == "def" || f[6] == "ref" || f[6] == "imp" || f[6] == "name";
+}
+
+fn clean_rows_valid(out: const u8[:], report: u8[>..]&) -> bool {
+    for name in ["symbols.tsv", "extents.tsv", "relationships.tsv", "occurrences.tsv"] {
+        var rows: u8[>..] = [];
+        guard read_file(str(out, "/", name), rows) else {
+            format(report, "clean rebuild cannot read flattened output: ", name, "; previous database retained"); return false;
+        }
+        var row = 0;
+        var valid = true;
+        each_split(rows, '\n') { line =>
+            row++;
+            if valid && line.len > 0 && !clean_row_valid(name, line) {
+                format(report, "clean rebuild malformed flattened output: ", name, " row ", row, "; previous database retained");
+                valid = false;
+            }
+        };
+        if !valid { return false; }
+    }
+    return true;
+}
+
+fn map_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&, clean: bool = false) -> bool {
     map_held.clear();
     let repo = abs_path(repo_arg);
     var mk: u8[>..] = [];
@@ -950,14 +1002,14 @@ fn map_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> bo
     let out = abs_path(out_arg);
     let writer = swan_writer_lock(str(out, "/swan.db"), report);
     guard writer != 0 else { return false; }
-    let ok = map_main_locked(repo, out, report);
+    let ok = map_main_locked(repo, out, report, clean);
     if ok { swan_writer_complete(writer); } else { swan_writer_unlock(writer); }
     return ok;
 }
 
 // The public wrapper holds the writer lock for every shared output: cached
 // indexer files, flattened rows, schema replacement and final database update.
-fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&) -> bool {
+fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean: bool = false) -> bool {
     let t_start = clock();
     let home = swan_home();
     let bin = str(home, "/tools/node_modules/.bin/");
@@ -974,7 +1026,26 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&) -> boo
     // A map from an older Swan is rebuilt from scratch, indexers included:
     // reusing their output would skip what the new schema needs.
     let old_db = str(out, "/swan.db");
-    if file_exists(old_db) {
+    if clean && file_exists(old_db) {
+        // Refuse a wrong or unverifiable target before invalidating anything.
+        // A damaged map can instead be rebuilt in a new private directory.
+        var e: u8[>..] = [];
+        var recorded: u8[>..] = [];
+        let h = sqlite::open_existing(old_db, e);
+        guard h != 0 else { format(report, "cannot verify clean map target: ", e); return false; }
+        let st = sqlite::prepare(h, "SELECT value FROM meta WHERE key = 'root'", e);
+        if st != 0 {
+            if sqlite::step(st, e) == 1 { sqlite::col_text(st, 0, recorded); }
+            sqlite::finalize(st);
+        }
+        sqlite::close(h);
+        guard recorded == repo else {
+            format(report, "clean rebuild requires the exact recorded repo root; requested ", repo,
+                   ", recorded ", if recorded.len > 0 { recorded[..] } else { "(unreadable)" });
+            return false;
+        }
+    }
+    if !clean && file_exists(old_db) {
         var e: u8[>..] = [];
         let h = sqlite::open_existing(old_db, e);
         if h == 0 { abort(str("swan: cannot inspect map schema: ", e)); }
@@ -985,6 +1056,25 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&) -> boo
             format(report, "map schema ", if v.len > 0 { v[..] } else { "?" }, " is older than ", SCHEMA_VERSION, ": rebuilding\n");
             for f in ["/swan.db", "/index-manifest.tsv", "/python-pieces.tsv", "/python-files.tsv"] { delete_file(str(out, f)); }
         }
+    }
+    // Invalidate reuse metadata under the same stable writer lock. Never remove
+    // the database or its lock: readers keep their snapshot until atomic publish.
+    // Defer replacement metadata until publication, so failure/interruption
+    // cannot make a later ordinary map trust unfinished indexer output.
+    var pending_cache: u8[>..] = [];
+    fn cache_write(name: const u8[:], contents: const u8[:]) {
+        if clean { arg(pending_cache, name); arg(pending_cache, contents); }
+        else { write_file(str(out, "/", name), contents); }
+    }
+    if clean {
+        for name in ["index-manifest.tsv", "tsc-files.txt", "typescript-chunks.txt", "typescript-shared.txt",
+                     "typescript-files.tsv", "typescript-layers.txt", "python-files.tsv", "python-pieces.tsv"] {
+            let path = str(out, "/", name);
+            guard !file_exists(path) || delete_file(path) else {
+                format(report, "cannot invalidate clean rebuild cache: ", path); return false;
+            }
+        }
+        report.append("clean rebuild: cached indexer output and merge layers will not be reused; previous database retained until publication\n");
     }
     // Edits after this moment make answers stale (src/fresh.goose).
     write_file(str(out, "/scip-started"), "");
@@ -1082,7 +1172,7 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&) -> boo
             listed = true;
         } else if ts_k >= 2 && run_step("tsc --listFilesOnly", la, repo, child_env(l, ""), 600000, listing) == 0 {
             listed = true;
-            write_file(str(out, "/tsc-files.txt"), str(key_line, listing));
+            cache_write("tsc-files.txt", str(key_line, listing));
         }
         var decls: u8[>..] = [];
         var refs: u8[>..] = [];
@@ -1095,7 +1185,7 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&) -> boo
             var prev_plan: u8[>..] = [];
             read_file(str(out, "/typescript-chunks.txt"), prev_plan);
             if prev_plan.len > 0 && same_file_set(prev_plan, chunks) { chunks.clear(); chunks.append(prev_plan); same_plan = true; }
-            write_file(str(out, "/typescript-chunks.txt"), chunks);
+            cache_write("typescript-chunks.txt", chunks);
         }
         if chunks.len == 0 {
             add_lang_job("scip-typescript", target, a, child_env(l, ""), ts_fp);
@@ -1131,11 +1221,11 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&) -> boo
             var prev_shared: u8[>..] = [];
             read_file(str(out, "/typescript-shared.txt"), prev_shared);
             let same_shared = prev_shared == str(shared);
-            write_file(str(out, "/typescript-shared.txt"), str(shared));
+            cache_write("typescript-shared.txt", str(shared));
             var prev_stamps: u8[>..] = [];
             read_file(str(out, "/typescript-files.tsv"), prev_stamps);
             let dirty = dependents_of_changes(out, stamps, prev_stamps);
-            write_file(str(out, "/typescript-files.tsv"), stamps);
+            cache_write("typescript-files.tsv", stamps);
             // A small edit: rather than rerun whole chunks (each loads the
             // shared code, about 7 s on AEON), index just the changed files
             // and their users as a run of their own, a layer. Layers are
@@ -1211,9 +1301,9 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&) -> boo
                         format(layers, line, "\n");
                     }
                 };
-                write_file(str(out, "/typescript-layers.txt"), layers);
+                cache_write("typescript-layers.txt", layers);
             } else {
-                write_file(str(out, "/typescript-layers.txt"), "");
+                cache_write("typescript-layers.txt", "");
             }
             var n = 0;
             each_split(chunks[..chunks.len - 1], '\n') { chunk =>
@@ -1318,7 +1408,7 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&) -> boo
         var prev_manifest: u8[>..] = [];
         read_file(str(out, "/python-pieces.tsv"), prev_manifest);
         var dirty = dependents_of_changes(out, stamps, prev_stamps);
-        write_file(str(out, "/python-files.tsv"), stamps);
+        cache_write("python-files.tsv", stamps);
         var manifest: u8[>..] = [];
         var reused = 0;
         each_split(pieces[..pieces.len - 1], '\n') { piece =>
@@ -1337,7 +1427,7 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&) -> boo
             }
             format(manifest, piece, "\t", fp, "\t", target, "\n");
         };
-        write_file(str(out, "/python-pieces.tsv"), manifest);
+        cache_write("python-pieces.tsv", manifest);
         if reused > 0 { format(report, "python: ", reused, " pieces reused\n"); }
         // Index files of pieces no longer in the plan go.
         var old2: u8[>..] = [];
@@ -1482,6 +1572,17 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&) -> boo
         }
     }
     let all_jobs = split(jobs[..jobs.len - 1], 2);
+    if clean {
+        // A successful indexer must produce this run's file, not leave an old
+        // target behind. Reuse metadata was invalidated before planning.
+        for job in all_jobs {
+            let f = split(job, 1);
+            guard f[2].len > 0 else { report.append("clean rebuild unexpectedly planned cached output"); return false; }
+            guard !file_exists(f[1]) || delete_file(f[1]) else {
+                format(report, "cannot remove prior indexer output: ", f[1]); return false;
+            }
+        }
+    }
     var order: i64[>..] = [];
     for i in all_jobs.len { order.push(i); }
     for i in all_jobs.len { pids.push(0); codes.push(0); began.push(0.0); took.push(0.0); }
@@ -1520,6 +1621,10 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&) -> boo
         if f[0].len > 0 { report.push('\n'); }
         idx++;
     };
+    if clean && !ok {
+        report.append("clean rebuild failed; previous database retained and reuse metadata invalidated");
+        return false;
+    }
     // A Python piece whose run failed is not reusable: its old index file
     // no longer matches the fingerprint recorded for it before the run. Nor
     // are TypeScript layers on top of a chunk run that failed: forgetting
@@ -1543,7 +1648,7 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&) -> boo
         let f = split(line, '\t');
         if f.len == 3 && find(failed, f[2]) < 0 { kept_index.append(line); kept_index.push('\n'); }
     };
-    write_file(str(out, "/index-manifest.tsv"), kept_index);
+    cache_write("index-manifest.tsv", kept_index);
     var listing: u8[>..] = [];
     if list_dir(out, listing) {
         each_split(listing, '\n') { nm =>
@@ -1553,7 +1658,7 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&) -> boo
         };
     }
     let db = str(out, "/swan.db");
-    if reused_all && file_exists(db) && file_exists(str(out, "/occurrences.tsv")) {
+    if !clean && reused_all && file_exists(db) && file_exists(str(out, "/occurrences.tsv")) {
         format(report, "nothing changed since the last map\nswan map: ", ((clock() - t_start) * 1000.0) as i64, " ms in all");
         return ok;
     }
@@ -1568,10 +1673,34 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&) -> boo
     arg(fl, out);
     for k in 1..parts.len { arg(fl, parts[k]); }
     var o: u8[>..] = [];
+    if clean {
+        for name in ["symbols.tsv", "extents.tsv", "relationships.tsv", "occurrences.tsv"] {
+            let path = str(out, "/", name);
+            guard !file_exists(path) || delete_file(path) else {
+                format(report, "cannot remove prior flattened output: ", path); return false;
+            }
+        }
+    }
     let t_flat = clock();
     guard run_step("flatten", fl, home, child_env(l, ""), 600000, o) == 0 else { format(report, "flatten failed"); return false; }
     format(report, "flatten: ", ((clock() - t_flat) * 1000.0) as i64, " ms\n");
-    index_main_locked(out, db, repo, file_exists(db), report);
+    if clean {
+        for name in ["symbols.tsv", "extents.tsv", "relationships.tsv", "occurrences.tsv"] {
+            guard file_exists(str(out, "/", name)) else {
+                format(report, "clean rebuild missing flattened output: ", name, "; previous database retained"); return false;
+            }
+        }
+        guard clean_rows_valid(out, report) else { return false; }
+    }
+    index_main_locked(out, db, repo, !clean && file_exists(db), report);
+    if clean && pending_cache.len > 0 {
+        let entries = split(pending_cache[..pending_cache.len - 1], 0);
+        for i in entries.len / 2 {
+            if !write_file(str(out, "/", entries[i * 2]), entries[i * 2 + 1]) {
+                format(report, "\nwarning: fresh database published but cache could not be saved: ", entries[i * 2]);
+            }
+        }
+    }
     format(report, "\nswan map: ", ((clock() - t_start) * 1000.0) as i64, " ms in all, up to ", limit, " indexers at once");
     if !ok { report.append("\n(some indexers failed; see above)"); }
     return ok;

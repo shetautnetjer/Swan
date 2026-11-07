@@ -272,6 +272,14 @@ python3 tests/test_map_readers.py --binary /path/to/staged-swan/bin/swan --outpu
 Run from the matching reviewed source checkout with an existing disposable
 output parent; these checks do not update the active installation.
 
+**Clean rebuild:** use `swan map <exact-repo-root> <exact-map-dir> --clean`
+after dependency/indexer changes or suspected stale generated output. MCP
+`update_map` exposes the same operation through `clean:true` with an explicit
+exact `repo` root. It bypasses all reuse metadata and merge layers, keeps the
+stable writer lock, and replaces the selected database only after every
+eligible indexer succeeds. Trust, other maps and source are preserved.
+See [target checks, failure recovery and qualification](docs/clean-reindex.md).
+
 <!-- coderabbit-ai-generated:v1 -->
 
 <!-- coderabbit-ai-generated-section:v1:408c1072b178095036c667f595f53dd2aa9053552258c86a2411dc15c4baef78 -->

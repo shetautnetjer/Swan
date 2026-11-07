@@ -24,7 +24,7 @@ import sqlite from "shetautnetjer/goose-sqlite@c759de735ae936dcbc197bb9aae40e135
 
 fn usage() {
     write_stderr("""
-        usage: swan map <repo> <out-dir>        index every language in the repo (or refresh)
+        usage: swan map <repo> <out-dir> [--clean]  index or refresh; --clean bypasses all cached output
                swan doctor [--profile core|python-typescript] [--json]
                swan check <repo> <out-dir>      run compilers and linters into the map
                swan trust <repo>                let map, check and live answers run the repo's build files
@@ -131,9 +131,9 @@ fn main() {
         exec_or_die(db, "COMMIT;");
         close_db(db);
         print(out);
-    } else if a[1] == "map" && a.len == 4 {
+    } else if a[1] == "map" && (a.len == 4 || (a.len == 5 && a[4] == "--clean")) {
         var report: u8[>..] = [];
-        let ok = map_main(a[2], a[3], report);
+        let ok = map_main(a[2], a[3], report, a.len == 5);
         print(report);
         if !ok { exit(1); }
     } else if a[1] == "trust" && a.len == 3 {
