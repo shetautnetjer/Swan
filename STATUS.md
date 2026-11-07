@@ -587,3 +587,34 @@ guide, then representative measurements before performance changes. Preserve
 SQLite, external semantic engines, writer ownership and read snapshots.
 The active installation, saved trust and production configuration remain
 outside this source PR.
+
+## 2026-11-06: Kotlin on Android (AGP 9), scip-java 0.14.1
+
+- scip-java is pinned at v0.14.1, installed per version
+  (`.tools/scip-java/v0.14.1/scip-java`, the `SCIP_JAVA` constant in
+  src/pipeline.goose), so re-running fetch-tools.sh fetches a new pin
+  instead of keeping the old binary; older ones beside it are left alone.
+- On aya-phone (Gradle 9.7.0, AGP 9.4.1 with its built-in Kotlin, Kotlin
+  2.4.21), measured in a VM: scip-java 0.13.2 and 0.14.1 both die in
+  `scipPrintDependencies` (ConcurrentModificationException: its
+  WriteDependencies walks the project's configurations while AGP 9 adds
+  some), and `scipCompileAll` alone has no actions there and writes no
+  index. Naming the Kotlin compiles works: 16/16 .kt files, with correct
+  callers, implementations and references.
+- So for a Gradle repo with an Android module (com.android.application,
+  .library, .test or .dynamic-feature, by plugin id, `apply plugin:` or a
+  version-catalog alias), `swan map` runs `clean`, each Android module's
+  `compileDebugKotlin` and `compileDebugUnitTestKotlin` (modules from
+  settings.gradle(.kts) `include`s, plus the root), then `scipCompileAll`.
+  Other Gradle repos keep `clean scipPrintDependencies scipCompileAll`.
+  `swan gradle-tasks <repo>` prints the list; `bun tests/lang_check.ts
+  gradle` checks it on fixtures/gradle-android (build files only).
+- Trade-off: without scipPrintDependencies, callees in external packages
+  carry no package versions on Android. Limits: the debug variant is
+  assumed (a module without one compiles nothing for scip-java), modules
+  moved with `projectDir` are looked for at their default path, and a
+  convention plugin that applies AGP for a module (build-logic, as in
+  nowinandroid) is not seen: such a repo gets the plain list.
+- Host checks with 0.14.1: tiny-java (`lang_check.ts java`) and tiny-kt
+  (`kotlin_live_check.ts`) pass. The Android path itself was measured in
+  the VM by hand, not yet through `swan map`.

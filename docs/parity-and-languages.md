@@ -64,7 +64,7 @@ start with scheme and package manager, so languages cannot collide.
 |---|---|---|---|---|
 | TypeScript / JavaScript | scip-typescript (Sourcegraph) | in use here; pushed 2026-10-23 | defs, refs, signatures, enclosing ranges, dependency symbols with versions | whole-repo reruns only (16.5 s on AEON); JS without types resolves less |
 | Python | scip-python (Sourcegraph, built on Pyright) | active; pushed 2026-10-24 | defs, refs, Pyright types, dependency symbols | dynamic code (getattr, monkeypatching) is invisible; needs the virtualenv present |
-| Java, Scala, Kotlin | scip-java (now `scip-code/scip-java`) | active; pushed 2026-10-22. The separate scip-kotlin repo is archived; Kotlin goes through scip-java | defs, refs, types, dependency symbols | needs a real build (Gradle, Maven, sbt), so it is slow and needs a working toolchain |
+| Java, Scala, Kotlin | scip-java (now `scip-code/scip-java`; Swan pins 0.14.1) | active; pushed 2026-10-22. The separate scip-kotlin repo is archived; Kotlin goes through scip-java | defs, refs, types, dependency symbols | needs a real build (Gradle, Maven, sbt), so it is slow and needs a working toolchain; on Android (AGP 9) no package versions for external callees (see below) |
 | Go | scip-go (now `scip-code/scip-go`) | active; pushed 2026-10-22 | defs, refs, implementations (Go interfaces), module symbols | needs `go` and the module cache |
 | Rust | rust-analyzer's built-in `rust-analyzer scip` | rust-analyzer is very active | defs, refs, types, crate symbols | macro-heavy code resolves partly; slow on big workspaces |
 | C / C++ | scip-clang (Sourcegraph) | active; pushed 2026-10-24 | defs, refs, headers | needs `compile_commands.json`; whatever the build system hides stays hidden |
@@ -140,8 +140,8 @@ workspace (21 .rs files), mapped together with its one Python file.**
     `CARGO_TARGET_DIR` into the output folder. Cargo still writes a
     `Cargo.lock` into a repo that has none, so map a copy of such a repo.
 
-**Java: scip-java 0.13.2 with a user-local Temurin JDK 21, on
-`fixtures/tiny-java` (no build tool).**
+**Java: scip-java 0.13.2 (now 0.14.1, which passes the same checks) with a
+user-local Temurin JDK 21, on `fixtures/tiny-java` (no build tool).**
 - With no Maven or Gradle, `swan map` writes a `scip-java.json` outside the
   repo, and scip-java compiles the sources itself (0.5 s). Diagnostics come
   from `javac` (0.2 s), parsed with the column from its caret line.
@@ -158,6 +158,18 @@ workspace (21 .rs files), mapped together with its one Python file.**
 - Not covered yet: Maven and Gradle repos. scip-java drives those build
   tools itself, but neither is installed here, and `swan check` skips javac
   for them.
+
+**Kotlin with Gradle: scip-java 0.14.1.** Plain Kotlin JVM builds
+(`fixtures/tiny-kt`) run `clean scipPrintDependencies scipCompileAll`. Android
+builds on AGP 9 (built-in Kotlin) do not: `scipPrintDependencies` dies of a
+ConcurrentModificationException (its WriteDependencies walks the project's
+configurations while AGP adds some; 0.13.2 and 0.14.1 alike) and
+`scipCompileAll` alone does nothing there. For a repo with an Android module,
+Swan runs `clean`, each Android module's `compileDebugKotlin` and
+`compileDebugUnitTestKotlin`, then `scipCompileAll` (`swan gradle-tasks
+<repo>` prints the list). The cost: callees in external packages have no
+package versions on Android, since those come from `scipPrintDependencies`.
+The debug variant is assumed; a module without one is not compiled.
 
 **CUDA (and C/C++): scip-clang 0.4.1 on `fixtures/tiny-cuda` (two .cu files
 and a .cuh header). No nvcc, no CUDA toolkit, no GPU here.**
