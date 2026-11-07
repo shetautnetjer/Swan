@@ -79,6 +79,18 @@ if (run("java")) {
   sh(["mkdir", "-p", w]);
   sh(["cp", "-r", "fixtures/tiny-java", `${w}/repo`]);
   sh(["bin/swan", "map", `${w}/repo`, `${w}/map`]);
+  // Reuse keys on the command too: the same files under a Swan home at
+  // another path (so another scip-java path in its argv, as a new scip-java
+  // version or Gradle task list gives) must index again.
+  const again = sh(["bin/swan", "map", `${w}/repo`, `${w}/map`]);
+  check("java: a second map with nothing changed reuses scip-java's index", again.includes("scip-java: reused"), again);
+  const home2 = `${w}/home2`;
+  sh(["mkdir", "-p", `${home2}/bin`]);
+  sh(["cp", "bin/swan", `${home2}/bin/swan`]);
+  for (const d of ["tools", ".tools"]) sh(["ln", "-s", `${process.cwd()}/${d}`, `${home2}/${d}`]);
+  const moved = sh([`${home2}/bin/swan`, "map", `${w}/repo`, `${w}/map`]);
+  check("java: the same files with another scip-java argv are indexed again, not reused",
+    !moved.includes("scip-java: reused") && !moved.includes("nothing changed"), moved);
   sh(["bin/swan", "check", `${w}/repo`, `${w}/map`]);
   const q = (...a: string[]) => JSON.parse(sh(["bin/swan", "query", `${w}/map/swan.db`, ...a]));
   const mcp = (name: string, args: Record<string, unknown>) => {
