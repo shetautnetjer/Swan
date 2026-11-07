@@ -165,11 +165,16 @@ builds on AGP 9 (built-in Kotlin) do not: `scipPrintDependencies` dies of a
 ConcurrentModificationException (its WriteDependencies walks the project's
 configurations while AGP adds some; 0.13.2 and 0.14.1 alike) and
 `scipCompileAll` alone does nothing there. For a repo with an Android module,
-Swan runs `clean`, each Android module's `compileDebugKotlin` and
-`compileDebugUnitTestKotlin`, then `scipCompileAll` (`swan gradle-tasks
-<repo>` prints the list). The cost: callees in external packages have no
-package versions on Android, since those come from `scipPrintDependencies`.
-The debug variant is assumed; a module without one is not compiled.
+Swan runs `clean compileDebugKotlin compileDebugUnitTestKotlin scipCompileAll`
+(`swan gradle-tasks <repo>` prints the list). The compiles are unqualified:
+Gradle runs them in every project that has them, so a module without a debug
+variant or without Kotlin is simply skipped, and a module wrongly taken for
+Android costs nothing. But a repo where no module has `compileDebugKotlin`
+(only product flavors, e.g. `compileFreeDebugKotlin`) fails the run, and gets
+no Java/Kotlin map. `compileDebugUnitTestKotlin` is dropped when the only
+Android modules are com.android.test. The cost: callees in external packages
+have no package versions on Android, since those come from
+`scipPrintDependencies`.
 
 **CUDA (and C/C++): scip-clang 0.4.1 on `fixtures/tiny-cuda` (two .cu files
 and a .cuh header). No nvcc, no CUDA toolkit, no GPU here.**

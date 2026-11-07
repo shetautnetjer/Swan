@@ -603,18 +603,32 @@ outside this source PR.
   callers, implementations and references.
 - So for a Gradle repo with an Android module (com.android.application,
   .library, .test or .dynamic-feature, by plugin id, `apply plugin:` or a
-  version-catalog alias), `swan map` runs `clean`, each Android module's
-  `compileDebugKotlin` and `compileDebugUnitTestKotlin` (modules from
-  settings.gradle(.kts) `include`s, plus the root), then `scipCompileAll`.
-  Other Gradle repos keep `clean scipPrintDependencies scipCompileAll`.
-  `swan gradle-tasks <repo>` prints the list; `bun tests/lang_check.ts
-  gradle` checks it on fixtures/gradle-android (build files only).
+  version-catalog alias, in the root or a settings.gradle(.kts) `include`),
+  `swan map` runs `clean compileDebugKotlin compileDebugUnitTestKotlin
+  scipCompileAll`. The compiles are unqualified: Gradle runs them in every
+  project that has them and fails only if none does, so a module wrongly
+  taken for Android costs nothing (a qualified `:app:compileDebugKotlin`
+  for a module that is not Android would fail the whole run and leave no
+  Java/Kotlin map). `compileDebugUnitTestKotlin` is left out when every
+  Android module found is com.android.test. Other Gradle repos keep
+  `clean scipPrintDependencies scipCompileAll`. Comments in build files,
+  `plugins.withId(...)` and an `apply false` on the chained lines after an
+  `id(...)` do not count. `swan gradle-tasks <repo>` prints the list; `bun
+  tests/lang_check.ts gradle` checks it on fixtures/gradle-android (build
+  files only), negative cases included.
 - Trade-off: without scipPrintDependencies, callees in external packages
   carry no package versions on Android. Limits: the debug variant is
-  assumed (a module without one compiles nothing for scip-java), modules
-  moved with `projectDir` are looked for at their default path, and a
-  convention plugin that applies AGP for a module (build-logic, as in
+  assumed. A module without a debug variant or without Kotlin is passed
+  over by Gradle, but a repo where no module has `compileDebugKotlin`
+  (only product flavors, e.g. `compileFreeDebugKotlin`) fails the run.
+  Modules moved with `projectDir` are looked for at their default path, and
+  a convention plugin that applies AGP for a module (build-logic, as in
   nowinandroid) is not seen: such a repo gets the plain list.
+- The scip-java index's fingerprint covers .java, .kt, .kts and .gradle
+  files plus the root build files and gradle/libs.versions.toml, so editing
+  any of them maps again instead of reusing the index.
 - Host checks with 0.14.1: tiny-java (`lang_check.ts java`) and tiny-kt
-  (`kotlin_live_check.ts`) pass. The Android path itself was measured in
-  the VM by hand, not yet through `swan map`.
+  (`kotlin_live_check.ts`) pass. The Android path has been run through
+  this branch's `swan map` on aya-phone in the VM: exit 0, 25 s, about
+  2.19 GB peak, 22 files including 16/16 .kt, with callers, implementations
+  and references matching grep.
