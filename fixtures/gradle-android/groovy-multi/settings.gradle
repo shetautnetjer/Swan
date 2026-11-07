@@ -1,0 +1,5 @@
+rootProject.name = 'groovy-multi'
+// include ':old'
+include ':app',
+        ':core:data'
+include 'lib'

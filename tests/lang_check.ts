@@ -2,7 +2,11 @@
 // have their own tests: each is mapped with scripts/index-repo.sh and asked
 // the questions an engineer would ask first.
 //
-//   bun tests/lang_check.ts [js|python|java|cuda ...]   (default: all)
+//   bun tests/lang_check.ts [js|python|java|gradle|cuda ...]   (default: all)
+
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const sh = (cmd: string[], env: Record<string, string> = {}) => {
   const r = Bun.spawnSync(cmd, { stdout: "pipe", stderr: "pipe", env: { ...process.env, ...env } });
@@ -75,6 +79,18 @@ if (run("java")) {
   sh(["mkdir", "-p", w]);
   sh(["cp", "-r", "fixtures/tiny-java", `${w}/repo`]);
   sh(["bin/swan", "map", `${w}/repo`, `${w}/map`]);
+  // Reuse keys on the command too: the same files under a Swan home at
+  // another path (so another scip-java path in its argv, as a new scip-java
+  // version or Gradle task list gives) must index again.
+  const again = sh(["bin/swan", "map", `${w}/repo`, `${w}/map`]);
+  check("java: a second map with nothing changed reuses scip-java's index", again.includes("scip-java: reused"), again);
+  const home2 = `${w}/home2`;
+  sh(["mkdir", "-p", `${home2}/bin`]);
+  sh(["cp", "bin/swan", `${home2}/bin/swan`]);
+  for (const d of ["tools", ".tools"]) sh(["ln", "-s", `${process.cwd()}/${d}`, `${home2}/${d}`]);
+  const moved = sh([`${home2}/bin/swan`, "map", `${w}/repo`, `${w}/map`]);
+  check("java: the same files with another scip-java argv are indexed again, not reused",
+    !moved.includes("scip-java: reused") && !moved.includes("nothing changed"), moved);
   sh(["bin/swan", "check", `${w}/repo`, `${w}/map`]);
   const q = (...a: string[]) => JSON.parse(sh(["bin/swan", "query", `${w}/map/swan.db`, ...a]));
   const mcp = (name: string, args: Record<string, unknown>) => {
@@ -105,6 +121,97 @@ if (run("java")) {
   const renamed = await Bun.file(`${w}/repo/src/main/java/shapes/Shapes.java`).text();
   check("java: rename_symbol rewrites the method and its call",
     !ren.isError && renamed.includes("static double sumOfAreas(") && renamed.includes("println(sumOfAreas("), ren);
+}
+
+if (run("gradle")) {
+  // The Gradle tasks map gives scip-java, from the build files alone (no
+  // Gradle, no Android SDK): when any module is Android, the unqualified
+  // Kotlin compiles replace scipPrintDependencies, which AGP 9 breaks.
+  const tasks = (dir: string) => sh(["bin/swan", "gradle-tasks", dir]).trim().split("\n");
+  const plain = ["clean", "scipPrintDependencies", "scipCompileAll"];
+  const android = ["clean", "compileDebugKotlin", "compileDebugUnitTestKotlin", "scipCompileAll"];
+  const g = "fixtures/gradle-android";
+  const eq = (what: string, got: string[], want: string[]) => check(what, got.join(" ") === want.join(" "), got);
+  eq("gradle: plain Kotlin JVM (tiny-kt) keeps scipPrintDependencies", tasks("fixtures/tiny-kt"), plain);
+  eq("gradle: no Gradle at all (tiny-java) gets the same list", tasks("fixtures/tiny-java"), plain);
+  eq("gradle: plugins { id(\"com.android.application\") } with include(\":app\")", tasks(`${g}/kts-app`), android);
+  eq("gradle: Groovy apply plugin, a multi-line include, :core:data, and a JVM :lib",
+    tasks(`${g}/groovy-multi`), android);
+  eq("gradle: version-catalog aliases; the root's `apply false`; a com.android.test module beside others",
+    tasks(`${g}/catalog`), android);
+  eq("gradle: an Android app in the root project", tasks(`${g}/root-module`), android);
+  eq("gradle: a JVM module with an Android plugin id inside /* ... */ stays plain",
+    tasks(`${g}/jvm-comment`), plain);
+  eq("gradle: a root with only plugins.withId(\"com.android.application\") stays plain",
+    tasks(`${g}/root-withid`), plain);
+  eq("gradle: id(\"com.android.application\") with .apply(false) on the next line stays plain",
+    tasks(`${g}/multiline-apply-false`), plain);
+  eq("gradle: include names with \"..\" or \"/\" are not followed out of the repo",
+    tasks(`${g}/bad-include/repo`), plain);
+  eq("gradle: only com.android.test modules get no compileDebugUnitTestKotlin",
+    tasks(`${g}/test-only`), ["clean", "compileDebugKotlin", "scipCompileAll"]);
+
+  const tmp = mkdtempSync(join(tmpdir(), "swan-gradle-detection-"));
+  try {
+    for (const name of ["jvm", "old", "blocked", "inside", "actual"]) {
+      mkdirSync(join(tmp, name));
+      writeFileSync(join(tmp, name, "build.gradle.kts"), name === "jvm" || name === "actual"
+        ? 'plugins { kotlin("jvm") }\n' : 'plugins { id("com.android.application") }\n');
+    }
+    for (const [settings, quote] of [["settings.gradle.kts", '"""'], ["settings.gradle", "'''"]]) {
+      const path = join(tmp, settings);
+      writeFileSync(path, `include(":jvm") // was ":old"\n/*\ninclude(":blocked")\n*/\n` +
+        `defText = ${quote}\n// not a comment\n/* not a comment\ninclude(":inside")\n${quote}\n` +
+        `include(":actual")\n`);
+      eq(`gradle: ${settings} ignores comments and includes inside multiline strings`, tasks(tmp), plain);
+      writeFileSync(join(tmp, "actual", "build.gradle.kts"), 'plugins { id("com.android.application") }\n');
+      eq(`gradle: ${settings} still sees a real include after a multiline string`, tasks(tmp), android);
+      writeFileSync(join(tmp, "actual", "build.gradle.kts"), 'plugins { kotlin("jvm") }\n');
+      if (settings.endsWith(".kts")) {
+        writeFileSync(path, '/* outer /* nested */\ninclude(":blocked")\n*/\n' +
+          'val text = """raw backslash \\"""\ninclude(":actual")\n');
+        eq("gradle: Kotlin nested comments and raw strings keep later includes visible", tasks(tmp), plain);
+        writeFileSync(join(tmp, "actual", "build.gradle.kts"), 'plugins { id("com.android.application") }\n');
+        eq("gradle: Kotlin raw string ending in backslash preserves a real include", tasks(tmp), android);
+        writeFileSync(join(tmp, "actual", "build.gradle.kts"), 'plugins { kotlin("jvm") }\n');
+      } else {
+        writeFileSync(path, 'def text = $/\n/* not a comment\n// not a comment\n' +
+          '$$ and $/ are escaped\ninclude(":inside")\n/$\ninclude(":actual")\n');
+        eq("gradle: dollar-slashy string does not create a fake include", tasks(tmp), plain);
+        writeFileSync(join(tmp, "actual", "build.gradle.kts"), 'plugins { id("com.android.application") }\n');
+        eq("gradle: comment-like text in a dollar-slashy string does not hide a real include", tasks(tmp), android);
+        writeFileSync(join(tmp, "actual", "build.gradle.kts"), 'plugins { kotlin("jvm") }\n');
+        writeFileSync(path, 'def text = /\nescaped \\/* and \\/\\/\ninclude(":inside")\n/\n' +
+          'def quotient = 4 / 2\ninclude(":actual")\n');
+        eq("gradle: slashy string does not create a fake include", tasks(tmp), plain);
+        writeFileSync(join(tmp, "actual", "build.gradle.kts"), 'plugins { id("com.android.application") }\n');
+        eq("gradle: slashy string and division preserve a real include", tasks(tmp), android);
+        writeFileSync(path, 'def text() { return /\n\\/* still text\ninclude(":inside")\n/ }\n' +
+          'include(":actual")\n');
+        eq("gradle: slashy string after return preserves a real include", tasks(tmp), android);
+        writeFileSync(path, 'def text = "prefix" + /\n\\/* still text\ninclude(":inside")\n/\n' +
+          'counter++ / 2\ninclude(":actual")\n');
+        eq("gradle: slashy string after an operator and postfix division preserve a real include", tasks(tmp), android);
+        writeFileSync(join(tmp, "actual", "build.gradle.kts"), 'plugins { kotlin("jvm") }\n');
+      }
+      rmSync(path);
+    }
+    for (const method of ["withId", "hasPlugin", "withPlugin"]) {
+      writeFileSync(join(tmp, "build.gradle.kts"), `plugins.${method}(\n  "com.android.application"\n) { }\n`);
+      eq(`gradle: multiline ${method} reaction does not apply Android`, tasks(tmp), plain);
+      writeFileSync(join(tmp, "build.gradle.kts"), `plugins.${method}(\n  "com.android.application"\n) { apply(plugin = "com.android.library") }\n`);
+      eq(`gradle: a real plugin application after ${method} is detected`, tasks(tmp), android);
+    }
+    rmSync(join(tmp, "build.gradle.kts"));
+    writeFileSync(join(tmp, "build.gradle"), 'def text = $/\n/* not a comment\n/$\n' +
+      'plugins { id "com.android.application" }\n');
+    eq("gradle: a Groovy plugin after a dollar-slashy string is detected", tasks(tmp), android);
+    writeFileSync(join(tmp, "build.gradle"), 'def text = /\n\\/* not a comment\n/\n' +
+      'plugins { id "com.android.application" }\n');
+    eq("gradle: a Groovy plugin after a slashy string is detected", tasks(tmp), android);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
 }
 
 if (run("cuda")) {

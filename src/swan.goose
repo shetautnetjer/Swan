@@ -28,6 +28,7 @@ fn usage() {
                swan doctor [--profile core|python-typescript] [--json]
                swan check <repo> <out-dir>      run compilers and linters into the map
                swan trust <repo>                let map, check and live answers run the repo's build files
+               swan gradle-tasks <repo>         the Gradle tasks map would give scip-java (runs nothing)
                swan format <repo> <out-dir> <file>...
                swan test <repo> <out-dir> <name_path|file> [relative_path]
                swan index <flattened-dir> <db> [repo-root]
@@ -140,6 +141,8 @@ fn main() {
         let ok = trust_main(a[2], report);
         print(report);
         if !ok { exit(1); }
+    } else if a[1] == "gradle-tasks" && a.len == 3 {
+        write_stdout(gradle_scip_tasks(abs_path(a[2])));
     } else if a[1] == "check" && a.len == 4 {
         var report: u8[>..] = [];
         let ok = check_main(a[2], a[3], report);
