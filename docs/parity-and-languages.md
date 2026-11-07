@@ -177,6 +177,9 @@ a Java-only Android repo, or unit tests turned off in every module (for
 Android modules are com.android.test. The cost: callees in external packages
 have no package versions on Android, since those come from
 `scipPrintDependencies`.
+Both lists start with `clean` (the Gradle run always has), which deletes every
+project's build/ outputs: run `swan map` on a checkout you don't mind
+rebuilding.
 
 **CUDA (and C/C++): scip-clang 0.4.1 on `fixtures/tiny-cuda` (two .cu files
 and a .cuh header). No nvcc, no CUDA toolkit, no GPU here.**
