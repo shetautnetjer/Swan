@@ -275,14 +275,21 @@ fn gradle_apply_false(lines: const u8[:][:], at: i64) -> bool {
 // Comments are skipped. An entry with `apply false`, on its line or the
 // chained lines after it, only declares the plugin (a root build file does
 // that for its modules), and `plugins.withId(...)`, `hasPlugin(...)` and
-// `withPlugin(...)` only react to it.
+// `withPlugin(...)` only react to it, their arguments on that line or, when
+// its parentheses stay open, on the lines up to where they close.
 fn android_plugin_of(build: const u8[:], aliases: const u8[:]) -> i64 {
     var k = -1;
     let text = strip_gradle_comments(build);
     let lines = split(text, '\n');
+    var reacting = 0;      // parentheses a reaction call has left open
     for raw, at in lines {
         let line = trim(raw);
-        guard k < 0 && find(line, "withId") < 0 && find(line, "hasPlugin") < 0 && find(line, "withPlugin") < 0 else { continue; }
+        let react = find(line, "withId") >= 0 || find(line, "hasPlugin") >= 0 || find(line, "withPlugin") >= 0;
+        if react || reacting > 0 {
+            for c in line { if c == '(' { reacting++; } else if c == ')' && reacting > 0 { reacting--; } }
+            continue;
+        }
+        guard k < 0 else { continue; }
         guard !gradle_apply_false(lines, at) else { continue; }
         k = android_plugin_in(line);
         let al = find(line, "alias");

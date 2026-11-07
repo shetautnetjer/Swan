@@ -140,6 +140,8 @@ if (run("gradle")) {
     tasks(`${g}/jvm-comment`), plain);
   eq("gradle: a root with only plugins.withId(\"com.android.application\") stays plain",
     tasks(`${g}/root-withid`), plain);
+  eq("gradle: plugins.withId( / withPlugin( with the plugin id on the lines after stays plain",
+    tasks(`${g}/root-withid-multiline`), plain);
   eq("gradle: id(\"com.android.application\") with .apply(false) on the next line stays plain",
     tasks(`${g}/multiline-apply-false`), plain);
   eq("gradle: include names with \"..\" or \"/\" are not followed out of the repo",

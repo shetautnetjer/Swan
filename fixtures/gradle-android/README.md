@@ -15,6 +15,8 @@ Negative cases, which must keep the plain list:
 - jvm-comment: a JVM module whose Android plugin ids are only in comments.
 - root-withid: a root build file that only reacts to the plugin
   (`plugins.withId(...)`).
+- root-withid-multiline: the same, with `withId(` and `withPlugin(` and the
+  plugin id on the lines after.
 - multiline-apply-false: plugin entries declared with `.apply(false)` on the
   lines after the `id(...)`.
 - bad-include/repo: `include` names with ".." or "/", which would reach the
