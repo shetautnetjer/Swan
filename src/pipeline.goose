@@ -1264,8 +1264,9 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&) -> boo
             }
         }
         add_lang_job("scip-java", target, a, child_env(l, genv),
-                     lang_fingerprint(repo, [".java", ".kt", ".kts"], ["pom.xml", "build.gradle", "build.gradle.kts",
-                                                                       "settings.gradle", "settings.gradle.kts"]));
+                     lang_fingerprint(repo, [".java", ".kt", ".kts", ".gradle"],
+                                      ["pom.xml", "build.gradle", "build.gradle.kts", "settings.gradle",
+                                       "settings.gradle.kts", "gradle/libs.versions.toml"]));
     }
 
     // C# (Unity, Godot C#, .NET): scip-dotnet over the solution or project at
