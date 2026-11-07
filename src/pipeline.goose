@@ -228,13 +228,27 @@ fn android_catalog_aliases(repo: const u8[:]) -> u8[>..] {
 
 // A build file without its comments: /* ... */ (its newlines kept, so lines
 // stay lines) and // to the end of the line, neither inside a quoted string.
+// A Kotlin raw string, """...""", stays open across lines until its closing
+// """, with no escapes inside, so a "**/*" in one opens no comment. Block
+// comments are taken not to nest (Groovy's do not; a nested /* */ in a .kts
+// file ends at its first */).
 fn strip_gradle_comments(s: const u8[:]) -> u8[>..] {
     var out: u8[>..] = [];
     var q: u8 = 0;
+    var raw = false;
     var i = 0;
     while i < s.len {
         let c = s[i];
-        if q != 0 {
+        let triple = c == '"' && i + 2 < s.len && s[i + 1] == '"' && s[i + 2] == '"';
+        if raw {
+            if triple { out.append("\"\"\""); i += 3; raw = false; continue; }
+            out.push(c);
+        } else if q == 0 && triple {
+            out.append("\"\"\"");
+            i += 3;
+            raw = true;
+            continue;
+        } else if q != 0 {
             out.push(c);
             if c == '\\' && i + 1 < s.len { out.push(s[i + 1]); i++; } else if c == q || c == '\n' { q = 0; }
         } else if c == '/' && i + 1 < s.len && s[i + 1] == '*' {
@@ -314,17 +328,16 @@ fn android_plugin_of(build: const u8[:], aliases: const u8[:]) -> i64 {
 // The modules settings.gradle(.kts) includes, as Gradle paths (":app",
 // ":core:data"), one per line: every quoted name in an `include(...)` or
 // Groovy `include '...', '...'`, which may run over several lines; names
-// with ".." or "/" are skipped. Modules moved elsewhere with projectDir are
-// looked for at their default place.
+// with ".." or "/" are skipped, and so are comments. Modules moved elsewhere
+// with projectDir are looked for at their default place.
 fn gradle_includes(repo: const u8[:]) -> u8[>..] {
     var out: u8[>..] = [];
     var s: u8[>..] = [];
     guard read_file(str(repo, "/settings.gradle.kts"), s) || read_file(str(repo, "/settings.gradle"), s) else { return out; }
     var open = false;
     var depth = 0;
-    each_split(s, '\n') { raw =>
+    each_split(strip_gradle_comments(s), '\n') { raw =>
         let line = trim(raw);
-        guard !starts_with(line, "//");
         let starts = starts_with(line, "include") && line.len > 7 && (line[7] == '(' || line[7] == ' ' || line[7] == '\t');
         guard open || starts;
         var q: u8 = 0;

@@ -136,6 +136,8 @@ if (run("gradle")) {
   eq("gradle: version-catalog aliases; the root's `apply false`; a com.android.test module beside others",
     tasks(`${g}/catalog`), android);
   eq("gradle: an Android app in the root project", tasks(`${g}/root-module`), android);
+  eq("gradle: \"**/*.kt\" and a multi-line \"\"\"...**/*...\"\"\" raw string above plugins { id(...) } open no comment",
+    tasks(`${g}/raw-string`), android);
   eq("gradle: a JVM module with an Android plugin id inside /* ... */ stays plain",
     tasks(`${g}/jvm-comment`), plain);
   eq("gradle: a root with only plugins.withId(\"com.android.application\") stays plain",
@@ -146,6 +148,8 @@ if (run("gradle")) {
     tasks(`${g}/multiline-apply-false`), plain);
   eq("gradle: include names with \"..\" or \"/\" are not followed out of the repo",
     tasks(`${g}/bad-include/repo`), plain);
+  eq("gradle: includes in settings comments (// was include(\":old\"), /* include(\":old2\") */) are not followed",
+    tasks(`${g}/settings-comment`), plain);
   eq("gradle: only com.android.test modules get no compileDebugUnitTestKotlin",
     tasks(`${g}/test-only`), ["clean", "compileDebugKotlin", "scipCompileAll"]);
 }

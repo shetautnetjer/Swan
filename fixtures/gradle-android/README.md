@@ -8,6 +8,9 @@ Build files only, for the Gradle task list `swan gradle-tasks` prints
   build file that only declares the plugins (`apply false`), and a
   com.android.test module beside the others.
 - root-module: an Android app in the root project, no settings includes.
+- raw-string: `"**/*.kt"` and a multi-line Kotlin raw string holding `**/*`
+  above the plugins block, neither of which opens a comment. (Gradle wants
+  plugins {} first; only the parse is checked here.)
 - test-only: com.android.test modules only, so no unit-test compile.
 
 Negative cases, which must keep the plain list:
@@ -21,3 +24,6 @@ Negative cases, which must keep the plain list:
   lines after the `id(...)`.
 - bad-include/repo: `include` names with ".." or "/", which would reach the
   Android build file in bad-include/outside; they are skipped.
+- settings-comment: the only real include is the JVM `:lib`; `:old` (after
+  `//` on the include line) and `:old2` (inside `/* */`) are Android modules
+  that must not be followed.
