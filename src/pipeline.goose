@@ -181,6 +181,156 @@ fn java_home(home: const u8[:]) -> u8[>..] {
     return jh;
 }
 
+// The scip-java scripts/fetch-tools.sh installs, by version, so a new pin
+// is a new file and never an old binary kept. Keep the two in step.
+let SCIP_JAVA = "v0.14.1";
+
+// Gradle plugins that make a module an Android one.
+let ANDROID_PLUGINS = ["com.android.application", "com.android.library", "com.android.test",
+                       "com.android.dynamic-feature"];
+
+// Which Android plugin id s names in quotes ("id" or 'id', or "id:version"
+// in a version catalog): its index in ANDROID_PLUGINS, or -1.
+fn android_plugin_in(s: const u8[:]) -> i64 {
+    for p, k in ANDROID_PLUGINS {
+        for q in ["\"", "'"] {
+            if find(s, str(q, p, q)) >= 0 || find(s, str(q, p, ":")) >= 0 { return k; }
+        }
+    }
+    return -1;
+}
+
+// The plugin aliases in gradle/libs.versions.toml that name an Android
+// plugin, as build files write them ("libs.plugins.android.application"),
+// each with its ANDROID_PLUGINS index: "alias\tindex" lines. Gradle's
+// accessors turn '-' and '_' in a key into '.'. Other catalogs are not read.
+fn android_catalog_aliases(repo: const u8[:]) -> u8[>..] {
+    var out: u8[>..] = [];
+    var toml: u8[>..] = [];
+    guard read_file(str(repo, "/gradle/libs.versions.toml"), toml) else { return out; }
+    var plugins = false;
+    each_split(toml, '\n') { raw =>
+        let line = trim(raw);
+        if starts_with(line, "[") {
+            plugins = starts_with(line, "[plugins]");
+        } else if plugins && !starts_with(line, "#") {
+            let eq = find(line, "=");
+            let k = if eq > 0 { android_plugin_in(line[eq + 1..]) } else { -1 };
+            if k >= 0 {
+                var name: u8[>..] = str("libs.plugins.", trim(line[..eq]));
+                for i in 0..name.len { if name[i] == '-' || name[i] == '_' { name[i] = '.'; } }
+                format(out, name, "\t", k, "\n");
+            }
+        }
+    };
+    return out;
+}
+
+// The Android plugin a build file applies (its ANDROID_PLUGINS index), or
+// -1: by id in a plugins {} block, `id("...")`, `id '...'` or `apply
+// plugin:`, or by `alias(libs.plugins....)` from the version catalog. A line
+// with `apply false` only declares the plugin (a root build file does that
+// for its modules). Line comments are skipped, block comments are not.
+fn android_plugin_of(build: const u8[:], aliases: const u8[:]) -> i64 {
+    var k = -1;
+    each_split(build, '\n') { raw =>
+        let line = trim(raw);
+        guard k < 0 && !starts_with(line, "//") && find(line, "apply false") < 0 && find(line, "apply(false)") < 0;
+        k = android_plugin_in(line);
+        let at = find(line, "alias");
+        if k < 0 && at >= 0 {
+            var i = at + 5;
+            while i < line.len && (line[i] == '(' || line[i] == ' ') { i++; }
+            let start = i;
+            while i < line.len && (is_ident(line[i]) || line[i] == '.') { i++; }
+            let name = line[start..i];
+            each_split(aliases, '\n') { al =>
+                let tab = find(al, "\t");
+                if tab > 0 && al[..tab] == name {
+                    let n, ok = parse_int(al[tab + 1..]);
+                    if ok { k = n; }
+                }
+            };
+        }
+    };
+    return k;
+}
+
+// The modules settings.gradle(.kts) includes, as Gradle paths (":app",
+// ":core:data"), one per line: every quoted name in an `include(...)` or
+// Groovy `include '...', '...'`, which may run over several lines. Modules
+// moved elsewhere with projectDir are looked for at their default place.
+fn gradle_includes(repo: const u8[:]) -> u8[>..] {
+    var out: u8[>..] = [];
+    var s: u8[>..] = [];
+    guard read_file(str(repo, "/settings.gradle.kts"), s) || read_file(str(repo, "/settings.gradle"), s) else { return out; }
+    var open = false;
+    var depth = 0;
+    each_split(s, '\n') { raw =>
+        let line = trim(raw);
+        guard !starts_with(line, "//");
+        let starts = starts_with(line, "include") && line.len > 7 && (line[7] == '(' || line[7] == ' ' || line[7] == '\t');
+        guard open || starts;
+        var q: u8 = 0;
+        var from = 0;
+        for c, i in line {
+            if q != 0 {
+                if c == q {
+                    let name = line[from..i];
+                    let path: u8[>..] = if starts_with(name, ":") { str(name) } else { str(":", name) };
+                    if name.len > 0 && !contains_line(out, path) { format(out, path, "\n"); }
+                    q = 0;
+                }
+            } else if c == '"' || c == '\'' {
+                q = c;
+                from = i + 1;
+            } else if c == '(' {
+                depth++;
+            } else if c == ')' {
+                depth--;
+            }
+        }
+        open = depth > 0 || ends_with(line, ",");
+    };
+    return out;
+}
+
+// The Gradle tasks scip-java runs, one per line. Its own scipPrintDependencies
+// (the dependency versions behind callees in packages) and scipCompileAll
+// (the compiles) do for a plain JVM build. On an Android build (AGP 9, with
+// its built-in Kotlin) scipPrintDependencies dies of a
+// ConcurrentModificationException (WriteDependencies walks the project's
+// configurations while AGP adds some), and scipCompileAll alone has no
+// actions there; so it goes, and each Android module's Kotlin compiles,
+// main and unit tests, are named instead. The variant is taken to be debug:
+// nothing short of running Gradle says which variants a module has.
+// `clean` first: the compiles must run for scip-java to see them.
+fn gradle_scip_tasks(repo: const u8[:]) -> u8[>..] {
+    let aliases = android_catalog_aliases(repo);
+    var compiles: u8[>..] = [];
+    fn module(path: const u8[:], dir: const u8[:]) {
+        var b: u8[>..] = [];
+        guard read_file(str(dir, "/build.gradle.kts"), b) || read_file(str(dir, "/build.gradle"), b) else { return; }
+        let k = android_plugin_of(b, aliases);
+        guard k >= 0 else { return; }
+        format(compiles, path, ":compileDebugKotlin\n");
+        // A com.android.test module is all instrumented tests: no unit tests.
+        if ANDROID_PLUGINS[k] != "com.android.test" { format(compiles, path, ":compileDebugUnitTestKotlin\n"); }
+    }
+    module("", repo);
+    each_split(gradle_includes(repo), '\n') { path =>
+        guard path.len > 1;
+        var dir: u8[>..] = str(repo, "/", path[1..]);
+        for i in (repo.len + 1)..dir.len { if dir[i] == ':' { dir[i] = '/'; } }
+        module(path, dir);
+    };
+    var tasks: u8[>..] = [];
+    tasks.append("clean\n");
+    if compiles.len > 0 { tasks.append(compiles); } else { tasks.append("scipPrintDependencies\n"); }
+    tasks.append("scipCompileAll\n");
+    return tasks;
+}
+
 // The environment children get: a repo virtualenv first on PATH, and room
 // for scip-python and pyright on big repos.
 // Whether the repo's root holds a solution or project file for scip-dotnet.
@@ -1013,14 +1163,14 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&) -> boo
     }
 
     // scip-java indexes Java, and Kotlin built with Gradle (its compiler
-    // plugin follows the current Kotlin, 2.4 as of scip-java 0.13.2).
+    // plugin follows the current Kotlin, 2.4 as of scip-java 0.14.1).
     if (l.java || (l.kt && l.gradle)) && (l.maven || l.gradle) && !trusted {
         skipped.append(if l.gradle { " scip-java (Gradle)" } else { " scip-java (Maven)" });
         delete_file(str(out, "/index-java.scip"));
     } else if l.java || (l.kt && l.gradle) {
         let target = str(out, "/index-java.scip");
         var a: u8[>..] = [];
-        arg(a, str(home, "/.tools/scip-java/scip-java"));
+        arg(a, str(home, "/.tools/scip-java/", SCIP_JAVA, "/scip-java"));
         arg(a, "index");
         arg(a, str("--output=", target));
         arg(a, str("--targetroot=", out, "/java-targetroot"));
@@ -1035,14 +1185,17 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&) -> boo
         if l.gradle {
             // The build runs with Swan's Gradle home and, for Android, Swan's
             // SDK. scip-java's init script cannot run with the configuration
-            // cache or isolated projects, which newer builds turn on. Note
-            // its `clean`: the repo's build/ output is rebuilt.
+            // cache or isolated projects, which newer builds turn on. The
+            // tasks are gradle_scip_tasks's: on Android, each module's Kotlin
+            // compiles instead of scipPrintDependencies, which AGP 9 breaks
+            // (so no package versions for callees there). Note the `clean`
+            // first: the repo's build/ output is rebuilt.
             arg(a, "--");
             arg(a, "-Dorg.gradle.configuration-cache=false");
             arg(a, "-Dorg.gradle.isolated-projects=false");
             arg(a, "-Dorg.gradle.jvmargs=-Xmx3g");
             arg(a, "-Dkotlin.daemon.jvmargs=-Xmx3g");
-            for t in ["clean", "scipPrintDependencies", "scipCompileAll"] { arg(a, t); }
+            each_split(gradle_scip_tasks(repo), '\n') { t => if t.len > 0 { arg(a, t); } };
             genv.append(env_entry("GRADLE_USER_HOME", str(home, "/.tools/gradle-home")));
             let sdk = str(home, "/.tools/android-sdk");
             if file_exists(str(sdk, "/licenses/android-sdk-license")) {
