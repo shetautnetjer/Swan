@@ -17,3 +17,5 @@ Negative cases, which must keep the plain list:
   (`plugins.withId(...)`).
 - multiline-apply-false: plugin entries declared with `.apply(false)` on the
   lines after the `id(...)`.
+- bad-include/repo: `include` names with ".." or "/", which would reach the
+  Android build file in bad-include/outside; they are skipped.

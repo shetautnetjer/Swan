@@ -130,6 +130,8 @@ if (run("gradle")) {
     tasks(`${g}/root-withid`), plain);
   eq("gradle: id(\"com.android.application\") with .apply(false) on the next line stays plain",
     tasks(`${g}/multiline-apply-false`), plain);
+  eq("gradle: include names with \"..\" or \"/\" are not followed out of the repo",
+    tasks(`${g}/bad-include/repo`), plain);
   eq("gradle: only com.android.test modules get no compileDebugUnitTestKotlin",
     tasks(`${g}/test-only`), ["clean", "compileDebugKotlin", "scipCompileAll"]);
 }

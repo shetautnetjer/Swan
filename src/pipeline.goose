@@ -306,8 +306,9 @@ fn android_plugin_of(build: const u8[:], aliases: const u8[:]) -> i64 {
 
 // The modules settings.gradle(.kts) includes, as Gradle paths (":app",
 // ":core:data"), one per line: every quoted name in an `include(...)` or
-// Groovy `include '...', '...'`, which may run over several lines. Modules
-// moved elsewhere with projectDir are looked for at their default place.
+// Groovy `include '...', '...'`, which may run over several lines; names
+// with ".." or "/" are skipped. Modules moved elsewhere with projectDir are
+// looked for at their default place.
 fn gradle_includes(repo: const u8[:]) -> u8[>..] {
     var out: u8[>..] = [];
     var s: u8[>..] = [];
@@ -326,7 +327,10 @@ fn gradle_includes(repo: const u8[:]) -> u8[>..] {
                 if c == q {
                     let name = line[from..i];
                     let path: u8[>..] = if starts_with(name, ":") { str(name) } else { str(":", name) };
-                    if name.len > 0 && !contains_line(out, path) { format(out, path, "\n"); }
+                    // A name with ".." or "/" is no Gradle path; it would
+                    // send the build-file lookup outside the module tree.
+                    let bad = find(name, "..") >= 0 || find(name, "/") >= 0;
+                    if name.len > 0 && !bad && !contains_line(out, path) { format(out, path, "\n"); }
                     q = 0;
                 }
             } else if c == '"' || c == '\'' {
