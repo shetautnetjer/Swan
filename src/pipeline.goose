@@ -226,33 +226,81 @@ fn android_catalog_aliases(repo: const u8[:]) -> u8[>..] {
     return out;
 }
 
+// A build file without its comments: /* ... */ (its newlines kept, so lines
+// stay lines) and // to the end of the line, neither inside a quoted string.
+fn strip_gradle_comments(s: const u8[:]) -> u8[>..] {
+    var out: u8[>..] = [];
+    var q: u8 = 0;
+    var i = 0;
+    while i < s.len {
+        let c = s[i];
+        if q != 0 {
+            out.push(c);
+            if c == '\\' && i + 1 < s.len { out.push(s[i + 1]); i++; } else if c == q || c == '\n' { q = 0; }
+        } else if c == '/' && i + 1 < s.len && s[i + 1] == '*' {
+            i += 2;
+            while i < s.len && !(s[i] == '*' && i + 1 < s.len && s[i + 1] == '/') {
+                if s[i] == '\n' { out.push('\n'); }
+                i++;
+            }
+            i++;
+        } else if c == '/' && i + 1 < s.len && s[i + 1] == '/' {
+            while i < s.len && s[i] != '\n' { i++; }
+            continue;
+        } else {
+            if c == '"' || c == '\'' { q = c; }
+            out.push(c);
+        }
+        i++;
+    }
+    return out;
+}
+
+// Whether a plugin entry is only declared, with `apply false` / `.apply(false)`
+// on its own line or on the chained lines after it (`.version(...)`).
+fn gradle_apply_false(lines: const u8[:][:], at: i64) -> bool {
+    var j = at;
+    while j < lines.len {
+        let line = trim(lines[j]);
+        guard j == at || starts_with(line, ".") || starts_with(line, "apply ") || starts_with(line, "version ") else { return false; }
+        if find(line, "apply false") >= 0 || find(line, "apply(false)") >= 0 { return true; }
+        j++;
+    }
+    return false;
+}
+
 // The Android plugin a build file applies (its ANDROID_PLUGINS index), or
 // -1: by id in a plugins {} block, `id("...")`, `id '...'` or `apply
-// plugin:`, or by `alias(libs.plugins....)` from the version catalog. A line
-// with `apply false` only declares the plugin (a root build file does that
-// for its modules). Line comments are skipped, block comments are not.
+// plugin:`, or by `alias(libs.plugins....)` from the version catalog.
+// Comments are skipped. An entry with `apply false`, on its line or the
+// chained lines after it, only declares the plugin (a root build file does
+// that for its modules), and `plugins.withId(...)`, `hasPlugin(...)` and
+// `withPlugin(...)` only react to it.
 fn android_plugin_of(build: const u8[:], aliases: const u8[:]) -> i64 {
     var k = -1;
-    each_split(build, '\n') { raw =>
+    let text = strip_gradle_comments(build);
+    let lines = split(text, '\n');
+    for raw, at in lines {
         let line = trim(raw);
-        guard k < 0 && !starts_with(line, "//") && find(line, "apply false") < 0 && find(line, "apply(false)") < 0;
+        guard k < 0 && find(line, "withId") < 0 && find(line, "hasPlugin") < 0 && find(line, "withPlugin") < 0 else { continue; }
+        guard !gradle_apply_false(lines, at) else { continue; }
         k = android_plugin_in(line);
-        let at = find(line, "alias");
-        if k < 0 && at >= 0 {
-            var i = at + 5;
+        let al = find(line, "alias");
+        if k < 0 && al >= 0 {
+            var i = al + 5;
             while i < line.len && (line[i] == '(' || line[i] == ' ') { i++; }
             let start = i;
             while i < line.len && (is_ident(line[i]) || line[i] == '.') { i++; }
             let name = line[start..i];
-            each_split(aliases, '\n') { al =>
-                let tab = find(al, "\t");
-                if tab > 0 && al[..tab] == name {
-                    let n, ok = parse_int(al[tab + 1..]);
+            each_split(aliases, '\n') { a =>
+                let tab = find(a, "\t");
+                if tab > 0 && a[..tab] == name {
+                    let n, ok = parse_int(a[tab + 1..]);
                     if ok { k = n; }
                 }
             };
         }
-    };
+    }
     return k;
 }
 

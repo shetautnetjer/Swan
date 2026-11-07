@@ -124,6 +124,12 @@ if (run("gradle")) {
   eq("gradle: version-catalog aliases; the root's `apply false`; a com.android.test module beside others",
     tasks(`${g}/catalog`), android);
   eq("gradle: an Android app in the root project", tasks(`${g}/root-module`), android);
+  eq("gradle: a JVM module with an Android plugin id inside /* ... */ stays plain",
+    tasks(`${g}/jvm-comment`), plain);
+  eq("gradle: a root with only plugins.withId(\"com.android.application\") stays plain",
+    tasks(`${g}/root-withid`), plain);
+  eq("gradle: id(\"com.android.application\") with .apply(false) on the next line stays plain",
+    tasks(`${g}/multiline-apply-false`), plain);
   eq("gradle: only com.android.test modules get no compileDebugUnitTestKotlin",
     tasks(`${g}/test-only`), ["clean", "compileDebugKotlin", "scipCompileAll"]);
 }
