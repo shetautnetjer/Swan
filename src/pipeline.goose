@@ -869,9 +869,13 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&) -> boo
         jobs.append(base); jobs.push(2);
     }
     // A whole-language job, unless its files have the fingerprint they had
-    // when its index was made.
+    // when its index was made and its command is the same. The command (argv,
+    // with the indexer's versioned path and, for scip-java, the Gradle tasks)
+    // is part of the key, so a new indexer version or task list makes a new
+    // index. Maps made before it was part of the key rebuild each such index
+    // once, which is what they need anyway.
     fn add_lang_job(label: const u8[:], target: const u8[:], a: const u8[:], e: const u8[:], fp: u64) {
-        let fps = str(fp);
+        let fps = str(hash_combine(fp, hash(a)));
         var hit = false;
         each_split(prev_index, '\n') { line =>
             let f = split(line, '\t');
