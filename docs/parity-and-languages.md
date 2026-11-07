@@ -178,6 +178,15 @@ Android modules are com.android.test. The cost: callees in external packages
 have no package versions on Android, since those come from
 `scipPrintDependencies`.
 
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:4bc05e4064b2e093389c8bf50056c6ed015b83d460643ea13c1e43a4cb28c43a -->
+
+Gradle's standard `clean` deletes project build directories; later tasks may
+not recreate all outputs, so account for those deletions before mapping.
+
+<!-- /coderabbit-ai-generated:v1 -->
+
 **CUDA (and C/C++): scip-clang 0.4.1 on `fixtures/tiny-cuda` (two .cu files
 and a .cuh header). No nvcc, no CUDA toolkit, no GPU here.**
 - scip-clang supports CUDA through clang's CUDA mode. It needs clang's

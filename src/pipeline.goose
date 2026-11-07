@@ -228,28 +228,90 @@ fn android_catalog_aliases(repo: const u8[:]) -> u8[>..] {
 
 // A build file without its comments: /* ... */ (its newlines kept, so lines
 // stay lines) and // to the end of the line, neither inside a quoted string.
-fn strip_gradle_comments(s: const u8[:]) -> u8[>..] {
+// Kotlin and Groovy triple-quoted strings can contain newlines and comments.
+fn strip_gradle_comments(s: const u8[:], kotlin: bool) -> u8[>..] {
     var out: u8[>..] = [];
     var q: u8 = 0;
+    var triple = false;
     var i = 0;
     while i < s.len {
         let c = s[i];
         if q != 0 {
             out.push(c);
-            if c == '\\' && i + 1 < s.len { out.push(s[i + 1]); i++; } else if c == q || c == '\n' { q = 0; }
+            if c == '\\' && (!triple || !kotlin) && i + 1 < s.len { out.push(s[i + 1]); i++; }
+            else if triple && c == q && i + 2 < s.len && s[i + 1] == q && s[i + 2] == q {
+                out.push(q); out.push(q); i += 2; q = 0; triple = false;
+            } else if !triple && (c == q || c == '\n') { q = 0; }
         } else if c == '/' && i + 1 < s.len && s[i + 1] == '*' {
             i += 2;
-            while i < s.len && !(s[i] == '*' && i + 1 < s.len && s[i + 1] == '/') {
+            var depth = 1;
+            while i < s.len && depth > 0 {
+                if s[i] == '/' && i + 1 < s.len && s[i + 1] == '*' && kotlin { depth++; i += 2; continue; }
+                if s[i] == '*' && i + 1 < s.len && s[i + 1] == '/' { depth--; i += 2; continue; }
                 if s[i] == '\n' { out.push('\n'); }
                 i++;
             }
-            i++;
+            continue;
         } else if c == '/' && i + 1 < s.len && s[i + 1] == '/' {
             while i < s.len && s[i] != '\n' { i++; }
             continue;
         } else {
-            if c == '"' || c == '\'' { q = c; }
             out.push(c);
+            if c == '"' || c == '\'' {
+                q = c;
+                if i + 2 < s.len && s[i + 1] == c && s[i + 2] == c {
+                    triple = true; out.push(c); out.push(c); i += 2;
+                }
+            }
+        }
+        i++;
+    }
+    return out;
+}
+
+// Mask reaction calls, including multiline argument lists, but keep the
+// surrounding code and newlines. A plugin applied in a callback still counts.
+fn strip_gradle_reactions(s: const u8[:], kotlin: bool) -> u8[>..] {
+    var out: u8[>..] = [];
+    var q: u8 = 0;
+    var triple = false;
+    var depth = 0;
+    var i = 0;
+    while i < s.len {
+        let c = s[i];
+        if depth == 0 && q == 0 && (i == 0 || !is_ident(s[i - 1])) {
+            var n = 0;
+            for name in ["withId", "hasPlugin", "withPlugin"] {
+                if starts_with(s[i..], name) { n = name.len; }
+            }
+            if n > 0 {
+                var j = i + n;
+                while j < s.len && (s[j] == ' ' || s[j] == '\t' || s[j] == '\n' || s[j] == '\r') { j++; }
+                if j < s.len && s[j] == '(' {
+                    while i <= j { out.push(if s[i] == '\n' { '\n' } else { ' ' }); i++; }
+                    depth = 1;
+                    continue;
+                }
+            }
+        }
+        if q != 0 {
+            out.push(if depth > 0 && c != '\n' { ' ' } else { c });
+            if c == '\\' && (!triple || !kotlin) && i + 1 < s.len {
+                i++; out.push(if depth > 0 && s[i] != '\n' { ' ' } else { s[i] });
+            } else if triple && c == q && i + 2 < s.len && s[i + 1] == q && s[i + 2] == q {
+                out.push(if depth > 0 { ' ' } else { q }); out.push(if depth > 0 { ' ' } else { q });
+                i += 2; q = 0; triple = false;
+            } else if !triple && (c == q || c == '\n') { q = 0; }
+        } else {
+            if c == '"' || c == '\'' {
+                q = c;
+                if i + 2 < s.len && s[i + 1] == c && s[i + 2] == c { triple = true; }
+            } else if depth > 0 && c == '(' { depth++; }
+            else if depth > 0 && c == ')' { depth--; out.push(' '); i++; continue; }
+            out.push(if depth > 0 && c != '\n' { ' ' } else { c });
+            if triple && q == c && i + 2 < s.len && s[i + 1] == c && s[i + 2] == c {
+                out.push(if depth > 0 { ' ' } else { c }); out.push(if depth > 0 { ' ' } else { c }); i += 2;
+            }
         }
         i++;
     }
@@ -276,13 +338,13 @@ fn gradle_apply_false(lines: const u8[:][:], at: i64) -> bool {
 // chained lines after it, only declares the plugin (a root build file does
 // that for its modules), and `plugins.withId(...)`, `hasPlugin(...)` and
 // `withPlugin(...)` only react to it.
-fn android_plugin_of(build: const u8[:], aliases: const u8[:]) -> i64 {
+fn android_plugin_of(build: const u8[:], aliases: const u8[:], kotlin: bool) -> i64 {
     var k = -1;
-    let text = strip_gradle_comments(build);
+    let text = strip_gradle_reactions(strip_gradle_comments(build, kotlin), kotlin);
     let lines = split(text, '\n');
     for raw, at in lines {
         let line = trim(raw);
-        guard k < 0 && find(line, "withId") < 0 && find(line, "hasPlugin") < 0 && find(line, "withPlugin") < 0 else { continue; }
+        guard k < 0 else { continue; }
         guard !gradle_apply_false(lines, at) else { continue; }
         k = android_plugin_in(line);
         let al = find(line, "alias");
@@ -312,12 +374,31 @@ fn android_plugin_of(build: const u8[:], aliases: const u8[:]) -> i64 {
 fn gradle_includes(repo: const u8[:]) -> u8[>..] {
     var out: u8[>..] = [];
     var s: u8[>..] = [];
-    guard read_file(str(repo, "/settings.gradle.kts"), s) || read_file(str(repo, "/settings.gradle"), s) else { return out; }
+    let kotlin = read_file(str(repo, "/settings.gradle.kts"), s);
+    guard kotlin || read_file(str(repo, "/settings.gradle"), s) else { return out; }
+    let text = strip_gradle_comments(s, kotlin);
     var open = false;
     var depth = 0;
-    each_split(s, '\n') { raw =>
+    var triple: u8 = 0;
+    each_split(text, '\n') { raw =>
         let line = trim(raw);
-        guard !starts_with(line, "//");
+        let in_triple = triple != 0;
+        var q: u8 = 0;
+        var i = 0;
+        while i < line.len {
+            let c = line[i];
+            if c == '\\' && (q != 0 || (triple != 0 && !kotlin)) && i + 1 < line.len { i += 2; continue; }
+            if triple != 0 {
+                if c == triple && i + 2 < line.len && line[i + 1] == c && line[i + 2] == c { triple = 0; i += 3; continue; }
+            } else if q != 0 {
+                if c == q { q = 0; }
+            } else if c == '"' || c == '\'' {
+                if i + 2 < line.len && line[i + 1] == c && line[i + 2] == c { triple = c; i += 3; continue; }
+                q = c;
+            }
+            i++;
+        }
+        guard !in_triple;
         let starts = starts_with(line, "include") && line.len > 7 && (line[7] == '(' || line[7] == ' ' || line[7] == '\t');
         guard open || starts;
         var q: u8 = 0;
@@ -370,8 +451,9 @@ fn gradle_scip_tasks(repo: const u8[:]) -> u8[>..] {
     var unit = false;
     fn module(dir: const u8[:]) {
         var b: u8[>..] = [];
-        guard read_file(str(dir, "/build.gradle.kts"), b) || read_file(str(dir, "/build.gradle"), b) else { return; }
-        let k = android_plugin_of(b, aliases);
+        let kotlin = read_file(str(dir, "/build.gradle.kts"), b);
+        guard kotlin || read_file(str(dir, "/build.gradle"), b) else { return; }
+        let k = android_plugin_of(b, aliases, kotlin);
         guard k >= 0 else { return; }
         android = true;
         if ANDROID_PLUGINS[k] != "com.android.test" { unit = true; }
@@ -1268,9 +1350,9 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&) -> boo
             }
         }
         add_lang_job("scip-java", target, a, child_env(l, genv),
-                     lang_fingerprint(repo, [".java", ".kt", ".kts", ".gradle"],
+                     hash_combine(lang_fingerprint(repo, [".java", ".kt", ".kts", ".gradle"],
                                       ["pom.xml", "build.gradle", "build.gradle.kts", "settings.gradle",
-                                       "settings.gradle.kts", "gradle/libs.versions.toml"]));
+                                       "settings.gradle.kts", "gradle/libs.versions.toml"]), hash(a)));
     }
 
     // C# (Unity, Godot C#, .NET): scip-dotnet over the solution or project at

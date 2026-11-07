@@ -4,6 +4,10 @@
 //
 //   bun tests/lang_check.ts [js|python|java|gradle|cuda ...]   (default: all)
 
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 const sh = (cmd: string[], env: Record<string, string> = {}) => {
   const r = Bun.spawnSync(cmd, { stdout: "pipe", stderr: "pipe", env: { ...process.env, ...env } });
   if (r.exitCode !== 0) throw new Error(`${cmd.join(" ")}: ${r.stderr}`);
@@ -134,6 +138,42 @@ if (run("gradle")) {
     tasks(`${g}/bad-include/repo`), plain);
   eq("gradle: only com.android.test modules get no compileDebugUnitTestKotlin",
     tasks(`${g}/test-only`), ["clean", "compileDebugKotlin", "scipCompileAll"]);
+
+  const tmp = mkdtempSync(join(tmpdir(), "swan-gradle-detection-"));
+  try {
+    for (const name of ["jvm", "old", "blocked", "inside", "actual"]) {
+      mkdirSync(join(tmp, name));
+      writeFileSync(join(tmp, name, "build.gradle.kts"), name === "jvm" || name === "actual"
+        ? 'plugins { kotlin("jvm") }\n' : 'plugins { id("com.android.application") }\n');
+    }
+    for (const [settings, quote] of [["settings.gradle.kts", '"""'], ["settings.gradle", "'''"]]) {
+      const path = join(tmp, settings);
+      writeFileSync(path, `include(":jvm") // was ":old"\n/*\ninclude(":blocked")\n*/\n` +
+        `defText = ${quote}\n// not a comment\n/* not a comment\ninclude(":inside")\n${quote}\n` +
+        `include(":actual")\n`);
+      eq(`gradle: ${settings} ignores comments and includes inside multiline strings`, tasks(tmp), plain);
+      writeFileSync(join(tmp, "actual", "build.gradle.kts"), 'plugins { id("com.android.application") }\n');
+      eq(`gradle: ${settings} still sees a real include after a multiline string`, tasks(tmp), android);
+      writeFileSync(join(tmp, "actual", "build.gradle.kts"), 'plugins { kotlin("jvm") }\n');
+      if (settings.endsWith(".kts")) {
+        writeFileSync(path, '/* outer /* nested */\ninclude(":blocked")\n*/\n' +
+          'val text = """raw backslash \\"""\ninclude(":actual")\n');
+        eq("gradle: Kotlin nested comments and raw strings keep later includes visible", tasks(tmp), plain);
+        writeFileSync(join(tmp, "actual", "build.gradle.kts"), 'plugins { id("com.android.application") }\n');
+        eq("gradle: Kotlin raw string ending in backslash preserves a real include", tasks(tmp), android);
+        writeFileSync(join(tmp, "actual", "build.gradle.kts"), 'plugins { kotlin("jvm") }\n');
+      }
+      rmSync(path);
+    }
+    for (const method of ["withId", "hasPlugin", "withPlugin"]) {
+      writeFileSync(join(tmp, "build.gradle.kts"), `plugins.${method}(\n  "com.android.application"\n) { }\n`);
+      eq(`gradle: multiline ${method} reaction does not apply Android`, tasks(tmp), plain);
+      writeFileSync(join(tmp, "build.gradle.kts"), `plugins.${method}(\n  "com.android.application"\n) { apply(plugin = "com.android.library") }\n`);
+      eq(`gradle: a real plugin application after ${method} is detected`, tasks(tmp), android);
+    }
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
 }
 
 if (run("cuda")) {
