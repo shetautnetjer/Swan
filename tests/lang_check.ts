@@ -2,7 +2,7 @@
 // have their own tests: each is mapped with scripts/index-repo.sh and asked
 // the questions an engineer would ask first.
 //
-//   bun tests/lang_check.ts [js|python|java|cuda ...]   (default: all)
+//   bun tests/lang_check.ts [js|python|java|gradle|cuda ...]   (default: all)
 
 const sh = (cmd: string[], env: Record<string, string> = {}) => {
   const r = Bun.spawnSync(cmd, { stdout: "pipe", stderr: "pipe", env: { ...process.env, ...env } });
@@ -105,6 +105,25 @@ if (run("java")) {
   const renamed = await Bun.file(`${w}/repo/src/main/java/shapes/Shapes.java`).text();
   check("java: rename_symbol rewrites the method and its call",
     !ren.isError && renamed.includes("static double sumOfAreas(") && renamed.includes("println(sumOfAreas("), ren);
+}
+
+if (run("gradle")) {
+  // The Gradle tasks map gives scip-java, from the build files alone (no
+  // Gradle, no Android SDK): on Android each module's Kotlin compiles
+  // replace scipPrintDependencies, which AGP 9 breaks.
+  const tasks = (dir: string) => sh(["bin/swan", "gradle-tasks", dir]).trim().split("\n");
+  const plain = ["clean", "scipPrintDependencies", "scipCompileAll"];
+  const android = (...mods: string[]) => ["clean", ...mods.flatMap((m) => [`${m}:compileDebugKotlin`, `${m}:compileDebugUnitTestKotlin`]), "scipCompileAll"];
+  const g = "fixtures/gradle-android";
+  const eq = (what: string, got: string[], want: string[]) => check(what, got.join(" ") === want.join(" "), got);
+  eq("gradle: plain Kotlin JVM (tiny-kt) keeps scipPrintDependencies", tasks("fixtures/tiny-kt"), plain);
+  eq("gradle: no Gradle at all (tiny-java) gets the same list", tasks("fixtures/tiny-java"), plain);
+  eq("gradle: plugins { id(\"com.android.application\") } with include(\":app\")", tasks(`${g}/kts-app`), android(":app"));
+  eq("gradle: Groovy apply plugin, a multi-line include, :core:data, and a JVM :lib left out",
+    tasks(`${g}/groovy-multi`), android(":app", ":core:data"));
+  eq("gradle: version-catalog aliases; the root's `apply false` adds nothing; com.android.test has no unit tests",
+    tasks(`${g}/catalog`), [...android(":app", ":feature:news").slice(0, -1), ":benchmark:compileDebugKotlin", "scipCompileAll"]);
+  eq("gradle: an Android app in the root project", tasks(`${g}/root-module`), android(""));
 }
 
 if (run("cuda")) {

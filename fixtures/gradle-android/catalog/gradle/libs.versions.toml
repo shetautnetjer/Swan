@@ -1,0 +1,10 @@
+[versions]
+agp = "9.4.1"
+
+[libraries]
+androidx-core = { group = "androidx.core", name = "core-ktx", version = "1.17.0" }
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
+android_library = { id = "com.android.library", version.ref = "agp" }
+android-test = "com.android.test:9.4.1"
