@@ -1,6 +1,6 @@
 # Swan status
 
-as_of: 2026-11-06
+as_of: 2026-11-07
 
 This is a chronological development log. Earlier "not done" statements,
 private-repo timings and "all tests pass" entries describe their original
@@ -633,3 +633,37 @@ outside this source PR.
   this branch's `swan map` on aya-phone in the VM: exit 0, 25 s, about
   2.19 GB peak, 22 files including 16/16 .kt, with callers, implementations
   and references matching grep.
+
+## 2026-11-07: exact-map clean rebuild and offline Cua qualification
+
+- Added CLI `map --clean` and boolean MCP `update_map.clean` for one exact
+  map. Clean invalidates generated reuse metadata under the existing stable
+  writer lock, reruns eligible indexers, retains the old database until
+  complete atomic publication, and writes replacement cache metadata only
+  afterward. Existing trust, sessions, other maps and ordinary refresh
+  behavior retain their owners. Source skill guidance documents selection,
+  failure/retry and the private-map fallback.
+- Independent testing found that the old permissive parser accepted a
+  malformed symbols row, published an empty database and reported success.
+  Clean-only prepublication checks now reject invalid row shapes, numbers
+  and roles/flags while retaining legitimate empty output and five/six-field
+  symbol compatibility. The same MCP reader retains the old map after
+  rejection and recovers on valid input. The new test fails at that exact
+  malformed case against the pre-fix binary `c7101a1fc78604ff2332d196dc20f9d33d8184c310759e6d53306101c3ee05f9`.
+- Final host binary `0a42c9dec9a9f5bcfb0ec9037a68a28cd908d5b7f5d3463466c1d339b882a3eb`:
+  6/6 clean-rebuild cases and 9/9 build-policy cases passed. The host Node 26
+  Python/TypeScript doctor environment remains unqualified; synthetic host
+  tests and guest success do not establish host dependency readiness.
+- Cua Space independently built the corrected archive
+  `fd6c42c218baa9b94a7310868450b0860dd1f453d12678dcff0150fcee7b478f`.
+  On Node 24.21/Bun 1.3.14, Python/TypeScript doctor passed, followed by
+  6 clean-rebuild, 9 build-policy, 9 concurrency, 5 reader and 24 pattern
+  checks. Manifest-covered source bytes stayed unchanged; generated
+  `bin/swan` and `build/golsp.c` were rebuilt. Earlier, the pre-row-validation
+  guest source passed 41 unit and 14 skill-unit tests; those totals are not
+  represented as a rerun on the final row-validation source.
+- Qualification is bounded to these synthetic cases, fixture patterns and
+  dependency observations. It does not prove complete semantic coverage,
+  source immutability during arbitrary builds or power-loss durability.
+  No installation, live map refresh or trust/configuration change is claimed
+  by this source commit. See [clean-rebuild details](docs/clean-reindex.md).

@@ -24,6 +24,13 @@ policy does not pin map identity or authorize other effects; inherited
 The pattern pack, fixtures and self-test behavior are unchanged. Guidance is
 conditional on the actual tool schema, not an installation or version claim.
 
+On 2026-11-07, explicit per-map clean rebuild guidance was added for servers
+advertising `update_map.clean` and binaries supporting `map --clean`. The
+existing private-map workflow remains the fallback for older binaries or
+unverifiable target identity. This does not authorize indexing, grant trust,
+delete a registry or change agent configuration. Pattern resources and the
+self-test remain unchanged.
+
 ## Distribution
 
 The Linux package includes this directory under its installation prefix.

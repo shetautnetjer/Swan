@@ -25,7 +25,7 @@ let TOOLS = """
      {"name":"insert_before_symbol","description":"Insert code before a symbol's definition, one blank line apart: a new function, class or import before an existing one.","inputSchema":{"type":"object","properties":{"repo":{"type":"string","description":"A repo path: answer about that repo's map instead (as use_repo; the choice persists)."},"build":{"type":"boolean","description":"Allow an implicit build when no usable map covers the repo (default true). Applies only to repository selection, not explicit tool actions or live warm-up."},"name_path":{"type":"string"},"relative_path":{"type":"string"},"body":{"type":"string"}},"required":["name_path","relative_path","body"]}},
      {"name":"rename_symbol","description":"Rename a symbol at every use the compiler resolved, across files. By default only plans: every site, sites skipped because their text differs (aliases, re-exports), conflicts with an existing symbol of the new name, and stale files. Set apply to true to write it; a conflict or a stale file refuses. Strings, comments and uses by name at run time are not covered.","inputSchema":{"type":"object","properties":{"repo":{"type":"string","description":"A repo path: answer about that repo's map instead (as use_repo; the choice persists)."},"build":{"type":"boolean","description":"Allow an implicit build when no usable map covers the repo (default true). Applies only to repository selection, not explicit tool actions or live warm-up."},"name_path":{"type":"string"},"relative_path":{"type":"string","description":"The file that defines the symbol (required)."},"new_name":{"type":"string"},"apply":{"type":"boolean"}},"required":["name_path","relative_path","new_name"]}},
      {"name":"get_diagnostics","description":"Compiler errors and warnings (tsc, cargo check) from the last check, each pinned to the symbol it is in. With name_path: the symbol's own diagnostics plus, up to depth steps out (default 1), those of the symbols that use it: where an edit to it shows up as breakage. With only relative_path: a file or directory. With neither: everything. Entries in files changed since the check say stale.","inputSchema":{"type":"object","properties":{"repo":{"type":"string","description":"A repo path: answer about that repo's map instead (as use_repo; the choice persists)."},"build":{"type":"boolean","description":"Allow an implicit build when no usable map covers the repo (default true). Applies only to repository selection, not explicit tool actions or live warm-up."},"name_path":{"type":"string"},"relative_path":{"type":"string"},"depth":{"type":"integer"},"errors_only":{"type":"boolean"},"max_results":{"type":"integer"},"live":{"type":"boolean","description":"Ask the running language server (rust-analyzer) about the one file in relative_path, as it is on disk now: errors seconds after an edit, without check_errors. The first call starts the server and waits for it to index."}}}},
-     {"name":"update_map","description":"Bring the map up to date after edits: reruns the SCIP indexers over the repo and rewrites only the files whose data changed. Takes as long as the indexers (seconds on small repos, minutes on large ones).","inputSchema":{"type":"object","properties":{"repo":{"type":"string","description":"A repo path: answer about that repo's map instead (as use_repo; the choice persists)."},"build":{"type":"boolean","description":"Allow an implicit build when no usable map covers the repo (default true). Applies only to repository selection, not explicit tool actions or live warm-up."}}}},
+     {"name":"update_map","description":"Bring the map up to date after edits: reruns the SCIP indexers over the repo and rewrites only the files whose data changed. Takes as long as the indexers (seconds on small repos, minutes on large ones).","inputSchema":{"type":"object","properties":{"clean":{"type":"boolean","description":"Rebuild the selected existing map without reusing indexer output or merge layers (default false). Requires repo to be the exact map root. Preserves the previous database until all indexers and the replacement database succeed; keeps trust unchanged."},"repo":{"type":"string","description":"A repo path: answer about that repo's map instead (as use_repo; the choice persists)."},"build":{"type":"boolean","description":"Allow an implicit build when no usable map covers the repo (default true). Applies only to repository selection, not explicit tool actions or live warm-up."}}}},
      {"name":"check_errors","description":"Run the repo's own checkers (tsc with the repo's tsconfig, cargo check, pyright) and load what they report, so get_diagnostics answers from fresh results.","inputSchema":{"type":"object","properties":{"repo":{"type":"string","description":"A repo path: answer about that repo's map instead (as use_repo; the choice persists)."},"build":{"type":"boolean","description":"Allow an implicit build when no usable map covers the repo (default true). Applies only to repository selection, not explicit tool actions or live warm-up."}}}},
      {"name":"run_tests","description":"Run the tests that reach a symbol through calls (up to depth steps, default 3), or the tests that reach anything a file defines when relative_path names a file and name_path is empty. Uses each language's test runner from tools/modules.json (pytest, bun test / vitest, cargo test). Returns which test files ran, pass or fail, and the runner's output tail.","inputSchema":{"type":"object","properties":{"repo":{"type":"string","description":"A repo path: answer about that repo's map instead (as use_repo; the choice persists)."},"build":{"type":"boolean","description":"Allow an implicit build when no usable map covers the repo (default true). Applies only to repository selection, not explicit tool actions or live warm-up."},"name_path":{"type":"string"},"relative_path":{"type":"string"},"depth":{"type":"integer"}}}},
      {"name":"format_file","description":"Run a file through its language's formatter from tools/modules.json (ruff format, biome format, rustfmt). The file's positions in the map are stale afterwards until update_map.","inputSchema":{"type":"object","properties":{"repo":{"type":"string","description":"A repo path: answer about that repo's map instead (as use_repo; the choice persists)."},"build":{"type":"boolean","description":"Allow an implicit build when no usable map covers the repo (default true). Applies only to repository selection, not explicit tool actions or live warm-up."},"relative_path":{"type":"string"}},"required":["relative_path"]}},
@@ -54,6 +54,13 @@ fn arg_int(args: json::Node?, key: const u8[:], dflt: i64) -> i64 {
 fn request_build(args: json::Node?) -> bool, bool {
     let setting = json::member(args, "build");
     guard setting else { return true, true; }
+    let value, ok = json::as_bool(setting);
+    return value, ok;
+}
+
+fn request_clean(args: json::Node?) -> bool, bool {
+    let setting = json::member(args, "clean");
+    guard setting else { return false, true; }
     let value, ok = json::as_bool(setting);
     return value, ok;
 }
@@ -437,8 +444,19 @@ fn call_tool(db: i64, name: const u8[:], args: json::Node?, out: u8[>..]&) -> bo
         meta_value(db, "root", root);
         meta_value(db, "source", dir);
         guard root.len > 0 && dir.len > 0 else { out.append("the map does not record its repo; rebuild it with swan map"); return false; }
+        let clean = name == "update_map" && arg_bool(args, "clean");
+        if clean {
+            guard abs_path(arg_text(args, "repo")) == root else {
+                out.append("clean rebuild requires repo to be the exact recorded root, not a path inside an ancestor map"); return false;
+            }
+            var recorded_map: u8[>..] = [];
+            var selected_map: u8[>..] = [];
+            guard swan_realpath(str(dir, "/swan.db"), recorded_map) && swan_realpath(serve_map, selected_map) && recorded_map == selected_map else {
+                out.append("clean rebuild refused: selected map does not match its recorded output directory"); return false;
+            }
+        }
         var report: u8[>..] = [];
-        let ok = if name == "update_map" { map_main(root, dir, report) } else { check_main(root, dir, report) };
+        let ok = if name == "update_map" { map_main(root, dir, report, clean) } else { check_main(root, dir, report) };
         // The next tool request reopens the published map and its freshness.
         json::format_string(out, report);
         return ok;
@@ -523,11 +541,16 @@ fn serve_loop() {
             let targs = json::member(params, "arguments");
             let snapshot = tool_reads_map(tool_name, targs);
             let build, valid_build = request_build(targs);
+            let clean, valid_clean = request_clean(targs);
             var ok = valid_build;
             // Validate even without repo, before selection, reopening or tool
             // effects. A failed restriction leaves the current selection alone.
             if !valid_build {
                 payload.append("build must be a boolean");
+            } else if tool_name == "update_map" && !valid_clean {
+                payload.append("clean must be a boolean"); ok = false;
+            } else if tool_name == "update_map" && clean && arg_text(targs, "repo").len == 0 {
+                payload.append("clean rebuild requires an explicit repo root"); ok = false;
             } else if tool_name == "use_repo" {
                 var p: u8[>..] = [];
                 p.append(arg_text(targs, "path"));
@@ -536,7 +559,9 @@ fn serve_loop() {
                 var rp: u8[>..] = [];
                 rp.append(arg_text(targs, "repo"));
                 if rp.len > 0 {
-                    ok = repo_switch(rp, build, false, snapshot, payload);     // no summary: the tool's own answer follows
+                    // Clean rebuild targets an existing exact map; never build a
+                    // missing map implicitly before validating its identity.
+                    ok = repo_switch(rp, build && !(tool_name == "update_map" && clean), false, snapshot, payload);
                 } else if serve_map.len > 0 {
                     ok = serve_reopen(serve_map, snapshot, "", payload);
                 }
