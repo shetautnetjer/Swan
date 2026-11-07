@@ -109,21 +109,23 @@ if (run("java")) {
 
 if (run("gradle")) {
   // The Gradle tasks map gives scip-java, from the build files alone (no
-  // Gradle, no Android SDK): on Android each module's Kotlin compiles
-  // replace scipPrintDependencies, which AGP 9 breaks.
+  // Gradle, no Android SDK): when any module is Android, the unqualified
+  // Kotlin compiles replace scipPrintDependencies, which AGP 9 breaks.
   const tasks = (dir: string) => sh(["bin/swan", "gradle-tasks", dir]).trim().split("\n");
   const plain = ["clean", "scipPrintDependencies", "scipCompileAll"];
-  const android = (...mods: string[]) => ["clean", ...mods.flatMap((m) => [`${m}:compileDebugKotlin`, `${m}:compileDebugUnitTestKotlin`]), "scipCompileAll"];
+  const android = ["clean", "compileDebugKotlin", "compileDebugUnitTestKotlin", "scipCompileAll"];
   const g = "fixtures/gradle-android";
   const eq = (what: string, got: string[], want: string[]) => check(what, got.join(" ") === want.join(" "), got);
   eq("gradle: plain Kotlin JVM (tiny-kt) keeps scipPrintDependencies", tasks("fixtures/tiny-kt"), plain);
   eq("gradle: no Gradle at all (tiny-java) gets the same list", tasks("fixtures/tiny-java"), plain);
-  eq("gradle: plugins { id(\"com.android.application\") } with include(\":app\")", tasks(`${g}/kts-app`), android(":app"));
-  eq("gradle: Groovy apply plugin, a multi-line include, :core:data, and a JVM :lib left out",
-    tasks(`${g}/groovy-multi`), android(":app", ":core:data"));
-  eq("gradle: version-catalog aliases; the root's `apply false` adds nothing; com.android.test has no unit tests",
-    tasks(`${g}/catalog`), [...android(":app", ":feature:news").slice(0, -1), ":benchmark:compileDebugKotlin", "scipCompileAll"]);
-  eq("gradle: an Android app in the root project", tasks(`${g}/root-module`), android(""));
+  eq("gradle: plugins { id(\"com.android.application\") } with include(\":app\")", tasks(`${g}/kts-app`), android);
+  eq("gradle: Groovy apply plugin, a multi-line include, :core:data, and a JVM :lib",
+    tasks(`${g}/groovy-multi`), android);
+  eq("gradle: version-catalog aliases; the root's `apply false`; a com.android.test module beside others",
+    tasks(`${g}/catalog`), android);
+  eq("gradle: an Android app in the root project", tasks(`${g}/root-module`), android);
+  eq("gradle: only com.android.test modules get no compileDebugUnitTestKotlin",
+    tasks(`${g}/test-only`), ["clean", "compileDebugKotlin", "scipCompileAll"]);
 }
 
 if (run("cuda")) {

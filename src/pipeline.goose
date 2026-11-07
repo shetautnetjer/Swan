@@ -301,32 +301,44 @@ fn gradle_includes(repo: const u8[:]) -> u8[>..] {
 // its built-in Kotlin) scipPrintDependencies dies of a
 // ConcurrentModificationException (WriteDependencies walks the project's
 // configurations while AGP adds some), and scipCompileAll alone has no
-// actions there; so it goes, and each Android module's Kotlin compiles,
-// main and unit tests, are named instead. The variant is taken to be debug:
-// nothing short of running Gradle says which variants a module has.
+// actions there; so when any module looks Android, it goes, and the Kotlin
+// compiles are named instead: compileDebugKotlin and compileDebugUnitTestKotlin,
+// unqualified. Gradle runs an unqualified task in every project that has it
+// and fails only if none does, so a wrong guess about which module is
+// Android costs nothing, and a module without a debug variant or without
+// Kotlin is just passed over. compileDebugUnitTestKotlin is left out when
+// every Android module found is com.android.test (all instrumented tests,
+// no unit tests). The variant is taken to be debug: nothing short of running
+// Gradle says which variants a module has, and a repo where no module has
+// compileDebugKotlin (only flavored variants) fails the run.
 // `clean` first: the compiles must run for scip-java to see them.
 fn gradle_scip_tasks(repo: const u8[:]) -> u8[>..] {
     let aliases = android_catalog_aliases(repo);
-    var compiles: u8[>..] = [];
-    fn module(path: const u8[:], dir: const u8[:]) {
+    var android = false;
+    var unit = false;
+    fn module(dir: const u8[:]) {
         var b: u8[>..] = [];
         guard read_file(str(dir, "/build.gradle.kts"), b) || read_file(str(dir, "/build.gradle"), b) else { return; }
         let k = android_plugin_of(b, aliases);
         guard k >= 0 else { return; }
-        format(compiles, path, ":compileDebugKotlin\n");
-        // A com.android.test module is all instrumented tests: no unit tests.
-        if ANDROID_PLUGINS[k] != "com.android.test" { format(compiles, path, ":compileDebugUnitTestKotlin\n"); }
+        android = true;
+        if ANDROID_PLUGINS[k] != "com.android.test" { unit = true; }
     }
-    module("", repo);
+    module(repo);
     each_split(gradle_includes(repo), '\n') { path =>
         guard path.len > 1;
         var dir: u8[>..] = str(repo, "/", path[1..]);
         for i in (repo.len + 1)..dir.len { if dir[i] == ':' { dir[i] = '/'; } }
-        module(path, dir);
+        module(dir);
     };
     var tasks: u8[>..] = [];
     tasks.append("clean\n");
-    if compiles.len > 0 { tasks.append(compiles); } else { tasks.append("scipPrintDependencies\n"); }
+    if android {
+        tasks.append("compileDebugKotlin\n");
+        if unit { tasks.append("compileDebugUnitTestKotlin\n"); }
+    } else {
+        tasks.append("scipPrintDependencies\n");
+    }
     tasks.append("scipCompileAll\n");
     return tasks;
 }
@@ -1186,9 +1198,9 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&) -> boo
             // The build runs with Swan's Gradle home and, for Android, Swan's
             // SDK. scip-java's init script cannot run with the configuration
             // cache or isolated projects, which newer builds turn on. The
-            // tasks are gradle_scip_tasks's: on Android, each module's Kotlin
-            // compiles instead of scipPrintDependencies, which AGP 9 breaks
-            // (so no package versions for callees there). Note the `clean`
+            // tasks are gradle_scip_tasks's: on Android, the (unqualified)
+            // Kotlin compiles instead of scipPrintDependencies, which AGP 9
+            // breaks (so no package versions for callees there). Note the `clean`
             // first: the repo's build/ output is rebuilt.
             arg(a, "--");
             arg(a, "-Dorg.gradle.configuration-cache=false");
