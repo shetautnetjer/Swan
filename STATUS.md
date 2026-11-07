@@ -619,8 +619,9 @@ outside this source PR.
 - Trade-off: without scipPrintDependencies, callees in external packages
   carry no package versions on Android. Limits: the debug variant is
   assumed. A module without a debug variant or without Kotlin is passed
-  over by Gradle, but a repo where no module has `compileDebugKotlin`
-  (only product flavors, e.g. `compileFreeDebugKotlin`) fails the run.
+  over by Gradle, but either task missing from every project fails the
+  run: only product flavors, multiplatform Android (`...KotlinAndroid`),
+  Java-only Android, or unit tests off in every module.
   Modules moved with `projectDir` are looked for at their default path, and
   a convention plugin that applies AGP for a module (build-logic, as in
   nowinandroid) is not seen: such a repo gets the plain list.

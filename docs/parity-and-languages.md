@@ -169,9 +169,11 @@ Swan runs `clean compileDebugKotlin compileDebugUnitTestKotlin scipCompileAll`
 (`swan gradle-tasks <repo>` prints the list). The compiles are unqualified:
 Gradle runs them in every project that has them, so a module without a debug
 variant or without Kotlin is simply skipped, and a module wrongly taken for
-Android costs nothing. But a repo where no module has `compileDebugKotlin`
-(only product flavors, e.g. `compileFreeDebugKotlin`) fails the run, and gets
-no Java/Kotlin map. `compileDebugUnitTestKotlin` is dropped when the only
+Android costs nothing. But either task missing from every project
+fails the run, and that repo gets no Java/Kotlin map: only product flavors
+(`compileFreeDebugKotlin`), multiplatform Android (`compileDebugKotlinAndroid`),
+a Java-only Android repo, or unit tests turned off in every module (for
+`compileDebugUnitTestKotlin`). `compileDebugUnitTestKotlin` is dropped when the only
 Android modules are com.android.test. The cost: callees in external packages
 have no package versions on Android, since those come from
 `scipPrintDependencies`.
