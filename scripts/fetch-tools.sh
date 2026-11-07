@@ -38,13 +38,18 @@ if [ ! -x ".tools/jdk/$JDK/bin/java" ]; then
   echo "$JDK_SHA256  .tools/jdk/jdk21.tgz" | sha256sum -c -
   tar -xzf .tools/jdk/jdk21.tgz -C .tools/jdk
 fi
-SCIP_JAVA=v0.13.2
-SCIP_JAVA_SHA256=5248136592d19ea2c468f64ebd18587d32de7c961536ff19346f8a025af1d13c
-if [ ! -x .tools/scip-java/scip-java ]; then
-  mkdir -p .tools/scip-java
-  curl -fsSL -o .tools/scip-java/scip-java "https://github.com/scip-code/scip-java/releases/download/$SCIP_JAVA/scip-java-$SCIP_JAVA"
-  echo "$SCIP_JAVA_SHA256  .tools/scip-java/scip-java" | sha256sum -c -
-  chmod +x .tools/scip-java/scip-java
+# One folder per version, so a new pin is fetched rather than an old binary
+# kept; src/pipeline.goose's SCIP_JAVA names the same one. Older versions
+# beside it are left alone (a running swan may use one).
+SCIP_JAVA=v0.14.1
+SCIP_JAVA_SHA256=06be799e2d9914e142ede285bb21c0f077e9ea84b6a835c90893c2fb048eeb53
+sj=.tools/scip-java/$SCIP_JAVA
+if [ ! -x "$sj/scip-java" ]; then
+  mkdir -p "$sj"
+  curl -fsSL -o "$sj/scip-java.dl" "https://github.com/scip-code/scip-java/releases/download/$SCIP_JAVA/scip-java-$SCIP_JAVA"
+  echo "$SCIP_JAVA_SHA256  $sj/scip-java.dl" | sha256sum -c -
+  chmod +x "$sj/scip-java.dl"
+  mv "$sj/scip-java.dl" "$sj/scip-java"
 fi
 # scip-clang, for C, C++ and CUDA.
 SCIP_CLANG=v0.4.1
