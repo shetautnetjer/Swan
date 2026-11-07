@@ -226,6 +226,25 @@ fn android_catalog_aliases(repo: const u8[:]) -> u8[>..] {
     return out;
 }
 
+// Slashy strings occur where an expression may start; a slash after a value
+// is division instead. The detector does not evaluate arbitrary Groovy code.
+fn groovy_slashy_start(s: const u8[:], at: i64) -> bool {
+    var i = at;
+    while i > 0 && (s[i - 1] == ' ' || s[i - 1] == '\t' || s[i - 1] == '\n' || s[i - 1] == '\r') { i--; }
+    if i == 0 { return true; }
+    let c = s[i - 1];
+    if c == '=' || c == '(' || c == '[' || c == '{' || c == ',' || c == ':' || c == '~' || c == '?' { return true; }
+    if c == '+' || c == '-' {
+        // After postfix ++ or -- the slash is division, not a new string.
+        return i < 2 || s[i - 2] != c;
+    }
+    if c == '*' || c == '%' || c == '&' || c == '|' || c == '^' || c == '!' || c == '<' || c == '>' { return true; }
+    let end = i;
+    while i > 0 && is_ident(s[i - 1]) { i--; }
+    let word = s[i..end];
+    return word == "return" || word == "case" || word == "throw" || word == "assert";
+}
+
 // A build file without its comments: /* ... */ (its newlines kept, so lines
 // stay lines) and // to the end of the line, neither inside a quoted string.
 // Kotlin and Groovy triple-quoted strings can contain newlines and comments.
@@ -233,10 +252,23 @@ fn strip_gradle_comments(s: const u8[:], kotlin: bool) -> u8[>..] {
     var out: u8[>..] = [];
     var q: u8 = 0;
     var triple = false;
+    var slashy = false;
+    var dollar_slashy = false;
     var i = 0;
     while i < s.len {
         let c = s[i];
-        if q != 0 {
+        if dollar_slashy {
+            out.push(c);
+            if c == '$' && i + 1 < s.len && (s[i + 1] == '$' || s[i + 1] == '/') {
+                out.push(s[i + 1]); i++;
+            } else if c == '/' && i + 1 < s.len && s[i + 1] == '$' {
+                out.push('$'); i++; dollar_slashy = false;
+            }
+        } else if slashy {
+            out.push(c);
+            if c == '\\' && i + 1 < s.len && s[i + 1] == '/' { out.push('/'); i++; }
+            else if c == '/' { slashy = false; }
+        } else if q != 0 {
             out.push(c);
             if c == '\\' && (!triple || !kotlin) && i + 1 < s.len { out.push(s[i + 1]); i++; }
             else if triple && c == q && i + 2 < s.len && s[i + 1] == q && s[i + 2] == q {
@@ -255,6 +287,10 @@ fn strip_gradle_comments(s: const u8[:], kotlin: bool) -> u8[>..] {
         } else if c == '/' && i + 1 < s.len && s[i + 1] == '/' {
             while i < s.len && s[i] != '\n' { i++; }
             continue;
+        } else if !kotlin && c == '$' && i + 1 < s.len && s[i + 1] == '/' {
+            out.push(c); out.push('/'); i++; dollar_slashy = true;
+        } else if !kotlin && c == '/' && groovy_slashy_start(out, out.len) {
+            out.push(c); slashy = true;
         } else {
             out.push(c);
             if c == '"' || c == '\'' {
@@ -380,25 +416,44 @@ fn gradle_includes(repo: const u8[:]) -> u8[>..] {
     var open = false;
     var depth = 0;
     var triple: u8 = 0;
+    var slashy = false;
+    var dollar_slashy = false;
+    var offset = 0;
     each_split(text, '\n') { raw =>
         let line = trim(raw);
-        let in_triple = triple != 0;
+        let line_start = offset;
+        offset += raw.len + 1;
+        let in_string = triple != 0 || slashy || dollar_slashy;
         var q: u8 = 0;
         var i = 0;
-        while i < line.len {
-            let c = line[i];
-            if c == '\\' && (q != 0 || (triple != 0 && !kotlin)) && i + 1 < line.len { i += 2; continue; }
+        while i < raw.len {
+            let c = raw[i];
+            if dollar_slashy {
+                if c == '$' && i + 1 < raw.len && (raw[i + 1] == '$' || raw[i + 1] == '/') { i += 2; continue; }
+                if c == '/' && i + 1 < raw.len && raw[i + 1] == '$' { dollar_slashy = false; i += 2; continue; }
+                i++; continue;
+            }
+            if slashy {
+                if c == '\\' && i + 1 < raw.len && raw[i + 1] == '/' { i += 2; continue; }
+                if c == '/' { slashy = false; }
+                i++; continue;
+            }
+            if c == '\\' && (q != 0 || (triple != 0 && !kotlin)) && i + 1 < raw.len { i += 2; continue; }
             if triple != 0 {
-                if c == triple && i + 2 < line.len && line[i + 1] == c && line[i + 2] == c { triple = 0; i += 3; continue; }
+                if c == triple && i + 2 < raw.len && raw[i + 1] == c && raw[i + 2] == c { triple = 0; i += 3; continue; }
             } else if q != 0 {
                 if c == q { q = 0; }
+            } else if !kotlin && c == '$' && i + 1 < raw.len && raw[i + 1] == '/' {
+                dollar_slashy = true; i += 2; continue;
+            } else if !kotlin && c == '/' && groovy_slashy_start(text, line_start + i) {
+                slashy = true;
             } else if c == '"' || c == '\'' {
-                if i + 2 < line.len && line[i + 1] == c && line[i + 2] == c { triple = c; i += 3; continue; }
+                if i + 2 < raw.len && raw[i + 1] == c && raw[i + 2] == c { triple = c; i += 3; continue; }
                 q = c;
             }
             i++;
         }
-        guard !in_triple;
+        guard !in_string;
         let starts = starts_with(line, "include") && line.len > 7 && (line[7] == '(' || line[7] == ' ' || line[7] == '\t');
         guard open || starts;
         var q: u8 = 0;

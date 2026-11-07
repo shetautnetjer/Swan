@@ -162,6 +162,25 @@ if (run("gradle")) {
         writeFileSync(join(tmp, "actual", "build.gradle.kts"), 'plugins { id("com.android.application") }\n');
         eq("gradle: Kotlin raw string ending in backslash preserves a real include", tasks(tmp), android);
         writeFileSync(join(tmp, "actual", "build.gradle.kts"), 'plugins { kotlin("jvm") }\n');
+      } else {
+        writeFileSync(path, 'def text = $/\n/* not a comment\n// not a comment\n' +
+          '$$ and $/ are escaped\ninclude(":inside")\n/$\ninclude(":actual")\n');
+        eq("gradle: dollar-slashy string does not create a fake include", tasks(tmp), plain);
+        writeFileSync(join(tmp, "actual", "build.gradle.kts"), 'plugins { id("com.android.application") }\n');
+        eq("gradle: comment-like text in a dollar-slashy string does not hide a real include", tasks(tmp), android);
+        writeFileSync(join(tmp, "actual", "build.gradle.kts"), 'plugins { kotlin("jvm") }\n');
+        writeFileSync(path, 'def text = /\nescaped \\/* and \\/\\/\ninclude(":inside")\n/\n' +
+          'def quotient = 4 / 2\ninclude(":actual")\n');
+        eq("gradle: slashy string does not create a fake include", tasks(tmp), plain);
+        writeFileSync(join(tmp, "actual", "build.gradle.kts"), 'plugins { id("com.android.application") }\n');
+        eq("gradle: slashy string and division preserve a real include", tasks(tmp), android);
+        writeFileSync(path, 'def text() { return /\n\\/* still text\ninclude(":inside")\n/ }\n' +
+          'include(":actual")\n');
+        eq("gradle: slashy string after return preserves a real include", tasks(tmp), android);
+        writeFileSync(path, 'def text = "prefix" + /\n\\/* still text\ninclude(":inside")\n/\n' +
+          'counter++ / 2\ninclude(":actual")\n');
+        eq("gradle: slashy string after an operator and postfix division preserve a real include", tasks(tmp), android);
+        writeFileSync(join(tmp, "actual", "build.gradle.kts"), 'plugins { kotlin("jvm") }\n');
       }
       rmSync(path);
     }
@@ -171,6 +190,13 @@ if (run("gradle")) {
       writeFileSync(join(tmp, "build.gradle.kts"), `plugins.${method}(\n  "com.android.application"\n) { apply(plugin = "com.android.library") }\n`);
       eq(`gradle: a real plugin application after ${method} is detected`, tasks(tmp), android);
     }
+    rmSync(join(tmp, "build.gradle.kts"));
+    writeFileSync(join(tmp, "build.gradle"), 'def text = $/\n/* not a comment\n/$\n' +
+      'plugins { id "com.android.application" }\n');
+    eq("gradle: a Groovy plugin after a dollar-slashy string is detected", tasks(tmp), android);
+    writeFileSync(join(tmp, "build.gradle"), 'def text = /\n\\/* not a comment\n/\n' +
+      'plugins { id "com.android.application" }\n');
+    eq("gradle: a Groovy plugin after a slashy string is detected", tasks(tmp), android);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
