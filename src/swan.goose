@@ -112,7 +112,7 @@ fn main() {
         else if a[3] == "uses" { find_referencing_symbols(db, a[4], rel, 2000, true, out); }
         else if a[3] == "overview" { get_symbols_overview(db, a[4], out); }
         else if a[3] == "callers" { get_callers(db, a[4], rel, 3, 200, out); }
-        else if a[3] == "callees" { get_callees(db, a[4], rel, 200, out); }
+        else if a[3] == "callees" { get_callees(db, a[4], rel, false, 200, out); }
         else if a[3] == "unused" { find_unused_symbols(db, a[4], false, 200, out); }
         else if a[3] == "info" { index_info(db, out); }
         else if a[3] == "at" {

@@ -107,6 +107,19 @@ fn get_callers(db: i64, pattern: const u8[:], rel: const u8[:], depth: i64, limi
 
     let st = prepare_or_die(db, "SELECT * FROM temp.callers_found ORDER BY distance, def_file, def_line LIMIT ?1");
     sqlite::bind_int(st, 1, limit);
+    // The exact lines where each caller uses the target (or, further out, the
+    // caller one step nearer). A caller whose kind is "module" is top-level
+    // code or an anonymous callback (a test body, an event handler), so its
+    // name alone points at line 1; these lines say where the uses really are.
+    var sites_sql: u8[>..] = [];
+    format_replaced(sites_sql, """
+        SELECT o.file, o.start_line FROM occurrences o
+        WHERE o.enclosing_id = ?1 AND o.is_def = 0 AND o.is_import = 0
+          AND ((?2 = 1 AND o.symbol_id IN (#IDS#))
+               OR o.symbol_id IN (SELECT id FROM temp.callers_found WHERE distance = ?2 - 1))
+        GROUP BY o.file, o.start_line ORDER BY o.file, o.start_line LIMIT 200
+        """, "#IDS#", ids);
+    let sites = prepare_or_die(db, sites_sql);
     out.append(",");
     json::format_key(out, "callers");
     out.push('[');
@@ -124,9 +137,31 @@ fn get_callers(db: i64, pattern: const u8[:], rel: const u8[:], depth: i64, limi
         out.push(',');
         json::format_key(out, "is_test");
         json::format_bool(out, is_test_path(file));
+        out.push(',');
+        json::format_key(out, "call_sites");
+        out.push('[');
+        sqlite::bind_int(sites, 1, sqlite::col_int(st, 0));
+        sqlite::bind_int(sites, 2, sqlite::col_int(st, 9));
+        var k = 0;
+        while step_checked(sites, err) == 1 {
+            var sf: u8[>..] = [];
+            sqlite::col_text(sites, 0, sf);
+            if k > 0 { out.push(','); }
+            k++;
+            out.push('{');
+            json::format_key(out, "relative_path");
+            json::format_string(out, sf);
+            out.push(',');
+            json::format_key(out, "line");
+            json::format_int(out, sqlite::col_int(sites, 1) + 1);
+            out.push('}');
+        }
+        sqlite::reset(sites);
+        out.push(']');
         out.push('}');
     }
     out.push(']');
+    sqlite::finalize(sites);
     sqlite::finalize(st);
 
     // The summary covers every caller, not only the ones listed.
@@ -167,7 +202,7 @@ fn get_callers(db: i64, pattern: const u8[:], rel: const u8[:], depth: i64, limi
 // What the target references from inside its own body: the functions it
 // calls, the types and constants it uses. Symbols from outside the repo
 // carry their package instead of a file.
-fn get_callees(db: i64, pattern: const u8[:], rel: const u8[:], limit: i64, out: u8[>..]&) {
+fn get_callees(db: i64, pattern: const u8[:], rel: const u8[:], calls_only: bool, limit: i64, out: u8[>..]&) {
     out.push('{');
     let ids = targets(db, pattern, rel, out);
     guard ids.len > 0 else { out.append(",\"callees\":[]}"); return; }
@@ -179,12 +214,14 @@ fn get_callees(db: i64, pattern: const u8[:], rel: const u8[:], limit: i64, out:
         FROM occurrences o JOIN symbols s ON s.id = o.symbol_id
         WHERE o.enclosing_id IN (#IDS#) AND o.is_def = 0
           AND s.kind NOT IN ('parameter', 'type_parameter') AND s.id NOT IN (#IDS#)
+          AND (?2 = 0 OR s.kind IN ('function', 'method', 'constructor', 'macro', 'class', 'struct'))
         GROUP BY s.id
         ORDER BY s.in_repo DESC, s.def_file, s.def_line
         LIMIT ?1
         """, "#IDS#", ids);
     let st = prepare_or_die(db, sql);
     sqlite::bind_int(st, 1, limit);
+    sqlite::bind_int(st, 2, if calls_only { 1 } else { 0 });
     var err: u8[>..] = [];
     out.append(",");
     json::format_key(out, "callees");
@@ -283,11 +320,51 @@ fn hierarchy(db: i64, ids: const u8[:], down: bool, depth: i64, limit: i64, out:
     sqlite::finalize(st);
 }
 
+// A type from outside the repo (the standard library's Error, a framework's
+// base class) is never a target by name, since only the repo's own symbols
+// are. When nothing in the repo matches, the ones outside it that the repo's
+// types extend or implement are used instead, listed as library_targets.
+fn library_targets(db: i64, pattern: const u8[:], rel: const u8[:], ids: u8[>..], out: u8[>..]&) -> u8[>..] {
+    guard ids.len == 0 && rel.len == 0 && pattern.len > 0 else { return ids; }
+    let asked = if pattern[0] == '/' { pattern[1..] } else { pattern };
+    // Python's old exception names are aliases of OSError: the indexer
+    // resolves `class E(IOError)` to OSError, so that is what to look for.
+    let name = if asked == "IOError" || asked == "EnvironmentError" || asked == "WindowsError" { "OSError" } else { asked };
+    let st = prepare_or_die(db, """
+        SELECT DISTINCT s.id, s.scip FROM symbols s
+        JOIN relationships r ON r.related_id = s.id AND r.is_impl = 1
+        WHERE s.in_repo = 0 AND (s.name = ?1 OR s.name_path = ?1)
+        ORDER BY s.id LIMIT 20
+        """);
+    sqlite::bind_text(st, 1, name);
+    var err: u8[>..] = [];
+    var found: u8[>..] = [];
+    out.push(',');
+    json::format_key(out, "library_targets");
+    out.push('[');
+    while step_checked(st, err) == 1 {
+        if found.len > 0 { found.push(','); out.push(','); }
+        format(found, sqlite::col_int(st, 0));
+        var s: u8[>..] = [];
+        sqlite::col_text(st, 1, s);
+        out.push('{');
+        json::format_key(out, "name_path");
+        json::format_string(out, name);
+        out.push(',');
+        json::format_key(out, "package");
+        json::format_string(out, package_of(s));
+        out.push('}');
+    }
+    out.push(']');
+    sqlite::finalize(st);
+    return found;
+}
+
 // What implements, extends or overrides the target, at any depth up to 5:
 // the classes behind an interface, the overrides of a method.
 fn find_implementations(db: i64, pattern: const u8[:], rel: const u8[:], limit: i64, out: u8[>..]&) {
     out.push('{');
-    let ids = targets(db, pattern, rel, out);
+    let ids = library_targets(db, pattern, rel, targets(db, pattern, rel, out), out);
     out.push(',');
     json::format_key(out, "implementations");
     if ids.len > 0 { hierarchy(db, ids, true, 5, limit, out); } else { out.append("[]"); }
@@ -298,7 +375,7 @@ fn find_implementations(db: i64, pattern: const u8[:], rel: const u8[:], limit: 
 // what implements or extends it (subtypes).
 fn get_type_hierarchy(db: i64, pattern: const u8[:], rel: const u8[:], depth: i64, limit: i64, out: u8[>..]&) {
     out.push('{');
-    let ids = targets(db, pattern, rel, out);
+    let ids = library_targets(db, pattern, rel, targets(db, pattern, rel, out), out);
     out.push(',');
     json::format_key(out, "supertypes");
     if ids.len > 0 { hierarchy(db, ids, false, depth, limit, out); } else { out.append("[]"); }

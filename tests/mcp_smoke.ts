@@ -100,6 +100,12 @@ check("get_callees of Store/add: DEFAULT_WEIGHT, and Map/set from the typescript
   names.includes("DEFAULT_WEIGHT") &&
   callees.callees.some((c: any) => c.name_path === "Map/set" && c.package.startsWith("typescript ")));
 
+const callsOnly = await tool("get_callees", { name_path: "Store/add", calls_only: true });
+check("get_callees calls_only keeps calls (Map/set) and drops constants (DEFAULT_WEIGHT)",
+  callsOnly.callees.some((c: any) => c.name_path === "Map/set") &&
+  !callsOnly.callees.some((c: any) => c.name_path === "DEFAULT_WEIGHT") &&
+  callsOnly.callees.every((c: any) => ["function", "method", "constructor", "macro", "class", "struct"].includes(c.kind)), callsOnly);
+
 const impls = await tool("find_implementations", { name_path: "Weighed" });
 check("find_implementations Weighed: Box and Crate",
   impls.implementations.map((s: any) => s.name_path).sort().join(",") === "Box,Crate");
@@ -186,8 +192,25 @@ const one = await tool("get_callers", { name_path: "total", relative_path: "src/
 check("with relative_path it answers for that one", !one.ambiguous && one.callers.some((c: any) => c.relative_path === "src/main.ts"));
 
 const ms = await tool("get_callers", { name_path: "/makeStore" });
-check("get_callers leaves import lines out: makeStore's callers are main.ts's top level and testSummary",
-  ms.callers.map((c: any) => c.name_path).sort().join(",") === "main.ts,testSummary", ms.callers);
+check("get_callers leaves import lines out: makeStore's callers are main.ts's and hooks.test.ts's top level, and testSummary",
+  ms.callers.map((c: any) => c.name_path).sort().join(",") === "hooks.test.ts,main.ts,testSummary", ms.callers);
+const sitesOf = (name: string) => (ms.callers.find((c: any) => c.name_path === name)?.call_sites ?? [])
+  .map((s: any) => `${s.relative_path}:${s.line}`).join(",");
+check("get_callers gives the exact call-site lines, inside an anonymous test callback too",
+  sitesOf("main.ts") === "src/main.ts:5" && sitesOf("hooks.test.ts") === "src/hooks.test.ts:8" &&
+  sitesOf("testSummary") === "src/store.test.ts:6", ms.callers);
+const deep = await tool("get_callers", { name_path: "Store/total", depth: 3 });
+const summarySites = deep.callers.find((c: any) => c.name_path === "summary")?.call_sites ?? [];
+check("a caller two steps out lists the lines where it uses the nearer caller, not the target",
+  summarySites.length > 0 && summarySites.every((s: any) => s.relative_path === "src/report.ts"), deep.callers);
+const errImpls = await tool("find_implementations", { name_path: "Error" });
+check("find_implementations of the library type Error finds the repo's subclasses at both levels",
+  errImpls.library_targets?.length > 0 && errImpls.library_targets.every((t: any) => t.package.startsWith("typescript ")) &&
+  errImpls.implementations.map((s: any) => s.name_path).sort().join(",") === "HookError,HookTimeout", errImpls);
+const errTree = await tool("get_type_hierarchy", { name_path: "HookTimeout" });
+check("get_type_hierarchy of HookTimeout climbs to HookError and the library's Error",
+  errTree.supertypes.some((s: any) => s.name_path === "HookError") &&
+  errTree.supertypes.some((s: any) => s.name_path === "Error" && s.package?.startsWith("typescript ")), errTree);
 const msRefs = await tool("find_referencing_symbols", { name_path: "/makeStore" });
 check("find_referencing_symbols keeps them, marked import",
   msRefs[0].references.some((r: any) => r.import === true && r.relative_path === "src/store.test.ts"));

@@ -7,6 +7,31 @@
 # installed system-wide.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# Language groups to fetch, comma-separated (default: all of them). The
+# Goose compiler, the TypeScript/JavaScript and Python indexers and pyright
+# always come. For example: SWAN_LANGS=rust,c scripts/fetch-tools.sh
+#   rust  rust-analyzer          java  JDK, scip-java, Kotlin server
+#   c     scip-clang, clang headers, CUDA headers, clangd
+#   game  lua-language-server, shader server, Blender stubs
+#   csharp  .NET SDK, csharp-ls, scip-dotnet
+want() { [ -z "${SWAN_LANGS:-}" ] || [[ ",$SWAN_LANGS," == *",$1,"* ]]; }
+# Everything this script and the build need, checked before any download.
+missing=()
+for c in bash git curl tar gzip unzip sha256sum sha512sum cc node npm bun uv; do
+  command -v "$c" >/dev/null 2>&1 || missing+=("$c")
+done
+if command -v node >/dev/null 2>&1; then
+  nv=$(node -p 'process.versions.node' 2>/dev/null || echo 0)
+  if ! printf '22.22.2\n%s\n' "$nv" | sort -V -C; then missing+=("node>=22.22.2 (found $nv)"); fi
+fi
+if [ ${#missing[@]} -gt 0 ]; then
+  echo "fetch-tools: missing before anything is downloaded: ${missing[*]}" >&2
+  echo "  Ubuntu/Debian: sudo apt-get install -y git build-essential curl unzip xz-utils python3" >&2
+  echo "  uv:   curl -LsSf https://astral.sh/uv/install.sh | sh" >&2
+  echo "  bun:  curl -fsSL https://bun.sh/install | bash" >&2
+  echo "  node: 22.22.2 or later from https://nodejs.org (Ubuntu's own package is older)" >&2
+  exit 2
+fi
 GOOSE_TAG=v2026.3
 GOOSE_SHA256=06ac30284338269d3996d457412bf4f2b47c1f9a5601de65b6317187fe78d5c9
 dir=.tools/goose/goose-$GOOSE_TAG-linux-x64
@@ -20,7 +45,7 @@ fi
 # rust-analyzer, for Rust repos (its built-in `scip` command).
 RA_TAG=2026-10-19
 RA_SHA256=8fde1c9dae81459f98e99eedae3654846a9166abea686306c26e57773be558da
-if [ ! -x .tools/rust-analyzer/rust-analyzer ]; then
+if want rust && [ ! -x .tools/rust-analyzer/rust-analyzer ]; then
   mkdir -p .tools/rust-analyzer
   gz=.tools/rust-analyzer/rust-analyzer-$RA_TAG.gz
   curl -fsSL -o "$gz" "https://github.com/rust-lang/rust-analyzer/releases/download/$RA_TAG/rust-analyzer-x86_64-unknown-linux-gnu.gz"
@@ -32,7 +57,7 @@ fi
 # jars on first use.
 JDK=jdk-21.0.13+9
 JDK_SHA256=d7f5d5cf865a2902b70ff549b97586a7d3f234e016f041ab447ea740c7d66d1c
-if [ ! -x ".tools/jdk/$JDK/bin/java" ]; then
+if want java && [ ! -x ".tools/jdk/$JDK/bin/java" ]; then
   mkdir -p .tools/jdk
   curl -fsSL -o .tools/jdk/jdk21.tgz "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.13%2B9/OpenJDK21U-jdk_x64_linux_hotspot_21.0.13_9.tar.gz"
   echo "$JDK_SHA256  .tools/jdk/jdk21.tgz" | sha256sum -c -
@@ -44,7 +69,7 @@ fi
 SCIP_JAVA=v0.14.1
 SCIP_JAVA_SHA256=06be799e2d9914e142ede285bb21c0f077e9ea84b6a835c90893c2fb048eeb53
 sj=.tools/scip-java/$SCIP_JAVA
-if [ ! -x "$sj/scip-java" ]; then
+if want java && [ ! -x "$sj/scip-java" ]; then
   mkdir -p "$sj"
   curl -fsSL -o "$sj/scip-java.dl" "https://github.com/scip-code/scip-java/releases/download/$SCIP_JAVA/scip-java-$SCIP_JAVA"
   echo "$SCIP_JAVA_SHA256  $sj/scip-java.dl" | sha256sum -c -
@@ -54,7 +79,7 @@ fi
 # scip-clang, for C, C++ and CUDA.
 SCIP_CLANG=v0.4.1
 SCIP_CLANG_SHA256=a434d26a079fd80e1996ba79276cb1ef86b2b2ad28b13e24386285db32c59046
-if [ ! -x .tools/scip-clang/scip-clang ]; then
+if want c && [ ! -x .tools/scip-clang/scip-clang ]; then
   mkdir -p .tools/scip-clang
   curl -fsSL -o .tools/scip-clang/scip-clang "https://github.com/sourcegraph/scip-clang/releases/download/$SCIP_CLANG/scip-clang-x86_64-linux"
   echo "$SCIP_CLANG_SHA256  .tools/scip-clang/scip-clang" | sha256sum -c -
@@ -64,7 +89,7 @@ fi
 # stand-in clang++ that tells scip-clang where they are. CUDA indexing needs
 # __clang_cuda_runtime_wrapper.h from them. A sparse checkout is ~8 MB, where
 # a full LLVM release is 2 GB.
-if [ ! -x .tools/llvm/bin/clang++ ]; then
+if want c && [ ! -x .tools/llvm/bin/clang++ ]; then
   mkdir -p .tools/llvm/bin
   git clone -q --depth 1 --branch llvmorg-21.1.0 --filter=blob:none --sparse https://github.com/llvm/llvm-project.git .tools/llvm/src
   git -C .tools/llvm/src sparse-checkout set clang/lib/Headers
@@ -90,7 +115,7 @@ STUB
 fi
 # CUDA headers without the CUDA toolkit: NVIDIA's own pip wheels, laid out
 # the way clang's --cuda-path expects. No nvcc and no GPU are needed to index.
-if [ ! -d .tools/cuda-sdk/include ]; then
+if want c && [ ! -d .tools/cuda-sdk/include ]; then
   uv venv -q .tools/cuda-venv
   uv pip install -q --python .tools/cuda-venv/bin/python nvidia-cuda-runtime-cu12==12.9.79 \
     nvidia-cuda-nvcc-cu12==12.9.86 nvidia-cuda-cccl-cu12==12.9.27 nvidia-curand-cu12
@@ -114,7 +139,7 @@ fi
 # folder (--system-path).
 KLS=263.7084.0
 KLS_SHA256=ae0c4b01e17ab73a4a5227a78ea99e6dcbe3e499600315b22759a4e4cddd11df
-if [ ! -x ".tools/kotlin-lsp/kotlin-server-$KLS/bin/intellij-server" ]; then
+if want java && [ ! -x ".tools/kotlin-lsp/kotlin-server-$KLS/bin/intellij-server" ]; then
   mkdir -p .tools/kotlin-lsp
   tgz=.tools/kotlin-lsp/kotlin-server-$KLS.tar.gz
   curl -fsSL -o "$tgz" "https://download.jetbrains.com/language-server/kotlin-server/$KLS/kotlin-server-$KLS.tar.gz"
@@ -141,11 +166,11 @@ fetch_zip() {   # dir url sha256 kind
   rm ".tools/$1/dl"
   touch ".tools/$1/.done"
 }
-fetch_zip clangd https://github.com/clangd/clangd/releases/download/23.1.0/clangd-linux-23.1.0.zip \
+want c && fetch_zip clangd https://github.com/clangd/clangd/releases/download/23.1.0/clangd-linux-23.1.0.zip \
   e53b1a96196095faedb7642cf64964f7fb9ad4a0c1f00dd2c172a3d9dcbafdfd zip
-fetch_zip lua-ls https://github.com/LuaLS/lua-language-server/releases/download/3.19.2/lua-language-server-3.19.2-linux-x64.tar.gz \
+want game && fetch_zip lua-ls https://github.com/LuaLS/lua-language-server/releases/download/3.19.2/lua-language-server-3.19.2-linux-x64.tar.gz \
   93ad326b10f6c00911dd8c450fa098332dbd8f9f45d1052f5636a2d54479b947 tgz
-if [ ! -x .tools/shader-ls/bin/shader-language-server ]; then
+if want game && [ ! -x .tools/shader-ls/bin/shader-language-server ]; then
   mkdir -p .tools/shader-ls/bin
   curl -fsSL -o .tools/shader-ls/s.vsix https://github.com/antaalt/shader-validator/releases/download/v1.6.0/shader-validator-linux-x64.vsix
   echo "0ff5679108593b81055911f2b90a7b65cdd354e11792feb422d5daa42377a74f  .tools/shader-ls/s.vsix" | sha256sum -c -
@@ -155,11 +180,11 @@ if [ ! -x .tools/shader-ls/bin/shader-language-server ]; then
   rm -rf .tools/shader-ls/vsix .tools/shader-ls/s.vsix
   chmod +x .tools/shader-ls/bin/shader-language-server
 fi
-[ -d .tools/blender-stubs/bpy-stubs ] || uv pip install -q --target .tools/blender-stubs "fake-bpy-module-5.0==20260730"
+want game && { [ -d .tools/blender-stubs/bpy-stubs ] || uv pip install -q --target .tools/blender-stubs "fake-bpy-module-5.0==20260730"; }
 # C# (Unity scripts, Godot C#, .NET): the .NET SDK, csharp-ls for live errors
 # and scip-dotnet for the full map, as dotnet tools. Their homes and NuGet's
 # package cache stay under .tools too.
-if [ ! -x .tools/dotnet/dotnet ]; then
+if want csharp && [ ! -x .tools/dotnet/dotnet ]; then
   mkdir -p .tools/dotnet
   curl -fsSL -o .tools/dotnet/sdk.tgz https://builds.dotnet.microsoft.com/dotnet/Sdk/10.0.402/dotnet-sdk-10.0.402-linux-x64.tar.gz
   echo "1904a98dda2db34ba78ba3c4fb1b224455329af91c341d83547843c1839e112b04ae699ee92fa2449a8f62249196a938723078c0c60b9f65c88539d5687729c2  .tools/dotnet/sdk.tgz" | sha512sum -c -
@@ -170,10 +195,14 @@ dotnet_tool() {   # name version
   [ -x ".tools/dotnet-tools/$1" ] && return 0
   DOTNET_ROOT=$PWD/.tools/dotnet DOTNET_CLI_HOME=$PWD/.tools/dotnet-home NUGET_PACKAGES=$PWD/.tools/nuget \
     DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1 \
-    .tools/dotnet/dotnet tool install "$1" --version "$2" --tool-path .tools/dotnet-tools
+    .tools/dotnet/dotnet tool install "$1" --version "$2" --tool-path .tools/dotnet-tools ||
+    { echo "fetch-tools: warning: $1 did not install, so C# maps and live C# errors are unavailable" \
+           "(on a fresh Ubuntu, .NET needs libicu: sudo apt-get install -y libicu74)" >&2; return 0; }
 }
-dotnet_tool csharp-ls 0.28.0
-dotnet_tool scip-dotnet 0.2.14
+if want csharp && [ -x .tools/dotnet/dotnet ]; then
+  dotnet_tool csharp-ls 0.28.0
+  dotnet_tool scip-dotnet 0.2.14
+fi
 (cd tools && npm install --no-fund --no-audit --silent)
 # The lsp/ submodule (goose-lsp), if the clone was not recursive.
 git submodule update --init lsp
