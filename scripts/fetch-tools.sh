@@ -15,14 +15,28 @@ cd "$(dirname "$0")/.."
 #   game  lua-language-server, shader server, Blender stubs
 #   csharp  .NET SDK, csharp-ls, scip-dotnet
 want() { [ -z "${SWAN_LANGS:-}" ] || [[ ",$SWAN_LANGS," == *",$1,"* ]]; }
+# SWAN_RUNTIME_ONLY=1 provisions only the SCIP map indexers for the chosen
+# languages into .tools/ (this is what `swan-up install` runs against an
+# installed prefix). It skips the Goose compiler, the live-error language
+# servers, pyright/ruff, the npm install and the submodule update -- those are
+# for a dev checkout, and the TypeScript/Python indexers already ship in the
+# package. The build-only prerequisites (cc, node, npm, bun) are not needed.
+runtime_only=${SWAN_RUNTIME_ONLY:-}
 # Everything this script and the build need, checked before any download.
 missing=()
+if [ -n "$runtime_only" ]; then
+  need="bash curl tar gzip sha256sum"
+  want c && need="$need git uv"
+  want csharp && need="$need sha512sum"
+  for c in $need; do command -v "$c" >/dev/null 2>&1 || missing+=("$c"); done
+else
 for c in bash git curl tar gzip unzip sha256sum sha512sum cc node npm bun uv; do
   command -v "$c" >/dev/null 2>&1 || missing+=("$c")
 done
 if command -v node >/dev/null 2>&1; then
   nv=$(node -p 'process.versions.node' 2>/dev/null || echo 0)
   if ! printf '22.22.2\n%s\n' "$nv" | sort -V -C; then missing+=("node>=22.22.2 (found $nv)"); fi
+fi
 fi
 if [ ${#missing[@]} -gt 0 ]; then
   echo "fetch-tools: missing before anything is downloaded: ${missing[*]}" >&2
@@ -35,7 +49,7 @@ fi
 GOOSE_TAG=v2026.3
 GOOSE_SHA256=06ac30284338269d3996d457412bf4f2b47c1f9a5601de65b6317187fe78d5c9
 dir=.tools/goose/goose-$GOOSE_TAG-linux-x64
-if [ ! -x "$dir/goose" ]; then
+if [ -z "$runtime_only" ] && [ ! -x "$dir/goose" ]; then
   mkdir -p .tools/dl .tools/goose
   tgz=.tools/dl/goose-$GOOSE_TAG-linux-x64.tar.gz
   curl -fsSL -o "$tgz" "https://github.com/aardappel/goose/releases/download/$GOOSE_TAG/goose-$GOOSE_TAG-linux-x64.tar.gz"
@@ -130,7 +144,7 @@ if want c && [ ! -d .tools/cuda-sdk/include ]; then
   echo '{"cuda":{"name":"CUDA SDK","version":"12.9.1"}}' > .tools/cuda-sdk/version.json
 fi
 # ruff (lint, format) and pytest for Python repos without their own.
-if [ ! -x .tools/py-tools/bin/ruff ]; then
+if [ -z "$runtime_only" ] && [ ! -x .tools/py-tools/bin/ruff ]; then
   uv venv -q .tools/py-tools
   uv pip install -q --python .tools/py-tools/bin/python ruff==0.17.2 pytest==9.1.1
 fi
@@ -139,7 +153,7 @@ fi
 # folder (--system-path).
 KLS=263.7084.0
 KLS_SHA256=ae0c4b01e17ab73a4a5227a78ea99e6dcbe3e499600315b22759a4e4cddd11df
-if want java && [ ! -x ".tools/kotlin-lsp/kotlin-server-$KLS/bin/intellij-server" ]; then
+if [ -z "$runtime_only" ] && want java && [ ! -x ".tools/kotlin-lsp/kotlin-server-$KLS/bin/intellij-server" ]; then
   mkdir -p .tools/kotlin-lsp
   tgz=.tools/kotlin-lsp/kotlin-server-$KLS.tar.gz
   curl -fsSL -o "$tgz" "https://download.jetbrains.com/language-server/kotlin-server/$KLS/kotlin-server-$KLS.tar.gz"
@@ -166,7 +180,7 @@ fetch_zip() {   # dir url sha256 kind
   rm ".tools/$1/dl"
   touch ".tools/$1/.done"
 }
-want c && fetch_zip clangd https://github.com/clangd/clangd/releases/download/23.1.0/clangd-linux-23.1.0.zip \
+[ -z "$runtime_only" ] && want c && fetch_zip clangd https://github.com/clangd/clangd/releases/download/23.1.0/clangd-linux-23.1.0.zip \
   e53b1a96196095faedb7642cf64964f7fb9ad4a0c1f00dd2c172a3d9dcbafdfd zip
 want game && fetch_zip lua-ls https://github.com/LuaLS/lua-language-server/releases/download/3.19.2/lua-language-server-3.19.2-linux-x64.tar.gz \
   93ad326b10f6c00911dd8c450fa098332dbd8f9f45d1052f5636a2d54479b947 tgz
@@ -203,7 +217,9 @@ if want csharp && [ -x .tools/dotnet/dotnet ]; then
   dotnet_tool csharp-ls 0.28.0
   dotnet_tool scip-dotnet 0.2.14
 fi
-(cd tools && npm install --no-fund --no-audit --silent)
-# The lsp/ submodule (goose-lsp), if the clone was not recursive.
-git submodule update --init lsp
-echo "goose: $dir/goose"
+if [ -z "$runtime_only" ]; then
+  (cd tools && npm install --no-fund --no-audit --silent)
+  # The lsp/ submodule (goose-lsp), if the clone was not recursive.
+  git submodule update --init lsp
+  echo "goose: $dir/goose"
+fi

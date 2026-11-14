@@ -193,11 +193,12 @@ PY
 
 cmd_install() {
   local dist="" root="$ROOT_DEFAULT" maps="" profile="python-typescript" agents="claude,pi"
-  local pidir="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}" trust_from=""
+  local pidir="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}" trust_from="" langs="${SWAN_LANGS:-c,java,rust}"
   while [ $# -gt 0 ]; do case "$1" in
     --dist) dist="$2"; shift 2;; --root) root="$2"; shift 2;; --maps) maps="$2"; shift 2;;
     --profile) profile="$2"; shift 2;; --agents) agents="$2"; shift 2;;
     --pi-dir) pidir="$2"; shift 2;; --trust-from) trust_from="$2"; shift 2;;
+    --langs) langs="$2"; shift 2;; --no-langs) langs=""; shift;;
     *) die "install: unknown option $1";; esac; done
   [ -d "$dist" ] || die "install needs --dist <package folder from swan-up pack>"
   dist="$(cd "$dist" && pwd)"; root="$(mkdir -p "$root" && cd "$root" && pwd)"
@@ -214,6 +215,20 @@ cmd_install() {
     python3 -I "$dist/install.py" --archive "$dist/swan-linux-x86_64.tar.gz" \
       --sha256 "$(cut -d ' ' -f 1 "$dist/swan-linux-x86_64.tar.gz.sha256")" \
       --prefix "$PREFIX" --profile "$profile" | sed 's/^/  /'
+  fi
+  # Provision the SCIP map indexers for the requested languages into the prefix
+  # (C/C++, Java, Rust, ...). TypeScript and Python ship in the package; the
+  # rest are fetched here (pinned, checksum-verified) so a normal install maps
+  # every language. Idempotent: already-present indexers are left as they are.
+  # Non-fatal: a language that fails to fetch simply will not map; the install
+  # still switches, and python/typescript are unaffected.
+  if [ -n "$langs" ] && [ -x "$PREFIX/scripts/fetch-tools.sh" ]; then
+    say "provisioning language indexers: $langs"
+    if ( cd "$PREFIX" && SWAN_RUNTIME_ONLY=1 SWAN_LANGS="$langs" bash scripts/fetch-tools.sh ); then
+      say "language indexers ready: $langs"
+    else
+      say "warning: some language indexers did not provision ($langs); those languages will not map until provisioned"
+    fi
   fi
   # Trust decisions belong to the person, not the version: carry them forward, never add new ones.
   local trust="$PREFIX/data/trusted-repos"; mkdir -p "$PREFIX/data"; touch "$trust"

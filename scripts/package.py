@@ -25,7 +25,7 @@ MANIFEST = "PACKAGE-MANIFEST.json"
 RUNTIME_FILES = (
     "LICENSE", "NOTICE", "docs/install.md", "tools/modules.json", "tools/scip-flatten.ts", "tools/syntax-index.ts",
     "tools/package.json", "tools/package-lock.json", "scripts/doctor.py",
-    "scripts/package_support.py", "scripts/demo-offline.py",
+    "scripts/package_support.py", "scripts/demo-offline.py", "scripts/fetch-tools.sh",
 )
 OPTIONAL_FILES = ("scripts/verify-live-trust.py",)
 INSTALLER = "scripts/install.py"
