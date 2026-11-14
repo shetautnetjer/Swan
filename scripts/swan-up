@@ -1,0 +1,220 @@
+#!/usr/bin/env bash
+# swan-up: one command to build, install or update Swan, and connect agents.
+#
+#   swan-up pack    [--repo DIR] [--ref REF] [--out DIR]
+#       On a machine with the Goose compiler: clean-build REF in a private
+#       worktree, write a build receipt and export a package folder
+#       (archive, install.py, package_support.py, checksums, receipt, swan-up).
+#   swan-up install --dist DIR [--root DIR] [--maps DIR] [--profile P]
+#                   [--agents claude,pi] [--pi-dir DIR] [--trust-from FILE]
+#       On any Linux x86-64 box: install that package into a NEW versioned
+#       prefix ROOT/versions/<rev>, carry over trust decisions, switch
+#       ROOT/current to it, link ~/.local/bin/swan, register the Swan MCP for
+#       the chosen agents, copy the swan-code-check skill, then prove it works.
+#   swan-up status  [--root DIR]
+#       Show the active version and any running Swan servers on an older one.
+#
+# Agents launch ROOT/current/bin/swan, so a later update is the same command;
+# running Swan servers keep their old version until their agent restarts.
+# Maps live in --maps (default ROOT/maps), never inside a repository.
+# Turn it off: point the agent back at another binary (claude mcp add ...) or
+# remove the MCP entry; versions/<rev> folders can be deleted once unused.
+set -euo pipefail
+
+die() { echo "swan-up: $*" >&2; exit 1; }
+say() { echo "swan-up: $*"; }
+
+ROOT_DEFAULT="${SWAN_ROOT:-$HOME/.local/share/swan}"
+
+cmd_pack() {
+  local repo="" ref="origin/main" out="$HOME/.cache/swan/dist"
+  while [ $# -gt 0 ]; do case "$1" in
+    --repo) repo="$2"; shift 2;; --ref) ref="$2"; shift 2;; --out) out="$2"; shift 2;;
+    *) die "pack: unknown option $1";; esac; done
+  [ -n "$repo" ] || repo="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+  local goose="${GOOSE:-$repo/.tools/goose/goose-v2026.3-linux-x64/goose}"
+  [ -x "$goose" ] || die "pack needs the Goose compiler (set GOOSE=...); not found at $goose"
+  local rev; rev="$(git -C "$repo" rev-parse --verify "$ref^{commit}")" || die "unknown ref $ref"
+  local short="${rev:0:12}"
+  local work="$out/work-$short" dist="$out/swan-$short"
+  [ -e "$dist" ] && { say "package already exists: $dist"; echo "$dist"; return 0; }
+  mkdir -p "$out"
+  local src="$work/src"
+  if [ ! -d "$src" ]; then
+    mkdir -p "$work"
+    git -C "$repo" worktree add --detach "$src" "$rev" >/dev/null
+  fi
+  ( cd "$src"
+    if [ -d "$repo/lsp/.git" ] || [ -f "$repo/lsp/.git" ]; then
+      git -c protocol.file.allow=always -c submodule.lsp.url="$repo/lsp" submodule update --init lsp >/dev/null
+    else
+      git submodule update --init lsp >/dev/null
+    fi
+    mkdir -p .tools
+    if [ ! -d .tools/goose-home ]; then
+      if [ -d "$repo/.tools/goose-home/pkg" ]; then
+        mkdir -p .tools/goose-home && cp -a "$repo/.tools/goose-home/pkg" .tools/goose-home/pkg
+      else mkdir -p .tools/goose-home; fi
+    fi
+    say "building $short (log: $work/build.log)"
+    GOOSE="$goose" GOOSE_HOME="$src/.tools/goose-home" bash scripts/build.sh > "$work/build.log" 2>&1 \
+      || { tail -20 "$work/build.log" >&2; die "build failed"; }
+    [ -z "$(git status --porcelain --untracked-files=no)" ] || die "build changed tracked files"
+  )
+  python3 - "$src" "$rev" "$goose" "$work" <<'PY'
+import hashlib, json, platform, subprocess, sys
+src, rev, goose, work = sys.argv[1:]
+h = lambda p: hashlib.sha256(open(p, "rb").read()).hexdigest()
+json.dump({
+  "source_revision": rev,
+  "binary_sha256": h(f"{src}/bin/swan"),
+  "goose_binary_sha256": h(goose),
+  "gcc": subprocess.run(["gcc", "--version"], capture_output=True, text=True).stdout.splitlines()[0],
+  "system": platform.platform(), "libc": list(platform.libc_ver()),
+  "submodules": subprocess.run(["git", "-C", src, "submodule", "status"], capture_output=True, text=True).stdout.strip(),
+  "build_command": f"GOOSE={goose} GOOSE_HOME={src}/.tools/goose-home bash scripts/build.sh",
+  "build_log": f"{work}/build.log",
+}, open(f"{work}/build-receipt.json", "w"), indent=1)
+PY
+  # Third-party notices for what is compiled in: Goose, goose-sqlite (SQLite),
+  # goose-treesitter (tree-sitter and grammars) and goose-lsp.
+  local lic="$work/licenses"; rm -rf "$lic"; mkdir -p "$lic"
+  local gdir; gdir="$(dirname "$goose")"
+  cp "$gdir/LICENSE" "$lic/Goose-LICENSE"
+  [ -d "$gdir/licenses" ] && for f in "$gdir"/licenses/*; do [ -f "$f" ] && cp "$f" "$lic/Goose-$(basename "$f")"; done
+  cp "$src/lsp/LICENSE" "$lic/goose-lsp-LICENSE"
+  local pkg
+  for pkg in goose-sqlite goose-treesitter; do
+    local d; d="$(ls -d "$src/.tools/goose-home/pkg/github.com/shetautnetjer/$pkg"/*/ 2>/dev/null | head -1)"
+    [ -n "$d" ] && [ -f "$d/LICENSE" ] && cp "$d/LICENSE" "$lic/$pkg-LICENSE"
+  done
+  find "$src/.tools/goose-home/pkg" -path '*tree-sitter*' -iname 'LICENSE*' -type f 2>/dev/null | while read -r f; do
+    cp "$f" "$lic/$(echo "${f#$src/.tools/goose-home/pkg/}" | tr '/' '_')"; done
+  python3 "$src/scripts/package.py" --binary "$src/bin/swan" --output "$dist" \
+    --source-revision "$rev" --build-receipt "$work/build-receipt.json" \
+    --licenses "$lic" --require-license Goose-LICENSE >/dev/null
+  cp "$work/build-receipt.json" "$dist/"
+  cp "$src/scripts/swan-up" "$dist/swan-up"
+  ( cd "$dist" && sha256sum swan-up > swan-up.sha256 )
+  git -C "$repo" worktree remove --force "$src" >/dev/null 2>&1 || true
+  say "package ready: $dist"
+  echo "$dist"
+}
+
+backup_dir() { echo "$HOME/.local/share/swan/backups/$(date +%Y%m%d-%H%M%S)"; }
+
+install_skill() {   # install_skill <from-skill-dir> <skills-parent-dir>
+  local from="$1" parent="$2" to="$2/swan-code-check"
+  mkdir -p "$parent"
+  if [ -d "$to" ] && ! diff -rq "$from" "$to" >/dev/null 2>&1; then
+    local b; b="$(backup_dir)/$(echo "$parent" | tr '/' '_')"; mkdir -p "$b"
+    cp -a "$to" "$b/" && say "kept the old skill copy in $b"
+  fi
+  rm -rf "$to.new"; cp -a "$from" "$to.new"; rm -rf "$to"; mv "$to.new" "$to"
+  say "skill installed: $to"
+}
+
+connect_claude() {  # connect_claude <binary> <maps>
+  local claude; claude="$(command -v claude || true)"
+  [ -n "$claude" ] || { say "claude not found on PATH; skipped Claude Code"; return 0; }
+  "$claude" mcp remove swan -s user >/dev/null 2>&1 || true
+  "$claude" mcp add swan -s user -- "$1" serve --maps "$2" >/dev/null
+  say "Claude Code (user scope) now launches: $1 serve --maps $2"
+  install_skill "$PREFIX/skills/swan-code-check" "$HOME/.claude/skills"
+}
+
+connect_pi() {      # connect_pi <binary> <maps> <pi-dir>
+  local dir="$3"; mkdir -p "$dir"
+  if [ -f "$dir/mcp.json" ]; then local b; b="$(backup_dir)"; mkdir -p "$b"; cp "$dir/mcp.json" "$b/pi-mcp.json"; fi
+  python3 - "$dir/mcp.json" "$1" "$2" <<'PY'
+import json, os, sys
+path, binary, maps = sys.argv[1:]
+data = json.load(open(path)) if os.path.exists(path) else {}
+data.setdefault("mcpServers", {})["swan"] = {"command": binary, "args": ["serve", "--maps", maps]}
+tmp = path + ".tmp"; json.dump(data, open(tmp, "w"), indent=2); os.replace(tmp, path)
+PY
+  say "pi ($dir/mcp.json) now launches: $1 serve --maps $2"
+  install_skill "$PREFIX/skills/swan-code-check" "$dir/skills"
+}
+
+smoke_mcp() {       # prove an MCP client can start this Swan and list its tools
+  python3 - "$1" "$2" <<'PY'
+import json, subprocess, sys
+binary, maps = sys.argv[1:]
+p = subprocess.Popen([binary, "serve", "--maps", maps], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+def call(i, method, params=None):
+    p.stdin.write(json.dumps({"jsonrpc": "2.0", "id": i, "method": method, "params": params or {}}) + "\n"); p.stdin.flush()
+    return json.loads(p.stdout.readline())
+init = call(1, "initialize", {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "swan-up", "version": "1"}})
+tools = call(2, "tools/list")["result"]["tools"]
+p.stdin.close(); p.wait(timeout=10)
+print(f"swan-up: MCP ok: {init['result']['serverInfo'].get('name')} answers with {len(tools)} tools")
+PY
+}
+
+cmd_install() {
+  local dist="" root="$ROOT_DEFAULT" maps="" profile="python-typescript" agents="claude,pi"
+  local pidir="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}" trust_from=""
+  while [ $# -gt 0 ]; do case "$1" in
+    --dist) dist="$2"; shift 2;; --root) root="$2"; shift 2;; --maps) maps="$2"; shift 2;;
+    --profile) profile="$2"; shift 2;; --agents) agents="$2"; shift 2;;
+    --pi-dir) pidir="$2"; shift 2;; --trust-from) trust_from="$2"; shift 2;;
+    *) die "install: unknown option $1";; esac; done
+  [ -d "$dist" ] || die "install needs --dist <package folder from swan-up pack>"
+  dist="$(cd "$dist" && pwd)"; root="$(mkdir -p "$root" && cd "$root" && pwd)"
+  maps="${maps:-${SWAN_MAPS:-$root/maps}}"; mkdir -p "$maps"; maps="$(cd "$maps" && pwd)"
+  ( cd "$dist" && sha256sum -c --quiet install.py.sha256 package_support.py.sha256 swan-linux-x86_64.tar.gz.sha256 ) \
+    || die "package checksums do not match"
+  local rev; rev="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["source_revision"])' "$dist/build-receipt.json")"
+  PREFIX="$root/versions/${rev:0:12}"
+  if [ -x "$PREFIX/bin/swan" ] && "$PREFIX/bin/swan" doctor --profile "$profile" --json >/dev/null 2>&1; then
+    say "version ${rev:0:12} already installed at $PREFIX"
+  else
+    [ -e "$PREFIX" ] && die "$PREFIX exists but fails doctor; move it aside and rerun"
+    mkdir -p "$root/versions"
+    python3 -I "$dist/install.py" --archive "$dist/swan-linux-x86_64.tar.gz" \
+      --sha256 "$(cut -d ' ' -f 1 "$dist/swan-linux-x86_64.tar.gz.sha256")" \
+      --prefix "$PREFIX" --profile "$profile" | sed 's/^/  /'
+  fi
+  # Trust decisions belong to the person, not the version: carry them forward, never add new ones.
+  local trust="$PREFIX/data/trusted-repos"; mkdir -p "$PREFIX/data"; touch "$trust"
+  local src
+  for src in "$root/current/data/trusted-repos" "$trust_from"; do
+    [ -n "$src" ] && [ -f "$src" ] && [ "$(readlink -f "$src")" != "$(readlink -f "$trust")" ] \
+      && sort -u "$trust" "$src" -o "$trust"
+  done
+  ln -sfn "versions/${rev:0:12}" "$root/current.new" && mv -T "$root/current.new" "$root/current"
+  local bin="$root/current/bin/swan"
+  mkdir -p "$HOME/.local/bin"
+  if [ -e "$HOME/.local/bin/swan" ] && [ ! -L "$HOME/.local/bin/swan" ]; then
+    local b; b="$(backup_dir)"; mkdir -p "$b"; mv "$HOME/.local/bin/swan" "$b/"; fi
+  ln -sfn "$bin" "$HOME/.local/bin/swan"
+  say "active: ${rev:0:12} (swan on PATH -> $bin); maps in $maps"
+  case ",$agents," in *,claude,*) connect_claude "$bin" "$maps";; esac
+  case ",$agents," in *,pi,*) connect_pi "$bin" "$maps" "$pidir";; esac
+  "$bin" doctor --profile "$profile" --json >/dev/null && say "doctor: ready ($profile)" || die "doctor failed"
+  smoke_mcp "$bin" "$maps"
+  python3 -I "$PREFIX/skills/swan-code-check/scripts/selftest.py" --swan "$bin" | tail -1
+  cmd_status --root "$root"
+}
+
+cmd_status() {
+  local root="$ROOT_DEFAULT"
+  [ "${1:-}" = "--root" ] && root="$2"
+  local cur; cur="$(readlink -f "$root/current/bin/swan" 2>/dev/null || true)"
+  [ -n "$cur" ] && say "current: $cur" || say "no current version under $root"
+  local pid exe
+  for pid in $(pgrep -u "$(id -u)" -f 'swan serve' || true); do
+    exe="$(readlink -f "/proc/$pid/exe" 2>/dev/null || true)"
+    case "$exe" in */swan|*/swan\ \(deleted\))
+      [ "$exe" = "$cur" ] || say "still on an older Swan until its agent restarts: pid $pid ($exe)";;
+    esac
+  done
+}
+
+case "${1:-}" in
+  pack) shift; cmd_pack "$@";;
+  install) shift; cmd_install "$@";;
+  status) shift; cmd_status "$@";;
+  *) sed -n '2,23p' "$0"; exit 2;;
+esac
