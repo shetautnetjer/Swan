@@ -29,7 +29,7 @@ def report(home, profile="python-typescript"):
     add("swan", "core", "ready" if elf_x64(home / "bin/swan") else "missing",
         "Executable ELF x86_64 required; rerun the verified archive installer if missing or incompatible.",
         home / "bin/swan")
-    for relative in ("tools/modules.json", "tools/scip-flatten.ts", "skills/swan-code-check/SKILL.md"):
+    for relative in ("tools/modules.json", "tools/scip-flatten.ts", "tools/syntax-index.ts", "skills/swan-code-check/SKILL.md"):
         present = (home / relative).is_file() and within(home / relative, home)
         add(relative, "core", "ready" if present else "missing", "Required packaged resource.", home / relative)
     selected = profile == "python-typescript"
