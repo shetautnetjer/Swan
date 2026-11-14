@@ -19,6 +19,7 @@ import .pipeline;
 import .modules;
 import .live;
 import .structural;
+import .change;
 import treesitter from "shetautnetjer/goose-treesitter@59313e9da0b9f1cce8df83cabe53ed73fa92345c";   // tree-sitter and its grammars, built once and cached
 import sqlite from "shetautnetjer/goose-sqlite@c759de735ae936dcbc197bb9aae40e13565ef21c";   // open_existing never creates a missing map
 

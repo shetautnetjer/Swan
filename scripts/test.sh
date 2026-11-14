@@ -11,6 +11,7 @@ scripts/index-repo.sh fixtures/tiny-ts data/tiny-ts >/dev/null
 bun tests/mcp_smoke.ts bin/swan data/tiny-ts/swan.db
 bun tests/maps_check.ts
 tests/refresh_check.sh
+tests/cosmetic_check.sh
 bun tests/edit_check.ts
 bun tests/rust_check.ts
 bun tests/diag_check.ts

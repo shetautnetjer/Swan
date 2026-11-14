@@ -414,6 +414,19 @@ Producing the SCIP input remains a separate cost. The compiler/cache
 measurements in [packages.md](docs/packages.md) compare only this Goose
 toolchain's own build states, not other languages or package ecosystems.
 
+`swan map` over an existing map reruns an indexer only when code changed
+(src/change.goose). Files are stamped by what they hold, not by size and
+mtime, so a save that changes nothing is skipped. For TypeScript, JavaScript
+and Python the stamp is of the syntax tree with comments and layout left out:
+an edit to comments, blank lines or spacing runs no indexer, and Swan moves
+that file's rows to where the same code now sits, from a copy of the text
+that was indexed (kept in the map folder's `texts/`). Doc comments, `@jsx` and
+`@ts-` pragmas and Python's `# type:` comments count as code, since indexers
+read them; so does Python indentation. On rea (6,787 files), a comment or
+formatting edit to one TypeScript file took a refresh from 51 s to 5.7 s, the
+same as a refresh with nothing changed; a real code change still reruns
+scip-typescript over the whole program (52 s).
+
 ## Historical: the code-map bake-off (2026-10-25)
 
 Kept as a dated record; these numbers were measured once and not rerun.
@@ -465,8 +478,10 @@ for a user who needs only one language. See DECISIONS.md.
 - The CUDA fallback does not check device
   compilation. What each tried
   indexer misses is in `docs/parity-and-languages.md`.
-- scip-typescript has no per-file mode, so every refresh reruns it over the
-  whole repo (~17 s on the repo above). Swan's own part is 0.23 s.
+- scip-typescript has no per-file mode, so a refresh after a real code change
+  reruns it over the whole repo (~17 s on the repo above, 52 s on rea) unless
+  the repo is large enough to be split into chunks. Edits to comments and
+  layout no longer rerun it. Swan's own part is 0.23 s.
 - Edits shift the map's positions for the edited file at once (checked against a
   fresh SCIP run in `tests/edit_check.ts`), but uses inside new code only
   appear after a refresh. Renames cover what the compiler resolved, not
@@ -480,6 +495,7 @@ for a user who needs only one language. See DECISIONS.md.
 ```
 src/swan.goose       CLI: index | query | serve
 src/index.goose      builds (atomic: writes .tmp, renames) or refreshes the map
+src/change.goose     cosmetic or real edit: code stamps, and moving rows after a cosmetic edit
 src/graph.goose      callers and callees
 src/scip.goose       SCIP symbol grammar: name, kind, name path
 src/query.goose      the tool queries, as JSON
