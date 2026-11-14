@@ -37,6 +37,36 @@ all languages, Linux distributions, or an official public release. The receipt's
 source revision identifies the tested code; later documentation does not
 change that artifact's identity.
 
+## One command: `scripts/swan-up`
+
+`swan-up` wraps the exporter and installer below so every machine installs
+and updates Swan the same way.
+
+```bash
+# On the build machine (has the Goose compiler), from a Swan checkout:
+scripts/swan-up pack --ref origin/main          # prints the package folder
+# On any Linux x86-64 box, with that folder copied over:
+<package>/swan-up install --dist <package>      # add --maps DIR to keep existing maps
+<package>/swan-up status
+```
+
+`install` puts each version in a new prefix `~/.local/share/swan/versions/<rev>`
+(the installer's no-overwrite rule still holds), carries the saved trust list
+forward without adding to it, switches `~/.local/share/swan/current` to the new
+version and links `~/.local/bin/swan` to it. With `--agents claude,pi` (the
+default) it registers the Swan MCP for Claude Code at user scope and in pi's
+`mcp.json` (`$PI_CODING_AGENT_DIR` or `--pi-dir`), pointing at
+`~/.local/share/swan/current/bin/swan serve --maps <maps>`, and copies the
+`swan-code-check` skill into both agents' skill folders. Replaced settings and
+skills are kept under `~/.local/share/swan/backups/`. It then runs `doctor`,
+an MCP start-up check and the skill self-test. Maps default to
+`~/.local/share/swan/maps`, outside every repository.
+
+Updating is the same `pack` and `install`. Agents pick up the new version the
+next time they start Swan; `status` lists Swan servers still running an older
+binary. To roll back, point `current` at the previous `versions/<rev>`; to
+disconnect an agent, remove its `swan` MCP entry.
+
 ## Files and profiles
 
 The exporter produces these matching files:
