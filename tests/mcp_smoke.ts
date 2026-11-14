@@ -100,6 +100,12 @@ check("get_callees of Store/add: DEFAULT_WEIGHT, and Map/set from the typescript
   names.includes("DEFAULT_WEIGHT") &&
   callees.callees.some((c: any) => c.name_path === "Map/set" && c.package.startsWith("typescript ")));
 
+const callsOnly = await tool("get_callees", { name_path: "Store/add", calls_only: true });
+check("get_callees calls_only keeps calls (Map/set) and drops constants (DEFAULT_WEIGHT)",
+  callsOnly.callees.some((c: any) => c.name_path === "Map/set") &&
+  !callsOnly.callees.some((c: any) => c.name_path === "DEFAULT_WEIGHT") &&
+  callsOnly.callees.every((c: any) => ["function", "method", "constructor", "macro", "class", "struct"].includes(c.kind)), callsOnly);
+
 const impls = await tool("find_implementations", { name_path: "Weighed" });
 check("find_implementations Weighed: Box and Crate",
   impls.implementations.map((s: any) => s.name_path).sort().join(",") === "Box,Crate");

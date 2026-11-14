@@ -202,7 +202,7 @@ fn get_callers(db: i64, pattern: const u8[:], rel: const u8[:], depth: i64, limi
 // What the target references from inside its own body: the functions it
 // calls, the types and constants it uses. Symbols from outside the repo
 // carry their package instead of a file.
-fn get_callees(db: i64, pattern: const u8[:], rel: const u8[:], limit: i64, out: u8[>..]&) {
+fn get_callees(db: i64, pattern: const u8[:], rel: const u8[:], calls_only: bool, limit: i64, out: u8[>..]&) {
     out.push('{');
     let ids = targets(db, pattern, rel, out);
     guard ids.len > 0 else { out.append(",\"callees\":[]}"); return; }
@@ -214,12 +214,14 @@ fn get_callees(db: i64, pattern: const u8[:], rel: const u8[:], limit: i64, out:
         FROM occurrences o JOIN symbols s ON s.id = o.symbol_id
         WHERE o.enclosing_id IN (#IDS#) AND o.is_def = 0
           AND s.kind NOT IN ('parameter', 'type_parameter') AND s.id NOT IN (#IDS#)
+          AND (?2 = 0 OR s.kind IN ('function', 'method', 'constructor', 'macro', 'class', 'struct'))
         GROUP BY s.id
         ORDER BY s.in_repo DESC, s.def_file, s.def_line
         LIMIT ?1
         """, "#IDS#", ids);
     let st = prepare_or_die(db, sql);
     sqlite::bind_int(st, 1, limit);
+    sqlite::bind_int(st, 2, if calls_only { 1 } else { 0 });
     var err: u8[>..] = [];
     out.append(",");
     json::format_key(out, "callees");
