@@ -129,7 +129,7 @@ only that whole path. Lines and columns in answers are 1-based.
 | `find_referencing_symbols` | `name_path`, `relative_path?`, `max_results?` | per matched symbol, every reference: file, line, column, the symbol it sits inside, and its line of source |
 | `get_symbols_overview` | `relative_path` (file or directory) | every symbol defined there, in order |
 | `get_symbol_at` | `relative_path`, `line`, `column` | what a position refers to: definition, signature, docs, the symbol around it (JetBrains' quick documentation) |
-| `get_callers` | `name_path`, `relative_path?`, `depth?` (1 to 5), `max_results?` | who calls or uses the symbol (import lines left out), and who uses those: the impact radius, with each caller's distance and whether it is test code, and a summary of affected symbols, files and test files |
+| `get_callers` | `name_path`, `relative_path?`, `depth?` (1 to 5), `max_results?` | who calls or uses the symbol (import lines left out), and who uses those: the impact radius, with each caller's distance, whether it is test code and its `call_sites` (exact file and line of each use, including uses inside anonymous callbacks and top-level code), and a summary of affected symbols, files and test files |
 | `get_callees` | `name_path`, `relative_path?`, `max_results?` | what the symbol's body uses, with counts; dependency symbols show their package and version |
 | `find_implementations` | `name_path`, `relative_path?`, `max_results?`, `live?` | what implements, extends or overrides it, with distance; `live` asks the configured language server, subject to that server's capabilities |
 | `get_type_hierarchy` | `name_path`, `relative_path?`, `depth?`, `max_results?` | supertypes and subtypes, from SCIP relationships |

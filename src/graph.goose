@@ -107,6 +107,19 @@ fn get_callers(db: i64, pattern: const u8[:], rel: const u8[:], depth: i64, limi
 
     let st = prepare_or_die(db, "SELECT * FROM temp.callers_found ORDER BY distance, def_file, def_line LIMIT ?1");
     sqlite::bind_int(st, 1, limit);
+    // The exact lines where each caller uses the target (or, further out, the
+    // caller one step nearer). A caller whose kind is "module" is top-level
+    // code or an anonymous callback (a test body, an event handler), so its
+    // name alone points at line 1; these lines say where the uses really are.
+    var sites_sql: u8[>..] = [];
+    format_replaced(sites_sql, """
+        SELECT o.file, o.start_line FROM occurrences o
+        WHERE o.enclosing_id = ?1 AND o.is_def = 0 AND o.is_import = 0
+          AND ((?2 = 1 AND o.symbol_id IN (#IDS#))
+               OR o.symbol_id IN (SELECT id FROM temp.callers_found WHERE distance = ?2 - 1))
+        GROUP BY o.file, o.start_line ORDER BY o.file, o.start_line LIMIT 200
+        """, "#IDS#", ids);
+    let sites = prepare_or_die(db, sites_sql);
     out.append(",");
     json::format_key(out, "callers");
     out.push('[');
@@ -124,9 +137,31 @@ fn get_callers(db: i64, pattern: const u8[:], rel: const u8[:], depth: i64, limi
         out.push(',');
         json::format_key(out, "is_test");
         json::format_bool(out, is_test_path(file));
+        out.push(',');
+        json::format_key(out, "call_sites");
+        out.push('[');
+        sqlite::bind_int(sites, 1, sqlite::col_int(st, 0));
+        sqlite::bind_int(sites, 2, sqlite::col_int(st, 9));
+        var k = 0;
+        while step_checked(sites, err) == 1 {
+            var sf: u8[>..] = [];
+            sqlite::col_text(sites, 0, sf);
+            if k > 0 { out.push(','); }
+            k++;
+            out.push('{');
+            json::format_key(out, "relative_path");
+            json::format_string(out, sf);
+            out.push(',');
+            json::format_key(out, "line");
+            json::format_int(out, sqlite::col_int(sites, 1) + 1);
+            out.push('}');
+        }
+        sqlite::reset(sites);
+        out.push(']');
         out.push('}');
     }
     out.push(']');
+    sqlite::finalize(sites);
     sqlite::finalize(st);
 
     // The summary covers every caller, not only the ones listed.
