@@ -318,11 +318,48 @@ fn hierarchy(db: i64, ids: const u8[:], down: bool, depth: i64, limit: i64, out:
     sqlite::finalize(st);
 }
 
+// A type from outside the repo (the standard library's Error, a framework's
+// base class) is never a target by name, since only the repo's own symbols
+// are. When nothing in the repo matches, the ones outside it that the repo's
+// types extend or implement are used instead, listed as library_targets.
+fn library_targets(db: i64, pattern: const u8[:], rel: const u8[:], ids: u8[>..], out: u8[>..]&) -> u8[>..] {
+    guard ids.len == 0 && rel.len == 0 && pattern.len > 0 else { return ids; }
+    let name = if pattern[0] == '/' { pattern[1..] } else { pattern };
+    let st = prepare_or_die(db, """
+        SELECT DISTINCT s.id, s.scip FROM symbols s
+        JOIN relationships r ON r.related_id = s.id AND r.is_impl = 1
+        WHERE s.in_repo = 0 AND (s.name = ?1 OR s.name_path = ?1)
+        ORDER BY s.id LIMIT 20
+        """);
+    sqlite::bind_text(st, 1, name);
+    var err: u8[>..] = [];
+    var found: u8[>..] = [];
+    out.push(',');
+    json::format_key(out, "library_targets");
+    out.push('[');
+    while step_checked(st, err) == 1 {
+        if found.len > 0 { found.push(','); out.push(','); }
+        format(found, sqlite::col_int(st, 0));
+        var s: u8[>..] = [];
+        sqlite::col_text(st, 1, s);
+        out.push('{');
+        json::format_key(out, "name_path");
+        json::format_string(out, name);
+        out.push(',');
+        json::format_key(out, "package");
+        json::format_string(out, package_of(s));
+        out.push('}');
+    }
+    out.push(']');
+    sqlite::finalize(st);
+    return found;
+}
+
 // What implements, extends or overrides the target, at any depth up to 5:
 // the classes behind an interface, the overrides of a method.
 fn find_implementations(db: i64, pattern: const u8[:], rel: const u8[:], limit: i64, out: u8[>..]&) {
     out.push('{');
-    let ids = targets(db, pattern, rel, out);
+    let ids = library_targets(db, pattern, rel, targets(db, pattern, rel, out), out);
     out.push(',');
     json::format_key(out, "implementations");
     if ids.len > 0 { hierarchy(db, ids, true, 5, limit, out); } else { out.append("[]"); }
@@ -333,7 +370,7 @@ fn find_implementations(db: i64, pattern: const u8[:], rel: const u8[:], limit: 
 // what implements or extends it (subtypes).
 fn get_type_hierarchy(db: i64, pattern: const u8[:], rel: const u8[:], depth: i64, limit: i64, out: u8[>..]&) {
     out.push('{');
-    let ids = targets(db, pattern, rel, out);
+    let ids = library_targets(db, pattern, rel, targets(db, pattern, rel, out), out);
     out.push(',');
     json::format_key(out, "supertypes");
     if ids.len > 0 { hierarchy(db, ids, false, depth, limit, out); } else { out.append("[]"); }

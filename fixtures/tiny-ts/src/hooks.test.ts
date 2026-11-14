@@ -8,3 +8,7 @@ it("adds an item", () => {
   const store = makeStore();
   store.add("y");
 });
+
+// Subclasses of a library type (the built-in Error), two levels deep.
+export class HookError extends Error {}
+export class HookTimeout extends HookError {}

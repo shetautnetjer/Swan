@@ -197,6 +197,14 @@ const deep = await tool("get_callers", { name_path: "Store/total", depth: 3 });
 const summarySites = deep.callers.find((c: any) => c.name_path === "summary")?.call_sites ?? [];
 check("a caller two steps out lists the lines where it uses the nearer caller, not the target",
   summarySites.length > 0 && summarySites.every((s: any) => s.relative_path === "src/report.ts"), deep.callers);
+const errImpls = await tool("find_implementations", { name_path: "Error" });
+check("find_implementations of the library type Error finds the repo's subclasses at both levels",
+  errImpls.library_targets?.length > 0 && errImpls.library_targets.every((t: any) => t.package.startsWith("typescript ")) &&
+  errImpls.implementations.map((s: any) => s.name_path).sort().join(",") === "HookError,HookTimeout", errImpls);
+const errTree = await tool("get_type_hierarchy", { name_path: "HookTimeout" });
+check("get_type_hierarchy of HookTimeout climbs to HookError and the library's Error",
+  errTree.supertypes.some((s: any) => s.name_path === "HookError") &&
+  errTree.supertypes.some((s: any) => s.name_path === "Error" && s.package?.startsWith("typescript ")), errTree);
 const msRefs = await tool("find_referencing_symbols", { name_path: "/makeStore" });
 check("find_referencing_symbols keeps them, marked import",
   msRefs[0].references.some((r: any) => r.import === true && r.relative_path === "src/store.test.ts"));
