@@ -122,12 +122,19 @@ connect_claude() {  # connect_claude <binary> <maps>
   local claude; claude="$(command -v claude || true)"
   [ -n "$claude" ] || { say "claude not found on PATH; skipped Claude Code"; return 0; }
   local b; b="$(backup_dir)"; mkdir -p "$b"
-  "$claude" mcp get swan > "$b/claude-mcp-swan.txt" 2>&1 || true
+  local old="$b/claude-mcp-swan.json"
+  python3 -c 'import json,os,sys
+p=os.path.expanduser("~/.claude.json")
+e=json.load(open(p)).get("mcpServers",{}).get("swan") if os.path.exists(p) else None
+e and json.dump(e,open(sys.argv[1],"w"))' "$old" 2>/dev/null || true
   "$claude" mcp remove swan -s user >/dev/null 2>&1 || true
   if ! "$claude" mcp add swan -s user -- "$1" serve --maps "$2" >/dev/null 2>"$b/claude-mcp-add.err"; then
-    say "WARNING: could not register Swan in Claude Code (see $b/claude-mcp-add.err);"
-    say "the previous entry is recorded in $b/claude-mcp-swan.txt. Continuing with the other steps."
-    return 0
+    if [ -s "$old" ] && "$claude" mcp add-json swan "$(cat "$old")" -s user >/dev/null 2>&1; then
+      say "WARNING: could not register the new Swan in Claude Code (see $b/claude-mcp-add.err); the previous entry was put back."
+    else
+      say "WARNING: could not register Swan in Claude Code (see $b/claude-mcp-add.err); previous entry saved in $old."
+    fi
+    SWAN_UP_WARN=1; return 0
   fi
   say "Claude Code (user scope) now launches: $1 serve --maps $2"
   install_skill "$PREFIX/skills/swan-code-check" "$HOME/.claude/skills"
@@ -149,18 +156,21 @@ PY
 
 smoke_mcp() {       # prove an MCP client can start this Swan and list its tools
   python3 - "$1" "$2" <<'PY'
-import json, select, subprocess, sys, time
+import json, queue, subprocess, sys, threading, time
 binary, maps = sys.argv[1:]
 p = subprocess.Popen([binary, "serve", "--maps", maps], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+lines = queue.Queue()
+threading.Thread(target=lambda: [lines.put(l) for l in p.stdout] + [lines.put(None)], daemon=True).start()
 def send(msg):
     p.stdin.write(json.dumps(msg) + "\n"); p.stdin.flush()
 def reply(i, timeout=30):
     end = time.time() + timeout
-    while time.time() < end:
-        if not select.select([p.stdout], [], [], max(0, end - time.time()))[0]:
-            break
-        line = p.stdout.readline()
-        if not line:
+    while True:
+        try:
+            line = lines.get(timeout=max(0.01, end - time.time()))
+        except queue.Empty:
+            p.kill(); sys.exit(f"swan-up: MCP check failed: no reply to request {i} in {timeout}s")
+        if line is None:
             sys.exit("swan-up: MCP check failed: server exited")
         try:
             msg = json.loads(line)
@@ -168,7 +178,6 @@ def reply(i, timeout=30):
             continue                       # a log line, not a reply
         if msg.get("id") == i:
             return msg
-    p.kill(); sys.exit(f"swan-up: MCP check failed: no reply to request {i} in {timeout}s")
 send({"jsonrpc": "2.0", "id": 1, "method": "initialize",
       "params": {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "swan-up", "version": "1"}}})
 init = reply(1)
@@ -229,6 +238,7 @@ cmd_install() {
   case ",$agents," in *,claude,*) connect_claude "$bin" "$maps";; esac
   case ",$agents," in *,pi,*) connect_pi "$bin" "$maps" "$pidir";; esac
   cmd_status --root "$root"
+  [ -z "${SWAN_UP_WARN:-}" ] || { say "finished with warnings (see above)"; exit 3; }
 }
 
 cmd_status() {
