@@ -325,7 +325,7 @@ reindexed in the same map: "unknown" is never treated as fresh.
 Pass criteria, written before the run: a comment/format edit runs no
 indexer and the map equals a fresh build of the edited repo; a doc comment,
 a real change and a Python indent change do run the indexer and also equal a
-fresh build (tests/cosmetic_check.sh, 21 checks). Measured on a private copy
+fresh build (tests/cosmetic_check.sh, 23 checks). Measured on a private copy
 of rea, unsealed on both sides (SWAN_SANDBOX=0: the seal cannot bind-mount
 from the root shell used), same machine, one run each:
 

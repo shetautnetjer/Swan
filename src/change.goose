@@ -132,10 +132,14 @@ fn line_at(starts: const i64[:], off: i64) -> i64 {
 // same tokens (`old` and `new`, from code_tokens): at the same place in the
 // same token. A position between tokens goes to the next token's start, or,
 // for the end of a span (`at_end`), to the end of the token before. The end
-// of the old text is the end of the new one.
+// of the old text is the end of the new one, unless it is also the end of
+// the last token: then a span ending there ends with that token.
 fn moved_offset(old: const i64[:], new: const i64[:], off: i64, at_end: bool, old_len: i64, new_len: i64) -> i64 {
-    if off >= old_len { return new_len; }
     let n = old.len / 2;
+    if off >= old_len {
+        if at_end && n > 0 && old[(n - 1) * 2 + 1] >= old_len { return new[(n - 1) * 2 + 1]; }
+        return new_len;
+    }
     guard n > 0 else { return min(off, new_len); }
     var lo = 0;
     var hi = n - 1;
@@ -229,7 +233,14 @@ fn shift_cosmetic(db: i64, rel: const u8[:], lang: const u8[:], old: const u8[:]
             else { let x, y = moved(defs[r * 7 + 1], defs[r * 7 + 2], false); dl = x; dc = y; }
         }
         if defs[r * 7 + 3] >= 0 { let x, y = moved(defs[r * 7 + 3], defs[r * 7 + 4], false); bsl = x; bsc = y; }
-        if defs[r * 7 + 5] >= 0 { let x, y = moved(defs[r * 7 + 5], defs[r * 7 + 6], true); bel = x; bec = y; }
+        if defs[r * 7 + 5] >= 0 {
+            // The file's own symbol (defined at 0:0, a module) spans the whole
+            // file, comments after its last code included.
+            let whole = defs[r * 7 + 1] == 0 && defs[r * 7 + 2] == 0 &&
+                        offset_of(old, ostarts[..], defs[r * 7 + 5], defs[r * 7 + 6]) >= old.len;
+            if whole { bel = line_at(nstarts[..], new.len); bec = col_of(new, new.len); }
+            else { let x, y = moved(defs[r * 7 + 5], defs[r * 7 + 6], true); bel = x; bec = y; }
+        }
         sqlite::bind_int(us, 1, defs[r * 7]);
         sqlite::bind_int(us, 2, dl);
         sqlite::bind_int(us, 3, dc);

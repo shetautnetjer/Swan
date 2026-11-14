@@ -33,7 +33,14 @@ indexed()  { if ran "$1" "$2"; then ok "$2: $1 ran"; else fail "$2: $1 did not r
 # ---- TypeScript
 repo=ts
 cp -r fixtures/tiny-ts "$work/$repo"
+# A file whose last function ends the file, with no newline after it.
+printf 'export function tail(): number {\n  return 1;\n}' > "$work/$repo/src/tail.ts"
 map "$work/$repo" "$work/$repo.map" > "$work/ts-first.out"
+# A comment after it: the function still ends at its brace.
+printf '\n// after the end\n' >> "$work/$repo/src/tail.ts"
+refresh ts-tail
+no_index scip-typescript ts-tail
+same ts-tail
 s="$work/$repo/src/store.ts"
 # Comments, blank lines and spacing: every row in store.ts moves.
 { echo "// a comment"; echo; echo "/* and a block"; echo "   comment */"; cat "$s"; } > "$s.new" && mv "$s.new" "$s"

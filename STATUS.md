@@ -684,7 +684,7 @@ include this later test-documentation follow-up.
 `swan map` over an existing map now stamps files by content, and for
 TypeScript, JavaScript and Python by their code alone (src/change.goose). A
 comment or layout edit runs no indexer; Swan moves that file's rows itself.
-Verified: `tests/cosmetic_check.sh` (21 checks, each map compared with a fresh
+Verified: `tests/cosmetic_check.sh` (23 checks, each map compared with a fresh
 build); on a private copy of rea a comment edit's refresh went from 51.3 s to
 5.7 s, and 40 cosmetic edits at once left 19,724 rows equal to a fresh map.
 The rest of `scripts/test.sh` passed on the PC except `kotlin_live_check` and
