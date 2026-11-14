@@ -265,3 +265,31 @@ Keep cache publication/recovery, test-path deduplication, skipped-check
 diagnostic preservation, broader skill evaluation and performance work in
 separate changes, as recommended by the review. No library upgrade, database
 replacement, new service or installed-binary update is part of this PR.
+
+## 2026-11-14 — Storage stays one SQLite file per repo; no vectors yet
+
+Measured, not assumed. The user asked to try PGlite, SQLite and Postgres. The
+same real maps (click, requests, ky, express, fzf and aeon-herdr, ~830k
+occurrences) went into one SQLite file per repo, PGlite with one partition per
+repo, and Postgres 16 with one partition per repo, in a throwaway 4 GB box.
+Pass criteria were written before the run. All three passed every correctness
+check: load, a refresh of 10% of files, removing a repo, and 14 cross-repo
+questions with identical answers.
+
+SQLite was fastest at everything: refresh 0.21 s against 0.58 s (Postgres) and
+0.80 s (PGlite); cross-repo questions 14 ms against 55 ms and 340 ms; removing
+a repo is deleting a file. It also used the least disk (225 MB against about
+425 MB) and memory; PGlite peaked at 3.5 GB of the box's 4 GB. Cross-repo
+questions work in SQLite by attaching each repo's file.
+
+Vectors (local bge-small model, sqlite-vec, pgvector and PGlite's pgvector,
+identical results) found the right file in the top 5 for 19 of 20 fuzzy
+questions; keyword search found 18 to 19. That is under the 20-point bar set
+beforehand, so no vector store is added. Vectors did pick the right file first
+more often (12 against 9 to 11), so the next test is fuzzy questions on a large
+repo, written by someone other than the session that built the search text.
+
+Full numbers and the test code: the user's lab folder
+`aya/projects/developmental-lab/swan-storage-test-20261114/` (RESULTS.md,
+CRITERIA.md, box/). This supersedes the reasoning-only storage pick in
+`docs/modular-design.md`, which reached the same answer.
