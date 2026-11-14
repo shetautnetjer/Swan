@@ -1,5 +1,9 @@
 # Install the Linux package candidate
 
+**No release is published yet** (checked 2026-11-14): the archive and
+`install.py` below come from `scripts/package.py` in a source checkout. Until a
+release exists, people outside this project use the source build in the README.
+
 This installer targets **Linux x86-64 with glibc**. Native Windows, macOS,
 ARM64 and musl/Alpine are unsupported; WSL has not been qualified. Python
 3.10 or later must already be available in the system tool paths. A compatible

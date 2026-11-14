@@ -291,7 +291,7 @@ See [target checks, failure recovery and qualification](docs/clean-reindex.md).
 
 <!-- coderabbit-ai-generated-section:v1:408c1072b178095036c667f595f53dd2aa9053552258c86a2411dc15c4baef78 -->
 
-The documented bootstrap needs Bash, Git, a C toolchain, Node.js >=22.22.2
+`scripts/fetch-tools.sh` checks these first and names any that are missing before it downloads anything. The documented bootstrap needs Bash, Git, a C toolchain, Node.js >=22.22.2
 with npm, Bun,
 Python 3, uv (used to create the tool virtualenvs), and the download/archive utilities used by
 `scripts/fetch-tools.sh` (including curl, tar, unzip and SHA checksum tools).
@@ -307,6 +307,7 @@ installation on every Linux distribution.
 git clone --recurse-submodules https://github.com/shetautnetjer/Swan   # lsp/ is the goose-lsp submodule
 cd Swan
 scripts/fetch-tools.sh                          # Goose and the indexers and servers (sha256-pinned) into .tools/, the npm tools into tools/
+# SWAN_LANGS=rust,c scripts/fetch-tools.sh      # only some language groups (rust, java, c, game, csharp); TS/JS and Python always come
 scripts/build.sh                                # bin/swan; the first build fetches goose-sqlite and goose-treesitter
 bin/swan map <repo> data/<name>                 # every indexer the repo needs -> map (refreshes if it exists)
 bin/swan check <repo> data/<name>               # tsc / cargo check / pyright -> diagnostics in the map
