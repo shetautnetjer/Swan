@@ -13,8 +13,17 @@ Two parts, both pure (no Monty, no cmake, nothing to install):
   just `goose build egg.goose` (a C compiler; no packages, no cmake).
 - **`eggshell`** — the sealing runner (POSIX sh on `unshare`). It runs each
   indexer with **no network**, the **repo read-only**, writes **only to the
-  output dir** (plus an ephemeral `/tmp`/`$HOME` discarded on exit), and
-  **refuses** (exit 3) rather than running unconfined if the kernel can't seal.
+  output dir** (OUT may live anywhere, `/tmp` included) plus an ephemeral
+  scratch on `/dev/shm` (HOME + TMPDIR) discarded on exit, and **refuses**
+  (exit 3) rather than running unconfined if the kernel can't seal.
+
+  The read-only-repo guarantee comes from remounting the root filesystem
+  read-only, so it holds for any repo on the root fs — i.e. every normal
+  workspace (`/home`, `/opt`, `/srv`, …). A repo placed on a *separate*
+  read-write mount such as `/tmp` can't be made read-only from an
+  unprivileged user namespace on current kernels (its mount is locked), so
+  keep repos on the root filesystem; the host-protection seals (no network,
+  system read-only, writes contained) hold regardless.
 
 Goose has no subprocess library (Swan's `src/run.goose` notes this), so the
 Goose layer hands a sealed argv to the runner rather than spawning itself.
