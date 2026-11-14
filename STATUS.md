@@ -678,3 +678,16 @@ passed against unchanged binary
 Native code, skills and existing tests were untouched. Earlier Cua archives,
 qualification packets and manifests retain their original bytes and do not
 include this later test-documentation follow-up.
+
+## 2026-11-14: cosmetic edits rerun no indexer
+
+`swan map` over an existing map now stamps files by content, and for
+TypeScript, JavaScript and Python by their code alone (src/change.goose). A
+comment or layout edit runs no indexer; Swan moves that file's rows itself.
+Verified: `tests/cosmetic_check.sh` (21 checks, each map compared with a fresh
+build); on a private copy of rea a comment edit's refresh went from 51.3 s to
+5.7 s, and 40 cosmetic edits at once left 19,724 rows equal to a fresh map.
+The rest of `scripts/test.sh` passed on the PC except `kotlin_live_check` and
+3 `trust_check` checks, which fail the same way with main's binary there (the
+seal cannot bind-mount from that root shell). Not done: a real TypeScript
+change on rea still reruns the whole program. Details in DECISIONS.md.
