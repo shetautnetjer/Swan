@@ -1175,8 +1175,9 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
         else { write_file(str(out, "/", name), contents); }
     }
     if clean {
-        for name in ["index-manifest.tsv", "tsc-files.txt", "typescript-chunks.txt", "typescript-shared.txt",
-                     "typescript-files.tsv", "typescript-layers.txt", "python-files.tsv", "python-pieces.tsv"] {
+        for name in ["index-manifest.tsv", "tsc-files.txt", "tsc-program.txt", "typescript-chunks.txt",
+                     "typescript-shared.txt", "typescript-files.tsv", "typescript-layers.txt",
+                     "python-files.tsv", "python-pieces.tsv"] {
             let path = str(out, "/", name);
             guard !file_exists(path) || delete_file(path) else {
                 format(report, "cannot invalidate clean rebuild cache: ", path); return false;
@@ -1558,10 +1559,19 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
         // a list kept by an earlier Swan, of every program file, is not used.
         let key_line = str(names_key, " roots\n");
         var listed = false;
+        // Every file tsc compiles, the roots and what they import, kept
+        // beside the roots (tsc-program.txt): see `shared` below.
+        var program: u8[>..] = [];
         if plan_k >= 1 && starts_with(cached, key_line) {
-            listing.append(cached[key_line.len..]);
-            listed = true;
-        } else if plan_k >= 1 {
+            var kept_program: u8[>..] = [];
+            read_file(str(out, "/tsc-program.txt"), kept_program);
+            if starts_with(kept_program, key_line) {
+                listing.append(cached[key_line.len..]);
+                program.append(kept_program[key_line.len..]);
+                listed = true;
+            }
+        }
+        if plan_k >= 1 && !listed {
             // tsc exits 1 when a type library is missing (a repo without its
             // node_modules: "Cannot find type definition file for 'node'")
             // yet still lists every file; scip-typescript indexes such a repo
@@ -1580,11 +1590,15 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
                 if run_step("tsc --showConfig", sa, repo, child_env(l, ""), 600000, show) == 0 {
                     let cfg_dir: u8[>..] = if l.tsconfig { str(repo) } else { str(out, "/tsproject") };
                     let roots = ts_root_listing(listing, show, cfg_dir);
+                    program.append(listing);
                     listing.clear();
                     listing.append(roots);
                     listed = roots.len > 0;
                 }
-                if listed { cache_write("tsc-files.txt", str(key_line, listing)); }
+                if listed {
+                    cache_write("tsc-files.txt", str(key_line, listing));
+                    cache_write("tsc-program.txt", str(key_line, program));
+                }
             }
         }
         var decls: u8[>..] = [];
@@ -1625,12 +1639,26 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
                     format(stamps, st, "\n");
                 }
             };
+            // Repo files tsc compiles that are not roots (what the roots
+            // import from outside the include) are not indexed, but an edit
+            // to one can change how the roots resolve, so they count as
+            // shared inputs: an edit to one reruns every chunk.
+            var root_set = dictionary<const u8[:], bool> {};
+            each_split(listing, '\n') { f => let t = trim(f); if t.len > 0 { root_set.insert(t, true); } };
+            each_split(program, '\n') { raw =>
+                let f = trim(raw);
+                if f.len > repo.len && starts_with(f, repo) && f[repo.len] == '/' &&
+                   find(f, "/node_modules/") < 0 && !root_set.contains(f) {
+                    shared = hash_combine(shared, hash(str(f[repo.len + 1..], "\t", stamp(f) as! i64)));
+                }
+            };
             each_split(chunks, '\n') { chunk => each_split(chunk, '\t') { f =>
                 if f.len > repo.len { format(stamps, f[repo.len + 1..], "\t", stamp(f) as! i64, "\n"); }
             }; };
             // Layers index changed files against the last map's view of
             // everything else, so they are only used while the shared inputs
-            // (config, package.json, declarations) are what they were.
+            // (config, package.json, declarations, imported non-roots) are
+            // what they were.
             var prev_shared: u8[>..] = [];
             read_file(str(out, "/typescript-shared.txt"), prev_shared);
             let same_shared = prev_shared == str(shared);

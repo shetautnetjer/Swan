@@ -382,11 +382,14 @@ What changed, all in src/pipeline.goose's TypeScript planning:
   differing rows from these two; this was already true of split mode
   (AEON) and is fixed for both. The kept tsc list is keyed anew ("roots"),
   so a list from an earlier Swan is not reused.
+- Those imported non-root files are still stamped, as shared inputs like
+  the config and declarations: an edit to one reruns every chunk, since a
+  layer cannot hold a file that is not a root (caught in review of PR 30).
 
 Pass criteria, written before the run: a code edit on rea runs a layer, not
 the whole program; the map after edits equals a fresh build of the edited
 repo apart from rows that also differ between two fresh builds (scip-clang
-picks and type-print order); tests/layer_check.sh (26 checks, one-chunk and
+picks and type-print order); tests/layer_check.sh (31 checks, one-chunk and
 split modes, each map compared with a fresh build in one whole run) passes,
 and fails on the old planner.
 
@@ -395,19 +398,20 @@ as for phase 1), one run each. Before is the phase-1 build:
 
 | Refresh | Before | After |
 |---|---|---|
-| full map | 64.1 s | 65.7 s (adds tsc's file list, 3.3 s) |
-| nothing changed | 5.7 s | 5.8 s |
+| full map | 64.1 s | 65.9 s (adds tsc's file list, 3.3 s) |
+| nothing changed | 5.7 s | 5.7 s |
 | new export in one .ts file (3 users) | 52.6 s | 6.6 s (layer of 4 files, 1.1 s) |
-| new export in a file 38 others use | 53.2 s | 7.4 s (layer of 39 files, 1.9 s) |
+| new export in a file 38 others use | 53.2 s | 7.3 s (layer of 39 files, 1.9 s) |
 | nothing changed again | 5.6 s | 5.8 s |
 
 After both edits the layered map differs from a fresh build of the same
-text (phase-1 build, one whole run) in 102 of 1,876,874 rows; the phase-1
-map after the same edits (whole reruns) differs from it in 22, and a fresh
-one-chunk map in 26. The rows are hover signatures that print a union's
-members in another order, scip-clang's choice between duplicate C
-definitions (38 of the 102), and a few references to properties of inferred
-types (below).
+text (phase-1 build, one whole run) in 88 of 1,876,863 rows (102 in an
+earlier run of the same check); the phase-1 map after the same edits (whole
+reruns) differs from that fresh build in 59 (22 earlier), and a fresh
+one-chunk map in 29. So two whole runs already differ by tens of rows. The
+rows are hover signatures that print a union's members in another order,
+scip-clang's choice between duplicate C definitions, and a few references
+to properties of inferred types (below).
 
 Limits: a layer is indexed against the last map's view of every other
 file, so a change that makes code in a file that used nothing from the
@@ -415,7 +419,6 @@ changed one resolve differently (a newly added global, say) shows up at
 the next full run, after 6 layers or once layers cover a quarter of the
 files. A layer file's reference to a property of an inferred type defined
 outside the layer can get another number than the full run gave it; the
-layered map differs from a one-chunk fresh map in 92 rows, these and
-type-print order.
-About 5.7 s of every rea refresh is still Swan's own steps and the
-flattener rerunning because scip-java fails on rea every map.
+layered map differs from a one-chunk fresh map in 101 rows, these and
+type-print order. About 5.7 s of every rea refresh is still Swan's own
+steps and the flattener rerunning because scip-java fails on rea every map.

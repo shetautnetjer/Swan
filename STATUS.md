@@ -698,8 +698,9 @@ A big TypeScript project with no job slot to split into (rea) now runs as
 one chunk, so a code edit is indexed as a layer of the changed files and
 their users. Chunks also hold only tsc's root files, in the config's order,
 which fixes split mode indexing files outside the project's include.
-Verified: `tests/layer_check.sh` (26 checks, fails on the old planner); on a
+Verified: `tests/layer_check.sh` (31 checks, fails on the old planner); on a
 private copy of rea a code edit's refresh went from 52.6 s to 6.6 s, and an
-edit to a file 38 others use from 53.2 s to 7.4 s; after both, the map
-differs from a fresh build in 102 of 1,876,874 rows (two whole runs differ
-in 22). Details and limits in DECISIONS.md.
+edit to a file 38 others use from 53.2 s to 7.3 s; after both, the map
+differs from a fresh build in 88 of 1,876,863 rows (two whole runs differ
+in 22 to 59). An edit to a file imported from outside the include reruns
+every chunk. Details and limits in DECISIONS.md.

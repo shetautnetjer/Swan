@@ -93,6 +93,12 @@ for mode in one split; do
   refresh "$mode-again"
   no_index "scip-typescript" "$mode-again"
   same "$mode-again"
+  # An edit to the imported file outside the include: not a root, so no
+  # layer can hold it, but m0 resolves through it, so every chunk reruns.
+  sed -i 's/function helper(/function helper2(/' "$work/$repo/scripts/helper.ts"
+  refresh "$mode-outside"
+  if [ "$mode" = one ]; then indexed "scip-typescript 0/1" "$mode-outside"; else indexed "scip-typescript 0/4" "$mode-outside"; fi
+  same "$mode-outside"
 done
 
 # Below the threshold, one-chunk mode stays a single whole-language run.
