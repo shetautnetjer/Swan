@@ -355,3 +355,70 @@ changed files and their users) works only in chunk mode, and rea never gets
 chunks. (2) About 4.4 s of every rea refresh, even with nothing changed, is
 the flattener rerunning because scip-java fails on rea's Java files without a
 build tool and is retried every map.
+
+## 2026-11-14 14:10 PT — A real TypeScript edit reindexes only the changed files and their users
+
+Phase 2 of the incremental reindex ("Build phase 2", the user, after phase 1
+merged). Swan already had the mechanism: in chunk mode an edit is indexed as
+a layer of just the changed files and the files that use them (by the last
+map), over the kept chunks. rea never got chunks, because its Python, Java
+and C take all eight job slots, so every code edit reran the whole program.
+
+What changed, all in src/pipeline.goose's TypeScript planning:
+
+- A project of 200 or more TypeScript/JavaScript files (`SWAN_TS_LAYER_MIN`)
+  with no slot to split into runs as one chunk of all its files, so the
+  layer path applies. Smaller projects keep the one whole run.
+- `tsc --listFilesOnly` exits 1 on a repo whose node_modules are not
+  installed (rea: "Cannot find type definition file for 'node'") but still
+  lists the files; that listing is now used. Only tsc's own error exits
+  (1, 2) with files in the listing count, not a timeout or crash.
+- Chunks hold tsc's root files only, in the config's order (from
+  `tsc --showConfig`). --listFilesOnly also lists every file the roots
+  import, wherever it is; on rea that took in 118 .mts and .d.mts files
+  outside its tsconfig's include, which a whole run does not index, and
+  its order (the order tsc reached files) changed how scip-typescript
+  numbers properties of inferred types. A first rea check found 55,561
+  differing rows from these two; this was already true of split mode
+  (AEON) and is fixed for both. The kept tsc list is keyed anew ("roots"),
+  so a list from an earlier Swan is not reused.
+- Those imported non-root files are still stamped, as shared inputs like
+  the config and declarations: an edit to one reruns every chunk, since a
+  layer cannot hold a file that is not a root (caught in review of PR 30).
+
+Pass criteria, written before the run: a code edit on rea runs a layer, not
+the whole program; the map after edits equals a fresh build of the edited
+repo apart from rows that also differ between two fresh builds (scip-clang
+picks and type-print order); tests/layer_check.sh (31 checks, one-chunk and
+split modes, each map compared with a fresh build in one whole run) passes,
+and fails on the old planner.
+
+Measured on a private copy of rea, unsealed on both sides (SWAN_SANDBOX=0,
+as for phase 1), one run each. Before is the phase-1 build:
+
+| Refresh | Before | After |
+|---|---|---|
+| full map | 64.1 s | 65.9 s (adds tsc's file list, 3.3 s) |
+| nothing changed | 5.7 s | 5.7 s |
+| new export in one .ts file (3 users) | 52.6 s | 6.6 s (layer of 4 files, 1.1 s) |
+| new export in a file 38 others use | 53.2 s | 7.3 s (layer of 39 files, 1.9 s) |
+| nothing changed again | 5.6 s | 5.8 s |
+
+After both edits the layered map differs from a fresh build of the same
+text (phase-1 build, one whole run) in 88 of 1,876,863 rows (102 in an
+earlier run of the same check); the phase-1 map after the same edits (whole
+reruns) differs from that fresh build in 59 (22 earlier), and a fresh
+one-chunk map in 29. So two whole runs already differ by tens of rows. The
+rows are hover signatures that print a union's members in another order,
+scip-clang's choice between duplicate C definitions, and a few references
+to properties of inferred types (below).
+
+Limits: a layer is indexed against the last map's view of every other
+file, so a change that makes code in a file that used nothing from the
+changed one resolve differently (a newly added global, say) shows up at
+the next full run, after 6 layers or once layers cover a quarter of the
+files. A layer file's reference to a property of an inferred type defined
+outside the layer can get another number than the full run gave it; the
+layered map differs from a one-chunk fresh map in 101 rows, these and
+type-print order. About 5.7 s of every rea refresh is still Swan's own
+steps and the flattener rerunning because scip-java fails on rea every map.

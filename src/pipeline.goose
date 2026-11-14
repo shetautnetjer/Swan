@@ -814,12 +814,13 @@ fn plan_python(repo: const u8[:], k: i64) -> u8[>..] {
 }
 
 // Splits a TypeScript project into k chunks of similar size for parallel
-// scip-typescript runs. The files are the ones tsc itself would compile
-// (`tsc --listFilesOnly`, so the project's include and exclude hold), less
-// node_modules and declaration files, which every chunk gets. Packed
-// largest first, each into the lightest chunk. Returns one line per chunk,
-// files separated by tabs, and the declaration files as `decls`; nothing
-// when one run will do.
+// scip-typescript runs. The files are tsc's own roots (`tsc --listFilesOnly`
+// kept to the `--showConfig` file list, so the project's include and
+// exclude hold), less node_modules and declaration files, which every chunk
+// gets. Packed largest first, each into the lightest chunk. Returns one
+// line per chunk, files separated by tabs, and the declaration files as
+// `decls`; nothing when one run will do. k may be 1: one chunk of every
+// file, which lets a later edit be indexed as a layer over it.
 fn plan_ts(repo: const u8[:], listing: const u8[:], k: i64, decls: u8[>..]&, refs: u8[>..]&) -> u8[>..] {
     var files: u8[>..] = [];
     var sizes: i64[>..] = [];
@@ -838,7 +839,7 @@ fn plan_ts(repo: const u8[:], listing: const u8[:], k: i64, decls: u8[>..]&, ref
         }
     };
     var plan: u8[>..] = [];
-    guard k > 1 && sizes.len >= 4 * k else { return plan; }
+    guard k >= 1 && sizes.len >= 4 * k else { return plan; }
     let paths = split(files[..files.len - 1], '\n');
     var order: i64[>..] = [];
     for z, i in sizes { order.push(i); }
@@ -865,6 +866,64 @@ fn plan_ts(repo: const u8[:], listing: const u8[:], k: i64, decls: u8[>..]&, ref
         if !first { plan.push('\n'); }
     }
     return plan;
+}
+
+// tsc's root files, from `tsc --showConfig`. --listFilesOnly lists every
+// file in the program, the roots and all they import, wherever those are
+// (rea's scripts/*.mts, outside its tsconfig's include); scip-typescript
+// indexes only the roots, so a chunk of anything more would map files a
+// whole run leaves out. Returns the listing's lines that are roots, or
+// nothing when the config's file list cannot be read (TypeScript then runs
+// whole, as before).
+fn ts_root_listing(listing: const u8[:], show: const u8[:], cfg_dir: const u8[:]) -> u8[>..] {
+    var kept: u8[>..] = [];
+    let at = find(show, "\"files\": [");
+    guard at >= 0 else { return kept; }
+    var all: u8[>..] = [];
+    var done = false;
+    var bad = false;
+    var first = true;
+    each_split(show[at..], '\n') { line =>
+        guard !done && !bad;
+        if first { first = false; } else {
+            var t = trim(line);
+            if starts_with(t, "]") { done = true; } else {
+                if ends_with(t, ",") { t = t[..t.len - 1]; }
+                if t.len < 3 || t[0] != '"' || t[t.len - 1] != '"' || find(t, "\\") >= 0 { bad = true; } else {
+                    let rel = t[1..t.len - 1];
+                    let p = if rel[0] == '/' { str(rel) } else if starts_with(rel, "./") { str(cfg_dir, "/", rel[2..]) } else { str(cfg_dir, "/", rel) };
+                    if !swan_realpath(p, all) { all.append(p); }
+                    all.push('\n');
+                }
+            }
+        }
+    };
+    guard done && !bad && all.len > 0 else { return kept; }
+    // In the config's order, not the listing's (the order tsc reached
+    // files): scip-typescript numbers anonymous types in the order it
+    // meets them, so one chunk in another order names them differently
+    // from a whole run.
+    var real: u8[>..] = [];
+    var lines: u8[>..] = [];
+    each_split(listing, '\n') { raw =>
+        let f = trim(raw);
+        guard f.len > 0;
+        if !swan_realpath(f, real) { real.append(f); }
+        real.push('\n');
+        format(lines, f, "\n");
+    };
+    let reals = split(real, '\n');
+    let given = split(lines, '\n');
+    var listed = dictionary<const u8[:], i64> {};
+    for r, i in reals { if r.len > 0 && i < given.len { listed.insert(r, i); } }
+    each_split(all, '\n') { r =>
+        guard r.len > 0;
+        let at = listed.get(r);
+        guard at;
+        let i: i64 = at;
+        format(kept, given[i], "\n");
+    };
+    return kept;
 }
 
 // "path\tstamp" for every .py file, in walk order (list_dir sorts). S(path)
@@ -1116,8 +1175,9 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
         else { write_file(str(out, "/", name), contents); }
     }
     if clean {
-        for name in ["index-manifest.tsv", "tsc-files.txt", "typescript-chunks.txt", "typescript-shared.txt",
-                     "typescript-files.tsv", "typescript-layers.txt", "python-files.tsv", "python-pieces.tsv"] {
+        for name in ["index-manifest.tsv", "tsc-files.txt", "tsc-program.txt", "typescript-chunks.txt",
+                     "typescript-shared.txt", "typescript-files.tsv", "typescript-layers.txt",
+                     "python-files.tsv", "python-pieces.tsv"] {
             let path = str(out, "/", name);
             guard !file_exists(path) || delete_file(path) else {
                 format(report, "cannot invalidate clean rebuild cache: ", path); return false;
@@ -1472,11 +1532,22 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
         // tsc's list changes only when files come or go or the config
         // changes, so it is kept with a key of those and asked again only then.
         var names_key: u64 = 0;
+        var ts_count: i64 = 0;
         each_file(repo) { full, name =>
             for e in [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"] {
-                if ends_with(name, e) { names_key = hash_combine(names_key, hash(full)); }
+                if ends_with(name, e) { names_key = hash_combine(names_key, hash(full)); ts_count++; }
             }
         };
+        // With no slots to split into, a big project still runs as one
+        // chunk (all of tsc's files, the same index the whole-language run
+        // makes), so that a code edit can be indexed as a layer of just the
+        // changed files and their users instead of the whole project again.
+        // $SWAN_TS_LAYER_MIN files or more (default 200); small projects
+        // index in a few seconds anyway.
+        var layer_min: i64 = 200;
+        var lm: u8[>..] = [];
+        if env("SWAN_TS_LAYER_MIN", lm) { let n, ok = parse_int(lm); if ok && n > 0 { layer_min = n; } }
+        let plan_k = if ts_k >= 2 { ts_k } else if ts_count >= layer_min { 1 } else { 0 };
         for r in ["tsconfig.json", "package.json"] {
             let pth = str(repo, "/", r);
             if file_exists(pth) { names_key = hash_combine(names_key, hash_combine(hash(pth[..]), stamp(pth[..]))); }
@@ -1484,18 +1555,55 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
         var listing: u8[>..] = [];
         var cached: u8[>..] = [];
         read_file(str(out, "/tsc-files.txt"), cached);
-        let key_line = str(names_key, "\n");
+        // "roots": the kept list holds tsc's root files only (ts_root_listing);
+        // a list kept by an earlier Swan, of every program file, is not used.
+        let key_line = str(names_key, " roots\n");
         var listed = false;
-        if ts_k >= 2 && starts_with(cached, key_line) {
-            listing.append(cached[key_line.len..]);
-            listed = true;
-        } else if ts_k >= 2 && run_step("tsc --listFilesOnly", la, repo, child_env(l, ""), 600000, listing) == 0 {
-            listed = true;
-            cache_write("tsc-files.txt", str(key_line, listing));
+        // Every file tsc compiles, the roots and what they import, kept
+        // beside the roots (tsc-program.txt): see `shared` below.
+        var program: u8[>..] = [];
+        if plan_k >= 1 && starts_with(cached, key_line) {
+            var kept_program: u8[>..] = [];
+            read_file(str(out, "/tsc-program.txt"), kept_program);
+            if starts_with(kept_program, key_line) {
+                listing.append(cached[key_line.len..]);
+                program.append(kept_program[key_line.len..]);
+                listed = true;
+            }
+        }
+        if plan_k >= 1 && !listed {
+            // tsc exits 1 when a type library is missing (a repo without its
+            // node_modules: "Cannot find type definition file for 'node'")
+            // yet still lists every file; scip-typescript indexes such a repo
+            // the same way. Only tsc's own "errors reported" exits (1, 2)
+            // count, not a timeout or a crash, which could cut the list
+            // short, and a listing with none of the repo's files (a broken
+            // config) is not used.
+            let code = run_step("tsc --listFilesOnly", la, repo, child_env(l, ""), 600000, listing);
+            if code == 0 || ((code == 1 || code == 2) && contains_line_prefix(listing, str(repo, "/"))) {
+                var sa: u8[>..] = [];
+                arg(sa, str(bin, "tsc"));
+                arg(sa, "-p");
+                arg(sa, base);
+                arg(sa, "--showConfig");
+                var show: u8[>..] = [];
+                if run_step("tsc --showConfig", sa, repo, child_env(l, ""), 600000, show) == 0 {
+                    let cfg_dir: u8[>..] = if l.tsconfig { str(repo) } else { str(out, "/tsproject") };
+                    let roots = ts_root_listing(listing, show, cfg_dir);
+                    program.append(listing);
+                    listing.clear();
+                    listing.append(roots);
+                    listed = roots.len > 0;
+                }
+                if listed {
+                    cache_write("tsc-files.txt", str(key_line, listing));
+                    cache_write("tsc-program.txt", str(key_line, program));
+                }
+            }
         }
         var decls: u8[>..] = [];
         var refs: u8[>..] = [];
-        var chunks: u8[>..] = if listed { plan_ts(repo, listing, ts_k, decls, refs) } else { str("") };
+        var chunks: u8[>..] = if listed { plan_ts(repo, listing, plan_k, decls, refs) } else { str("") };
         // Keep the last map's chunks while the set of files is the same, so
         // that an edit reruns only the chunks it touches (sizes moving files
         // between chunks would rerun them all).
@@ -1531,12 +1639,26 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
                     format(stamps, st, "\n");
                 }
             };
+            // Repo files tsc compiles that are not roots (what the roots
+            // import from outside the include) are not indexed, but an edit
+            // to one can change how the roots resolve, so they count as
+            // shared inputs: an edit to one reruns every chunk.
+            var root_set = dictionary<const u8[:], bool> {};
+            each_split(listing, '\n') { f => let t = trim(f); if t.len > 0 { root_set.insert(t, true); } };
+            each_split(program, '\n') { raw =>
+                let f = trim(raw);
+                if f.len > repo.len && starts_with(f, repo) && f[repo.len] == '/' &&
+                   find(f, "/node_modules/") < 0 && !root_set.contains(f) {
+                    shared = hash_combine(shared, hash(str(f[repo.len + 1..], "\t", stamp(f) as! i64)));
+                }
+            };
             each_split(chunks, '\n') { chunk => each_split(chunk, '\t') { f =>
                 if f.len > repo.len { format(stamps, f[repo.len + 1..], "\t", stamp(f) as! i64, "\n"); }
             }; };
             // Layers index changed files against the last map's view of
             // everything else, so they are only used while the shared inputs
-            // (config, package.json, declarations) are what they were.
+            // (config, package.json, declarations, imported non-roots) are
+            // what they were.
             var prev_shared: u8[>..] = [];
             read_file(str(out, "/typescript-shared.txt"), prev_shared);
             let same_shared = prev_shared == str(shared);

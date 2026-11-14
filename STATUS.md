@@ -691,3 +691,16 @@ The rest of `scripts/test.sh` passed on the PC except `kotlin_live_check` and
 3 `trust_check` checks, which fail the same way with main's binary there (the
 seal cannot bind-mount from that root shell). Not done: a real TypeScript
 change on rea still reruns the whole program. Details in DECISIONS.md.
+
+## 2026-11-14: a real TypeScript edit reindexes only what it touches
+
+A big TypeScript project with no job slot to split into (rea) now runs as
+one chunk, so a code edit is indexed as a layer of the changed files and
+their users. Chunks also hold only tsc's root files, in the config's order,
+which fixes split mode indexing files outside the project's include.
+Verified: `tests/layer_check.sh` (31 checks, fails on the old planner); on a
+private copy of rea a code edit's refresh went from 52.6 s to 6.6 s, and an
+edit to a file 38 others use from 53.2 s to 7.3 s; after both, the map
+differs from a fresh build in 88 of 1,876,863 rows (two whole runs differ
+in 22 to 59). An edit to a file imported from outside the include reruns
+every chunk. Details and limits in DECISIONS.md.

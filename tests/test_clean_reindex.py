@@ -28,7 +28,9 @@ with (home / 'invocations.jsonl').open('a') as stream:
 control = (home / 'control').read_text() if (home / 'control').exists() else ''
 generation = (home / 'generation').read_text() if (home / 'generation').exists() else 'one'
 if mode == 'tsc':
-    print('\n'.join(str(p) for p in sorted(Path.cwd().rglob('*.ts'))))
+    files = [str(p) for p in sorted(Path.cwd().rglob('*.ts'))]
+    # --showConfig names the root files (src/pipeline.goose ts_root_listing).
+    print(json.dumps({'files': files}, indent=4) if '--showConfig' in args else '\n'.join(files))
 elif mode in ('indexer', 'python'):
     assert '--output' in args, args
     target = Path(args[args.index('--output') + 1])
@@ -40,6 +42,8 @@ elif mode in ('indexer', 'python'):
 elif mode == 'flatten':
     if control == 'flatten-fail': sys.exit(8)
     if control == 'flatten-silent': sys.exit(0)
+    # The flattener's own --fresh/--texts flags (src/change.goose) come first.
+    args = [a for i, a in enumerate(args) if a not in ('--fresh', '--texts') and args[i - 1] not in ('--fresh', '--texts')]
     repo, output = Path(args[2]), Path(args[4])
     for index in [args[3], *args[5:]]:
         assert Path(index.split('=', 1)[0]).read_text() == generation, 'reused stale SCIP or merge layer: ' + index
@@ -118,8 +122,9 @@ class CleanChecks(PolicyChecks):
         out = registry / 'typescript'
         self.control(generation='one')
         self.map(repo, out)
-        # A small edit creates a real delta layer through the ordinary planner.
-        with (repo / 'probe.ts').open('a') as f: f.write('// changed\n')
+        # A small code edit creates a real delta layer through the ordinary
+        # planner (a comment alone reruns no indexer, src/change.goose).
+        with (repo / 'probe.ts').open('a') as f: f.write('export const changed = 1;\n')
         self.map(repo, out)
         require((out / 'typescript-layers.txt').read_text().strip(), 'fixture did not create a delta layer')
         calls = len(self.marker())
@@ -142,7 +147,7 @@ class CleanChecks(PolicyChecks):
         before = len(self.marker())
         self.map(repo, out, clean=True)
         events = self.marker()[before:]
-        require(sum(e['mode'] == 'tsc' for e in events) == 1, 'clean reused cached listing')
+        require(sum(e['mode'] == 'tsc' and '--listFilesOnly' in e['args'] for e in events) == 1, 'clean reused cached listing')
         require(sum(e['mode'] == 'indexer' for e in events) == 2, 'clean reused chunks')
         require(not (out / 'typescript-layers.txt').read_text(), 'clean kept delta merge list')
         with closing(connect(out / 'swan.db')) as db:
@@ -208,7 +213,7 @@ class CleanChecks(PolicyChecks):
         self.map(repo, out)
         client = self.client(folder, registry)
         require(self.signature(client, repo) == 'generation:one', 'bad initial reader')
-        cache_names = ('index-manifest.tsv', 'tsc-files.txt', 'typescript-chunks.txt',
+        cache_names = ('index-manifest.tsv', 'tsc-files.txt', 'tsc-program.txt', 'typescript-chunks.txt',
                        'typescript-shared.txt', 'typescript-files.tsv', 'typescript-layers.txt',
                        'python-files.tsv', 'python-pieces.tsv')
         for mode in ('malformed-symbols', 'malformed-kind', 'malformed-extents', 'malformed-extents-short',

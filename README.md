@@ -380,11 +380,16 @@ a one-file edit, and under a second when nothing changed. TypeScript is
 split into chunks when it is the long pole (AEON: 18.6 s to 10.1 s).
 
 After an edit, only the changed files and the files that use them are
-indexed again, as a small extra run layered over the kept chunks: on AEON a
-one-line edit re-maps in 2.0 s (8.4 s before), an edit to a file 266 others
-use in 7.8 s, and an unchanged repo in 0.07 s. The result matches a fresh map
-on all but 35 of 713,268 rows, those being scip-typescript's own numbering of
-anonymous types, which also differs between two fresh maps.
+indexed again, as a small extra run layered over the kept chunks. A big
+project with no slot free to split into (on rea Python, Java and C take
+all eight) runs as one chunk, so it gets the same layers: there a real
+code edit re-maps in 6.6 s (52.6 s before), and an edit to a file 38
+others use in 7.3 s. On AEON a one-line edit re-maps in 2.0 s (8.4 s
+before), an edit to a file 266 others use in 7.8 s, and an unchanged repo
+in 0.07 s. The result matches a fresh map on all but 35 of 713,268 rows
+on AEON, those being scip-typescript's own numbering of anonymous types,
+which also differs between two fresh maps, and on all but 88 of 1,876,863
+on rea (two fresh maps there differ in 22 to 59).
 
 `SWAN_WARM=<language>` or `SWAN_WARM=auto` starts a language server when
 `swan serve` starts and opens one file, so the server loads the project
@@ -478,10 +483,16 @@ for a user who needs only one language. See DECISIONS.md.
 - The CUDA fallback does not check device
   compilation. What each tried
   indexer misses is in `docs/parity-and-languages.md`.
-- scip-typescript has no per-file mode, so a refresh after a real code change
-  reruns it over the whole repo (~17 s on the repo above, 52 s on rea) unless
-  the repo is large enough to be split into chunks. Edits to comments and
-  layout no longer rerun it. Swan's own part is 0.23 s.
+- scip-typescript has no per-file mode. A real code change is indexed as a
+  layer of the changed files and the files that use them (by the last map),
+  over the kept full run; projects under 200 TypeScript/JavaScript files
+  (`SWAN_TS_LAYER_MIN`) rerun whole, since that takes a few seconds. A change
+  that makes code in a file that used nothing from it resolve differently (a
+  newly added global, say) shows up at the next full run, which comes after
+  6 layers or once layers cover a quarter of the files. An edit to a file
+  the project imports from outside its tsconfig's include reruns the whole
+  program. Edits to comments and layout run no indexer. Swan's own part
+  is 0.23 s.
 - Edits shift the map's positions for the edited file at once (checked against a
   fresh SCIP run in `tests/edit_check.ts`), but uses inside new code only
   appear after a refresh. Renames cover what the compiler resolved, not
