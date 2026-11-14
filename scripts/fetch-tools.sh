@@ -182,9 +182,9 @@ fetch_zip() {   # dir url sha256 kind
 }
 [ -z "$runtime_only" ] && want c && fetch_zip clangd https://github.com/clangd/clangd/releases/download/23.1.0/clangd-linux-23.1.0.zip \
   e53b1a96196095faedb7642cf64964f7fb9ad4a0c1f00dd2c172a3d9dcbafdfd zip
-want game && fetch_zip lua-ls https://github.com/LuaLS/lua-language-server/releases/download/3.19.2/lua-language-server-3.19.2-linux-x64.tar.gz \
+[ -z "$runtime_only" ] && want game && fetch_zip lua-ls https://github.com/LuaLS/lua-language-server/releases/download/3.19.2/lua-language-server-3.19.2-linux-x64.tar.gz \
   93ad326b10f6c00911dd8c450fa098332dbd8f9f45d1052f5636a2d54479b947 tgz
-if want game && [ ! -x .tools/shader-ls/bin/shader-language-server ]; then
+if [ -z "$runtime_only" ] && want game && [ ! -x .tools/shader-ls/bin/shader-language-server ]; then
   mkdir -p .tools/shader-ls/bin
   curl -fsSL -o .tools/shader-ls/s.vsix https://github.com/antaalt/shader-validator/releases/download/v1.6.0/shader-validator-linux-x64.vsix
   echo "0ff5679108593b81055911f2b90a7b65cdd354e11792feb422d5daa42377a74f  .tools/shader-ls/s.vsix" | sha256sum -c -
@@ -194,7 +194,7 @@ if want game && [ ! -x .tools/shader-ls/bin/shader-language-server ]; then
   rm -rf .tools/shader-ls/vsix .tools/shader-ls/s.vsix
   chmod +x .tools/shader-ls/bin/shader-language-server
 fi
-want game && { [ -d .tools/blender-stubs/bpy-stubs ] || uv pip install -q --target .tools/blender-stubs "fake-bpy-module-5.0==20260730"; }
+[ -z "$runtime_only" ] && want game && { [ -d .tools/blender-stubs/bpy-stubs ] || uv pip install -q --target .tools/blender-stubs "fake-bpy-module-5.0==20260730"; }
 # C# (Unity scripts, Godot C#, .NET): the .NET SDK, csharp-ls for live errors
 # and scip-dotnet for the full map, as dotnet tools. Their homes and NuGet's
 # package cache stay under .tools too.
