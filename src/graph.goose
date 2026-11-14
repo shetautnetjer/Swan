@@ -326,7 +326,10 @@ fn hierarchy(db: i64, ids: const u8[:], down: bool, depth: i64, limit: i64, out:
 // types extend or implement are used instead, listed as library_targets.
 fn library_targets(db: i64, pattern: const u8[:], rel: const u8[:], ids: u8[>..], out: u8[>..]&) -> u8[>..] {
     guard ids.len == 0 && rel.len == 0 && pattern.len > 0 else { return ids; }
-    let name = if pattern[0] == '/' { pattern[1..] } else { pattern };
+    let asked = if pattern[0] == '/' { pattern[1..] } else { pattern };
+    // Python's old exception names are aliases of OSError: the indexer
+    // resolves `class E(IOError)` to OSError, so that is what to look for.
+    let name = if asked == "IOError" || asked == "EnvironmentError" || asked == "WindowsError" { "OSError" } else { asked };
     let st = prepare_or_die(db, """
         SELECT DISTINCT s.id, s.scip FROM symbols s
         JOIN relationships r ON r.related_id = s.id AND r.is_impl = 1

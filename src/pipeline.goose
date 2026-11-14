@@ -27,6 +27,7 @@ fn abs_path(p: const u8[:]) -> u8[>..] {
 struct Langs {
     ts: bool, js: bool, py: bool, rs: bool, java: bool, c: bool, cuda: bool,
     kt: bool,                   // Kotlin: tree-sitter only for now, no SCIP indexer runs
+    syn: bool,                  // Go, shell, Make, Ruby or Lua: tools/syntax-index.ts maps them
     other: u8[..256],           // languages with no indexer here, only search and live errors: "lua glsl ..."
     tsconfig: bool, cargo: bool, maven: bool, gradle: bool,
     venv: u8[..2048],           // a virtualenv inside the repo, if any
@@ -69,8 +70,17 @@ fn each_file<F>(repo: const u8[:]) {
     }
 }
 
+// Files tools/syntax-index.ts covers: Go, shell, Make, Ruby and Lua by name,
+// and scripts with no extension in a bin/ or scripts/ folder (it reads their
+// #! line itself).
+fn syntax_file(full: const u8[:], name: const u8[:]) -> bool {
+    for e in [".go", ".sh", ".bash", ".zsh", ".ksh", ".rb", ".lua", ".mk"] { if ends_with(name, e) { return true; } }
+    if name == "Makefile" || name == "makefile" || name == "GNUmakefile" || name == "Rakefile" { return true; }
+    return find(name, ".") < 0 && (find(full, "/bin/") >= 0 || find(full, "/scripts/") >= 0);
+}
+
 fn detect(repo: const u8[:]) -> Langs {
-    var l = Langs { ts: false, js: false, py: false, rs: false, java: false, c: false, cuda: false, kt: false,
+    var l = Langs { ts: false, js: false, py: false, rs: false, java: false, c: false, cuda: false, kt: false, syn: false,
                     tsconfig: file_exists(str(repo, "/tsconfig.json")),
                     cargo: file_exists(str(repo, "/Cargo.toml")),
                     maven: file_exists(str(repo, "/pom.xml")),
@@ -81,6 +91,7 @@ fn detect(repo: const u8[:]) -> Langs {
         if l.venv.len == 0 && file_exists(str(repo, "/", v, "/pyvenv.cfg")) { format(l.venv, repo, "/", v); }
     }
     each_file(repo) { full, name =>
+        if syntax_file(full, name) { l.syn = true; }
         if ends_with(name, ".ts") || ends_with(name, ".tsx") || ends_with(name, ".mts") || ends_with(name, ".cts") {
             l.ts = true;
         } else if ends_with(name, ".js") || ends_with(name, ".jsx") || ends_with(name, ".mjs") || ends_with(name, ".cjs") {
@@ -668,6 +679,20 @@ fn python_of(l: const Langs&) -> u8[>..] {
     return p;
 }
 
+// The repo's src folder when it holds Python packages or modules (the "src
+// layout"), as a PYTHONPATH value; empty otherwise.
+fn python_src_roots(repo: const u8[:]) -> u8[>..] {
+    let src = str(repo, "/src");
+    var names: u8[>..] = [];
+    var found = false;
+    if list_dir(src, names) {
+        each_split(names, '\n') { nm =>
+            if nm.len > 0 && (ends_with(nm, ".py") || file_exists(str(src, "/", nm, "/__init__.py"))) { found = true; }
+        };
+    }
+    return if found { src } else { str("") };
+}
+
 // scip-python asks pip which packages are installed, to name outside symbols
 // by package and version. Without pip the same list comes from Python's own
 // importlib.metadata, written where --environment can read it.
@@ -1021,7 +1046,7 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
     var skipped: u8[>..] = [];     // indexers that wait for `swan trust`
     format(report, "languages:", if l.ts { " typescript" } else { "" }, if l.js { " javascript" } else { "" },
            if l.java { " java" } else { "" }, if l.c { " c/c++" } else { "" }, if l.cuda { " cuda" } else { "" },
-           if l.py { " python" } else { "" }, if l.rs || l.cargo { " rust" } else { "" }, if l.kt { " kotlin" } else { "" }, if l.other.len > 0 { str(" ", l.other) } else { str("") },
+           if l.py { " python" } else { "" }, if l.rs || l.cargo { " rust" } else { "" }, if l.kt { " kotlin" } else { "" }, if l.syn { " go/shell/make/ruby/lua (syntax only)" } else { "" }, if l.other.len > 0 { str(" ", l.other) } else { str("") },
            if l.venv.len > 0 { str(" (venv ", l.venv, ")") } else { str("") }, "\n");
     // A map from an older Swan is rebuilt from scratch, indexers included:
     // reusing their output would skip what the new schema needs.
@@ -1113,6 +1138,26 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
         }
     }
 
+    // A repo's tsconfig that tsc cannot read (it extends a shared config
+    // from an npm package that is not installed, such as
+    // "@sindresorhus/tsconfig", or names a missing file) failed the whole
+    // TypeScript index. Swan's own config is used instead, and says so.
+    if l.tsconfig {
+        var probe: u8[>..] = [];
+        arg(probe, str(bin, "tsc"));
+        arg(probe, "-p");
+        arg(probe, str(repo, "/tsconfig.json"));
+        arg(probe, "--showConfig");
+        var po: u8[>..] = [];
+        var pe: u8[>..] = [];
+        if swan_run(probe, repo, child_env(l, ""), 60000, po, pe) != 0 {
+            let first = find(po, "\n");
+            format(report, "typescript: the repo's tsconfig.json cannot be read (",
+                   trim(if first > 0 { po[..first] } else { po }), "); indexing with Swan's own config\n");
+            l.tsconfig = false;
+            if !l.ts && !l.js { l.ts = true; }
+        }
+    }
     if l.tsconfig || l.ts || l.js {
         let target = str(out, "/index-typescript.scip");
         var a: u8[>..] = [];
@@ -1382,6 +1427,13 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
         let slash = rfind(repo, "/");
         let pieces = plan_python(repo, min(jobs_limit(), 6));
         let stamps = py_stamps(repo);
+        // A src layout (src/<package>/__init__.py) is importable only once
+        // the package is installed, which Swan never does, so tests and
+        // scripts that `import <package>` resolved to nothing. Putting src on
+        // PYTHONPATH lets scip-python find it, and names the package's
+        // modules as their importers do (`click.core`, not `src.click.core`).
+        let py_path = python_src_roots(repo);
+        let py_env: u8[>..] = if py_path.len > 0 { env_entry("PYTHONPATH", py_path) } else { str("") };
         fn add_python_job(piece: const u8[:], target: const u8[:]) {
             var a: u8[>..] = [];
             arg(a, str(bin, "scip-python"));
@@ -1397,7 +1449,7 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
             if piece.len > 0 { arg(a, "--target-only"); arg(a, piece); }
             a.append(env_args);
             let label: u8[>..] = if piece.len > 0 { str("scip-python ", piece) } else { str("scip-python") };
-            add_job(label, target, a, child_env(l, ""), piece);
+            add_job(label, target, a, child_env(l, py_env), piece);
         }
 
         // Reuse: a piece whose files are unchanged since the last map, and
@@ -1412,7 +1464,9 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
         var manifest: u8[>..] = [];
         var reused = 0;
         each_split(pieces[..pieces.len - 1], '\n') { piece =>
-            let fp = str(piece_fingerprint(stamps, piece));
+            // The search path changes symbol names, so it is part of the key.
+            let fp = if py_path.len > 0 { str(piece_fingerprint(stamps, piece), "-", hash(py_path)) }
+                     else { str(piece_fingerprint(stamps, piece)) };
             let target = str(out, "/index-python-", hash(piece), ".scip");
             var hit = false;
             each_split(prev_manifest, '\n') { line =>
@@ -1540,6 +1594,21 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
     }
 
     if skipped.len > 0 { format(report, untrusted_note(skipped, repo), "\n"); }
+    if l.syn {
+        // No compiler, no repo code run: a syntax-level map (definitions,
+        // bodies, references by name) for the languages above.
+        let target = str(out, "/index-syntax.scip");
+        var a: u8[>..] = [];
+        arg(a, "bun");
+        arg(a, str(home, "/tools/syntax-index.ts"));
+        arg(a, repo);
+        arg(a, target);
+        var fp: u64 = hash(str(home, "/tools/syntax-index.ts\t", swan_file_size(str(home, "/tools/syntax-index.ts"))));
+        each_file(repo) { full, name =>
+            if syntax_file(full, name) { fp = hash_combine(fp, hash(str(full, "\t", swan_file_size(full), "\t", swan_mtime_ns(full)))); }
+        };
+        add_lang_job("syntax-index", target, a, child_env(l, ""), fp);
+    }
     map_held.append(trim(skipped[..]));
     if jobs.len == 0 && (l.kt || l.other.len > 0 || skipped.len > 0) {
         // Nothing to index, but the code can still be searched by structure

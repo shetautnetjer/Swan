@@ -32,6 +32,13 @@ JavaScript, Rust, Kotlin, C and C++, C#, Lua and the three shading languages.
 for TypeScript/JavaScript, Python, Rust, Java, Kotlin, C, C++, CUDA and C#
 (PHP is planned). How deep each one goes depends on the tools installed
 for it; see [parity and languages](docs/parity-and-languages.md).
+Go, shell scripts (also ones known only by their `#!` line), Makefiles, Ruby
+and Lua get a syntax-level map (`tools/syntax-index.ts`): definitions, bodies
+and references found by name (marked `by_name`), so no repo maps to nothing.
+A Python `src/` layout is put on `PYTHONPATH` so tests that import the package
+link to it, and a `tsconfig.json` that cannot be read (it extends an npm
+package that is not installed) is replaced by Swan's own config. See
+[the modular design proposal](docs/modular-design.md) for where this is going.
 
 **Keeping up with edits:** after a one-line edit, re-mapping a 2,361-file
 TypeScript project takes about 2 s (it used to take 8 to 10 s), and nothing
