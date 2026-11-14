@@ -58,42 +58,21 @@ exec unshare --user --map-root-user --mount $NET_FLAG --pid --fork --kill-child 
     mount --make-rprivate /
     mount -o remount,bind,ro /                       # everything read-only
 
-    # Make OUT writable. If OUT is under /tmp it already sits on the separate
-    # (still read-write) /tmp mount; otherwise carve one writable hole in the
-    # read-only root.
-    case "$EGG_OUT" in
-      /tmp|/tmp/*) : ;;
-      *) mount --bind "$EGG_OUT" "$EGG_OUT"
-         mount -o remount,bind,rw "$EGG_OUT" "$EGG_OUT" ;;
-    esac
+    # Make OUT writable. When OUT is on the read-only root mount (the usual
+    # case, and /tmp too where /tmp is part of root) this carves one read-write
+    # hole. When OUT is on its own already-writable mount (e.g. a separate
+    # tmpfs /tmp), the bind is refused and OUT is used as it is.
+    if mount --bind "$EGG_OUT" "$EGG_OUT" 2>/dev/null; then
+      mount -o remount,bind,rw "$EGG_OUT" "$EGG_OUT" 2>/dev/null || true
+    fi
 
-    # Ephemeral scratch for HOME and TMPDIR on a fresh /dev/shm tmpfs. Kept off
-    # /tmp so it never collides with a repo or OUT that lives under /tmp.
+    # Ephemeral scratch (HOME + TMPDIR) on a fresh /dev/shm tmpfs: a separate
+    # read-write mount in every environment, so it never collides with a repo
+    # or OUT under /tmp and /tmp never needs masking. Everything stays
+    # read-only except the single OUT hole and this scratch.
     mount -t tmpfs none /dev/shm 2>/dev/null || true
     mkdir -p /dev/shm/home /dev/shm/tmp
     export HOME=/dev/shm/home TMPDIR=/dev/shm/tmp
-
-    # Contain stray /tmp writes by masking /tmp with a fresh tmpfs, but only when
-    # neither the repo nor OUT lives under /tmp (masking would hide them). When
-    # OUT is under /tmp, re-expose just OUT from a /dev/shm stash so containment
-    # is still kept.
-    mask=1
-    case "$EGG_REPO" in /tmp|/tmp/*) mask=0 ;; esac
-    case "$EGG_OUT" in
-      /tmp|/tmp/*)
-        if [ "$mask" = 1 ]; then
-          H="/dev/shm/egg-out.$$"
-          mkdir -p "$H"                || { echo "eggshell: cannot create scratch"   >&2; exit 3; }
-          mount --bind "$EGG_OUT" "$H" || { echo "eggshell: cannot stash out dir"    >&2; exit 3; }
-          mount -t tmpfs none /tmp     || { echo "eggshell: cannot seal /tmp"         >&2; exit 3; }
-          mkdir -p "$EGG_OUT"
-          mount --bind "$H" "$EGG_OUT" || { echo "eggshell: cannot expose out dir"    >&2; exit 3; }
-        fi
-        ;;
-      *)
-        [ "$mask" = 1 ] && mount -t tmpfs none /tmp
-        ;;
-    esac
 
     cd "$EGG_REPO"
     exec "$@"
