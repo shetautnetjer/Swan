@@ -171,6 +171,10 @@ def build_package(root, binary, output, revision, receipt_path, licenses, requir
             or receipt.get("binary_sha256") != sha256(binary_data)):
         raise PackageError("build receipt source revision or binary checksum does not match")
     payload = {"bin/swan": (binary_data, binary_mode), "BUILD-RECEIPT.json": (receipt_data, 0o644)}
+    # The egg-shell sealing runner, installed beside bin/swan so pipeline.goose
+    # can seal indexers via <swan_home>/bin/eggshell. Source is tracked at
+    # eggshell/eggshell; packaged with a deterministic executable mode.
+    payload["bin/eggshell"] = (regular_file(root / "eggshell/eggshell")[0], 0o755)
     skill_files = sorted(name for name in tracked if name.startswith("skills/swan-code-check/"))
     if "skills/swan-code-check/SKILL.md" not in skill_files:
         raise PackageError("tracked canonical skill is missing")
