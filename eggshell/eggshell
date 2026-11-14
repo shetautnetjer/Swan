@@ -1,0 +1,71 @@
+#!/bin/sh
+# eggshell — run one command sealed off so a code indexer is safe headless.
+#
+# Guarantees (safe by default):
+#   - no network                 (new empty network namespace; loopback only, no routes)
+#   - repo is read-only          (whole filesystem remounted read-only inside)
+#   - writes go only to OUT      (OUT bind-mounted read-write) and an ephemeral
+#                                 tmpfs /tmp + HOME that are discarded on exit
+#   - if the sandbox cannot be set up, REFUSE (never fall back to running
+#     unconfined). Swan's trust gate stays the fallback for whether to attempt
+#     build-running indexers at all.
+#
+# Usage:  eggshell <repo-dir> <out-dir> [--allow-net] -- <cmd> [args...]
+#   --allow-net   loosen only (share host network). Use this for an explicitly
+#                 trusted repo that must fetch dependencies; off by default.
+#
+# Exit codes: 2 usage/precondition error; 3 sandbox unavailable (REFUSED);
+#             otherwise the wrapped command's own exit code.
+set -eu
+
+if [ $# -lt 2 ]; then
+  echo "eggshell: usage: eggshell <repo> <out> [--allow-net] -- cmd..." >&2
+  exit 2
+fi
+REPO=$1; shift
+OUT=$1; shift
+
+ALLOW_NET=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --allow-net) ALLOW_NET=1; shift ;;
+    --) shift; break ;;
+    *) echo "eggshell: unexpected argument before --: $1" >&2; exit 2 ;;
+  esac
+done
+[ $# -ge 1 ] || { echo "eggshell: no command after --" >&2; exit 2; }
+
+[ -d "$REPO" ] || { echo "eggshell: repo is not a directory: $REPO" >&2; exit 2; }
+[ -d "$OUT" ]  || { echo "eggshell: out is not a directory: $OUT"  >&2; exit 2; }
+REPO=$(cd "$REPO" && pwd)
+OUT=$(cd "$OUT" && pwd)
+
+# The ephemeral scratch tmpfs is mounted at /tmp, so OUT must live elsewhere or
+# its writes would not persist. Swan's index/out dir is its own data dir.
+case "$OUT" in
+  /tmp|/tmp/*) echo "eggshell: out must not be under /tmp: $OUT" >&2; exit 2 ;;
+esac
+
+# Preflight: if unprivileged namespaces are not available, refuse rather than
+# run the indexer unconfined.
+if ! unshare --user --map-root-user true 2>/dev/null; then
+  echo "eggshell: unprivileged namespaces unavailable; REFUSING to run unconfined" >&2
+  exit 3
+fi
+
+NET_FLAG="--net"
+[ "$ALLOW_NET" = "1" ] && NET_FLAG=""   # trust loosening: share host network
+
+export EGG_REPO="$REPO" EGG_OUT="$OUT"
+exec unshare --user --map-root-user --mount $NET_FLAG --pid --fork --kill-child \
+  /bin/sh -euc '
+    mount --make-rprivate /
+    mount -o remount,bind,ro /                       # everything read-only
+    mount --bind "$EGG_OUT" "$EGG_OUT"               # except the output dir
+    mount -o remount,bind,rw "$EGG_OUT" "$EGG_OUT"
+    mount -t tmpfs none /tmp                          # ephemeral scratch
+    mkdir -p /tmp/home
+    export HOME=/tmp/home TMPDIR=/tmp
+    cd "$EGG_REPO"
+    exec "$@"
+  ' sh "$@"
