@@ -33,6 +33,8 @@ if mode == 'indexer':
     assert args[0] == 'index' and '--output' in args, args
     Path(args[args.index('--output') + 1]).write_text('synthetic sentinel index\n')
 elif mode == 'flatten':
+    # The flattener's own --fresh/--texts flags (src/change.goose) come first.
+    args = [a for i, a in enumerate(args) if a not in ('--fresh', '--texts') and args[i - 1] not in ('--fresh', '--texts')]
     assert len(args) == 5 and args[1] == '--root', args
     repo, output = Path(args[2]), Path(args[4])
     symbol = 'scip-typescript npm policy-fixture 0.0.0 probe().'
