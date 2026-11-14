@@ -703,6 +703,30 @@ extern fn swan_wait_any(code: i32&) -> i64;
 extern fn swan_file_size(path: const u8[:]) -> i64;
 extern fn swan_cpu_count() -> i32;
 
+// Sealed by default. SWAN_SANDBOX=0 turns the seal off (indexers run the old
+// way); anything else, including unset, means on.
+fn sandbox_on() -> bool {
+    var v: u8[>..] = [];
+    if env("SWAN_SANDBOX", v) && v == "0" { return false; }
+    return true;
+}
+
+// Wrap an indexer's argv so it runs sealed via <swan_home>/bin/eggshell:
+//   eggshell <repo> <out> -- <inner argv...>
+// No network, the repo read-only, writes only to the map dir. The runner
+// refuses (exit 3) if the kernel cannot seal, which surfaces as a failed
+// indexer rather than an unconfined run. Used only for untrusted repos; a
+// trusted repo runs as before (the user accepted its build files).
+fn seal_argv(inner: const u8[:], repo: const u8[:], out: const u8[:]) -> u8[>..] {
+    var a: u8[>..] = [];
+    arg(a, str(swan_home(), "/bin/eggshell"));
+    arg(a, repo);
+    arg(a, out);
+    arg(a, "--");
+    a.append(inner);
+    return a;
+}
+
 // How many indexers run at once: $SWAN_JOBS, else half the cores, at most 8
 // (scip-python can take several GB each).
 fn jobs_limit() -> i64 {
@@ -1661,7 +1685,9 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
             // reused from the last map: nothing to run
         } else {
             while running >= limit { wait_one(); }
-            pids[idx] = swan_spawn(f[2], repo, f[3], str(out, "/log-", idx, ".txt"));
+            var launch: u8[>..] = [];
+            if sandbox_on() && !build_trusted(repo, out) { launch = seal_argv(f[2], repo, out); } else { launch.append(f[2]); }
+            pids[idx] = swan_spawn(launch[..], repo, f[3], str(out, "/log-", idx, ".txt"));
             codes[idx] = -999;
             began[idx] = clock();
             if pids[idx] > 0 { running++; } else { codes[idx] = -1; }

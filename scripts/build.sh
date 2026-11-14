@@ -14,3 +14,5 @@ if [ ! -f build/golsp.c ] || [ -n "$(find -L lsp -newer build/golsp.c -print -qu
     GOOSE="$GOOSE" lsp/scripts/build.sh build
 fi
 "$GOOSE" build src/swan.goose -o bin/swan "$@"
+# the egg-shell sealing runner sits beside the swan binary (swan_home/bin)
+install -m 755 eggshell/eggshell bin/eggshell
