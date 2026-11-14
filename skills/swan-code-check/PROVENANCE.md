@@ -59,3 +59,15 @@ configuration. Its default output is newly allocated and removed at exit;
 Run `python3 -I skills/swan-code-check/scripts/test_selftest.py` for portable
 executable discovery, output handling and copied-resource checks. Run the
 pattern self-test against an actual Swan binary before releasing the skill.
+
+On 2026-11-14, after PRs #19 and #20, the project owner said agents should
+always build and refresh maps themselves ("They should always rebuild and
+refresh maps"). The skill now builds on first use and refreshes after edits
+and branch switches by default; the earlier "build:false unless authorized"
+guidance is removed. Repository trust (running a repo's own build code)
+stays a separate, explicit decision. New in this revision: evidence kinds
+(compiler, matched by name `by_name`, structural, live), the syntax-level
+languages (Go, shell, Make, Ruby, Lua), the known blind spots (Express-style
+calls through a local name, shell handing off to another language, unnamed
+callbacks), and the standard install path from `scripts/swan-up`. The
+pattern pack, fixture and self-test are unchanged.

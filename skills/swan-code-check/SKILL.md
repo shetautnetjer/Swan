@@ -1,206 +1,137 @@
 ---
 name: swan-code-check
 description: >-
-  Use Swan for compiler-indexed symbol lookup, references, change impact,
+  Use Swan for symbol lookup, references, callers, change impact,
   diagnostics, targeted tests, structural pattern search and planned renames
-  when editing or reviewing a code repository. Use the existing Swan
-  connection or installation; report incomplete indexing and missing tools.
+  when editing or reviewing a code repository. Build the repo's map on first
+  use and refresh it after edits; say which answers came from the compiler
+  and which were matched by name.
 ---
 
 # Swan code check
 
 Swan answers "where is it, who uses it, what breaks, which tests" from a
-compiler-produced SCIP map, with live diagnostics and syntax-tree pattern
-search. Use `rg` to cross-check completeness. Available languages and live
-features depend on the installed indexers, checkers and language servers.
+map of the repository, with live diagnostics and syntax-tree pattern search.
+Use `rg` to cross-check completeness. Available languages and live features
+depend on the installed indexers, checkers and language servers.
 
 This directory is maintained in the Swan repository at
 `skills/swan-code-check/`; see [PROVENANCE.md](PROVENANCE.md).
 
 ## Find the available Swan
 
-1. Discover a **configured Swan MCP connection** in the host's available
-   tools and read its actual tool schemas. Use its advertised names and
-   arguments; tool discovery and MCP naming differ by agent. Do not assume
-   another agent's CLI or API exists, or install/configure a server as part
-   of using this skill.
-2. If no connection is available, use an explicitly supplied executable,
-   `SWAN_BINARY`, or `swan` on `PATH`. Resolve a command name with the host's
-   executable lookup before treating it as a file path. Use the exact
-   installation's binary throughout; a checkout, package prefix and `PATH`
-   can contain different versions. The bundled self-test follows this rule.
-3. With a packaged binary, run that exact executable's
-   `doctor --profile core --json`, or `doctor --profile python-typescript --json`
-   for this skill's fixture. Doctor reports dependency availability; it does
-   not prove a repository is indexed or a language feature works. Read any
-   missing dependencies and the map report before claiming readiness. If an
-   older binary has no `doctor`, report that limitation and inspect its
-   actual command help and build output.
+1. Use the **configured Swan MCP connection** if the host has one, and read
+   its actual tool schemas; tool names and prefixes differ by agent.
+2. Otherwise use `swan` on `PATH`, `SWAN_BINARY`, or the standard install at
+   `~/.local/share/swan/current/bin/swan`. Use one exact binary throughout;
+   a checkout, a package prefix and `PATH` can hold different versions.
+3. `<swan-binary> doctor --profile python-typescript --json` reports which
+   indexers and language servers are installed. It does not prove a repo is
+   indexed; the map report does that.
 
-CLI fallback: `<swan-binary> query <db> symbol|refs|callers|callees|impls|unused|diag|pattern <arg> [relative_path]`.
-A new stdio MCP process can be launched with
-`<swan-binary> serve --maps <explicit-map-root>` when the caller has authorized
-that execution. Choose a writable map directory; preserve existing maps.
-The package includes this skill for copying to the caller's chosen skill
-location; it does not register agent settings or an MCP connection.
+Install or update Swan, its MCP entry for Claude Code and pi, and this skill
+with one command from a Swan package folder:
+`swan-up install --dist <package-folder>` (see the Swan repo's
+`docs/install.md`). Running Swan servers keep their old version until their
+agent restarts.
 
-## Start once per repo per task
+CLI fallback: `<swan-binary> query <db> symbol|refs|callers|callees|impls|unused|diag|pattern <arg> [relative_path]`,
+and `<swan-binary> map <repo> <map-dir>` to build or refresh a map.
 
-- Resolve the target repository's absolute path. Call
-  `use_repo {"path":"<repo>","build":false}` when implicit indexing is not
-  authorized. First-use building writes a map and can run indexers.
-- **Inspect each repository tool's actual schema for a boolean `build`
-  property.** When supported, pass `"repo":"<repo>","build":false` on every
-  call if implicit indexing is unauthorized. Do not infer support from the
-  server version or assume an older server enforces an unknown field.
-  A prior `use_repo` restriction does not carry over to subsequent `repo`
-  calls. Stateless launches must retain the intended registry, repo and
-  supported per-request policy.
-- If a tool lacks this control, use the exact database CLI, or a controlled
-  persistent server: select with `use_repo {"path":"<repo>","build":false}`,
-  verify returned repo/map identity, then **omit `repo` on subsequent calls**
-  in that same session to avoid implicit reselection. This fallback does not
-  work across fresh stateless launches; use the exact database CLI instead.
-  Stop on missing/incompatible-map or selection errors rather than rebuilding
-  without authorization. Preserve configured maps and server settings.
-- `build:false` controls implicit map selection/building only. It does not
-  pin an existing map, make SQLite opens storage-read-only, or disable explicit
-  `update_map`, checks, tests, live servers, formatting or edits; each keeps its
-  own authorization requirements. In a controlled review launcher, keep
-  process-local `SWAN_WARM` unset/empty when language-server startup is not
-  authorized: inherited warm-up can start a server after initialization or
-  selection, and `build:false` does not suppress it.
-- Confirm the returned repo root and map path cover the intended worktree;
-  another branch's checkout is not interchangeable. Give a brief initial
-  coverage summary for the task's languages/files from the actual tool
-  schemas, `use_repo`/map report, `index_info`, and doctor when available.
-  Distinguish these modes rather than reporting one overall "supported":
+## Build and refresh maps yourself
 
-  | Mode | Evidence and boundary |
-  | --- | --- |
-  | Structural patterns | Advertised grammar plus an applicable search; reads on-disk syntax, not compiler-resolved references. Inspect `files_searched`, `pattern_does_not_parse_in` and `truncated`. |
-  | Indexed symbols/references | Map report and a known-symbol/reference check; limited to files and languages the SCIP indexers actually included. |
-  | Live diagnostics/checks/tests | Installed adapter/runner plus the actual call result; availability alone does not prove execution or success. |
+Maps are how Swan answers. Build and refresh them without asking:
 
-  Mark unverified, skipped, failed or not-installed coverage explicitly.
-  Doctor's selected profile covers dependencies only; `unselected` does not
-  establish that an optional tool is absent. An existing map's empty
-  `skipped`/`report` does not prove every indexer ran. Do not invent a
-  capability API, or call an unsearched/unindexed area clean.
-  If `truncated` is true, increase `max_results` or narrow `relative_path`
-  and repeat until the relevant matches are inspected before calling a
-  structural sweep complete.
-- Read the map report and its `skipped` entries. Some indexers run the repo's
-  build files, and a repo-local Python environment can execute repo code.
-  **Never grant trust automatically.** Run `<swan-binary> trust <exact-repo>`
-  only with the user's explicit authorization to trust that repository and
-  run its build code. Repository ownership or an agent's identity does not
-  grant trust. Never enable the global `SWAN_TRUST_BUILD=1` override. If trust
-  is absent, continue within the available coverage and report what skipped.
-- Check a known symbol with `find_symbol` and confirm its file and line.
-  Cross-check relevant references with a focused `rg -l <name>` search;
-  mismatches require investigating stale or partial coverage. Expand scope
-  when the evidence requires it, rather than repeating full-repo scans.
+- **First use:** call `use_repo {"path":"<absolute-repo-root>"}`. It builds a
+  map when none covers the repo (`build` defaults to true). The map goes in
+  the server's map directory (`serve --maps <dir>`), never inside the repo.
+- **After edits, a branch or worktree switch, or a pull:** call `update_map`
+  before the next indexed answer (callers, impact, rename plans, affected
+  tests). Batch a set of edits and refresh once, not after every keystroke.
+- **After dependency, lockfile or indexer-config changes:** refresh with
+  `update_map {"repo":"<exact-repo-root>","clean":true}` (CLI:
+  `<swan-binary> map <repo> <map-dir> --clean`), because a plain refresh can
+  reuse cached compiler output. A failed clean rebuild keeps the old map;
+  report the failure rather than calling old answers current.
+- Read `index_info {"repo":"<repo>"}` at task start and after a change batch.
+  Freshness uses file timestamps; `new_file_count` only sees new files with
+  extensions already indexed.
+- Confirm the returned repo root and map cover the worktree you are in;
+  another branch's checkout is not interchangeable.
+- Check one known symbol with `find_symbol` and confirm its file and line,
+  then cross-check important references with `rg -l <name>`.
 
-## Refresh at task boundaries
+**Trust is separate from maps.** Some indexers and checkers run the repo's
+own build files (Cargo, Maven, Gradle, MSBuild, a repo `.venv`). Swan skips
+those until the repo is trusted, and lists them under `skipped`. Run
+`<swan-binary> trust <exact-repo>` only when the person has said that repo
+may run its build code. Never set `SWAN_TRUST_BUILD=1`. Without trust, keep
+working within the coverage you have and report what was skipped.
 
-- Read `index_info {"repo":"<repo>"}` at task start and after a relevant
-  change batch, not before every lookup. Refresh with `update_map` within the
-  caller's execution scope when files are stale or added, or the repository
-  has changed since the map's `refreshed_at`/`built_at`.
-- Recheck repo/map identity after switching branches, revisions or worktrees.
-  Refresh before relying on indexed answers when that switch changes source,
-  or generated sources change. Zero stale files is not proof of an
-  unchanged compiler view: freshness primarily uses file timestamps;
-  `new_file_count` only sees newer files with extensions already indexed.
-  Languages never indexed and deliberately excluded files can remain outside
-  coverage even after refresh. If `new_file_count` is absent, refresh on new
-  files rather than trusting the older binary's freshness count.
-- Dependency, lockfile, compiler/indexer configuration and other build-input
-  changes need more than freshness checks: `update_map` can reuse cached
-  SCIP output. For example, TypeScript cache keys omit `package-lock.json`
-  and `node_modules`. When indexing is authorized and the actual `update_map`
-  schema advertises boolean `clean`, first select with `use_repo` and
-  `build:false`, verify the exact canonical `root` and expected `map`, then
-  call `update_map {"repo":"<exact-repo-root>","build":false,"clean":true}`.
-  The CLI equivalent is `<swan-binary> map <exact-repo-root> <exact-map-dir>
-  --clean`. Clean rebuild reruns the eligible indexers, discards cached merge
-  layers, and publishes a new database only after success. It preserves the
-  existing trust policy; skipped/unavailable language coverage still needs
-  inspection. It does not grant build authorization: `build:false` prevents
-  implicit selection builds, not this explicit indexing action.
-- Clean rebuild is scoped to that map, never the registry. Keep the map's
-  directory and `swan.db.lock`; never wipe the registry, saved trust, or agent
-  settings. Failure or interruption before publication retains the old
-  database but invalidates reusable generated outputs. Report the failed
-  refresh; old answers are not thereby qualified as current. Retry only after
-  the writer and any surviving indexer have released the lock. Check the
-  returned root/map, known symbol and coverage after successful rebuild.
-  The source repository's `docs/clean-reindex.md` records the detailed contract.
-- If `clean` is unavailable, the old map's identity cannot be verified, or the
-  caller authorizes only a private candidate, create a new private
-  registry root and build its sole map child with
-  `<swan-binary> map <repo> <private-root>/fresh`. Use canonical absolute paths.
-  Map discovery selects by repo-root matches, not creation time: launch a
-  private `<swan-binary> serve --maps <private-root>`, call
-  `use_repo {"path":"<repo>","build":false}` on it, and verify the returned
-  `root` is exactly `<repo>`, `map` is exactly `<private-root>/fresh/swan.db`,
-  and `built` is false. Query only this private server using the per-call
-  policy or controlled persistent fallback above. Stateless wrappers must
-  retain the same private `--maps` root and supported build restriction.
-  Preserve configured maps and server settings. If the host cannot route to
-  that private server, use the exact database directly, for example
-  `<swan-binary> query <private-root>/fresh/swan.db symbol <name> [relative_path]`.
-  Otherwise mark affected indexed answers unverified; refresh success alone
-  is insufficient.
-- Batch coherent edits and refresh once before the next indexed impact query,
-  rename/rewrite plan, or affected-test selection that depends on a changed
-  graph. Avoid rebuilding after every edit; on-disk pattern searches and
-  supported live diagnostics can inspect intermediate changes. Read the
-  refresh result and verify the relevant known symbol/coverage again; a
-  completed refresh does not prove excluded files are now indexed.
+## Say what kind of evidence each answer is
+
+Report every finding with its evidence kind. Never merge them into one
+"supported" or "clean":
+
+| Kind | Where it comes from | How sure |
+| --- | --- | --- |
+| Compiler | SCIP indexers: TypeScript/JavaScript, Python, Rust, Java, Kotlin, C, C++, CUDA, C# (only those the map report shows ran) | Resolved by the compiler: exact |
+| Matched by name | Rows marked `by_name: true`; whole syntax-level languages below; Rust uses inside unresolved macros | An identifier with the same name: a lead, not proof. Two things with one name are not told apart |
+| Structural pattern | `search_pattern` on on-disk syntax | Shape of the code only; check `files_searched`, `pattern_does_not_parse_in`, `truncated` |
+| Live diagnostics, checks, tests | The language server, checker or test runner actually run | Only what the call returned; "available" is not "passed" |
+
+**Syntax-level languages** (definitions, bodies and references by name, no
+compiler): Go, shell scripts (including ones known only by their `#!` line),
+Makefiles, Ruby and Lua. Callers and impact in these are name matches; say so.
+
+**Known blind spots: never call these areas clean.**
+
+- Express-style calls made through a local name (`const r = express.Router();
+  r.get(...)`, an aliased `app`): the route and its handler may not be linked.
+- Shell scripts that hand off to another language (`python x.py`, `node`,
+  `bun`, heredocs): the call into the other file is not followed.
+- Unnamed callbacks and inline functions passed as arguments: they have no
+  name path, so callers/callees through them are incomplete.
+- Strings, comments, config and anything reached by name at run time
+  (reflection, `getattr`, dynamic imports, routing tables).
+
+When a question touches one of these, check with `rg` and read the code, and
+say in the answer which part rests on that check.
+
+If `files_searched` is 0, the pattern did not apply: that is "not checked",
+never "clean". If `truncated` is true, raise `max_results` or narrow
+`relative_path` before calling a sweep complete.
 
 ## Editing and review
 
-All examples below follow the repo/build-policy rules above, including the
-legacy persistent-session exception. Read schemas for exact argument names.
-
 - Before changing a shared symbol, use `get_callers` with `name_path` and
-  `depth:2`. `summary.files` is the impact radius; `summary.test_files` guide
-  validation and any coding handoff. Use `find_implementations` for
-  interfaces/base classes and `get_callees` for dependencies. Disambiguate
-  with an exact name path such as `/Store/add` or `relative_path`.
-- After editing, request `get_diagnostics` with `relative_path` and `live:true`
-  if supported, or `check_errors` for the repo. `run_tests` with `name_path`
-  or `relative_path` runs affected tests through the repo's runner. Checkers,
-  live servers and tests execute code: stay within the caller's task
-  authorization and report unavailable or skipped coverage. Diagnostics and
-  map freshness are separate: successful live diagnostics or `check_errors`
-  does not refresh the reference graph, and refreshing the map does not prove
-  diagnostics or tests passed.
-- For a diff, inspect changed files (`git diff --name-only <base>...HEAD`),
-  their symbols (`get_symbols_overview` or `get_symbol_at`) and callers beyond
-  the diff, then diagnostics. For a security/quality sweep, run applicable
-  entries in [references/patterns.json](references/patterns.json) through
-  `search_pattern`, passing `language` and the intended `relative_path`.
-  Cross-check with
+  `depth:2`. `summary.files` is the impact radius; `summary.test_files`
+  guide validation. Use `find_implementations` for interfaces and base
+  classes and `get_callees` for dependencies. Disambiguate with an exact
+  name path such as `/Store/add` or `relative_path`.
+- After editing, refresh the map, then `get_diagnostics` with
+  `relative_path` and `live:true` if supported, or `check_errors`.
+  `run_tests` with `name_path` or `relative_path` runs affected tests.
+  Diagnostics and map freshness are separate: passing diagnostics do not
+  refresh the graph, and a refreshed map does not prove tests pass.
+- For a diff: changed files (`git diff --name-only <base>...HEAD`), their
+  symbols (`get_symbols_overview`), callers beyond the diff, then
+  diagnostics. For a security or quality sweep, run the entries in
+  [references/patterns.json](references/patterns.json) through
+  `search_pattern` with `language` and `relative_path`, and cross-check with
   `rg -n 'shell:\s*true|rejectUnauthorized:\s*false|NODE_TLS_REJECT_UNAUTHORIZED|verify\s*=\s*False'`.
-  A hit is a lead to read, not a finding. Report findings with file:line and
-  the relevant Swan evidence; disclose incomplete coverage.
-- `rename_symbol` and `rewrite_pattern` plan first (omit `apply` or use false).
-  Read the plan before applying. Apply only edits covered by the caller's
-  task authorization; a review-only request does not authorize mutation.
-  Other editing tools, formatting and deletion have the same scope boundary.
-  Stale-file refusal requires refresh and replanning. Strings, comments and
-  runtime-by-name uses are outside compiler-resolved rename coverage.
+  A hit is a lead to read, not a finding.
+- `rename_symbol` and `rewrite_pattern` plan first (omit `apply`). Read the
+  plan, then apply edits that are part of your task. A review-only request
+  does not ask for edits. A stale-file refusal means refresh and replan.
+  Strings, comments and by-name uses are outside rename coverage.
 - `find_unused_symbols` returns candidates: entry points, code reached by
   name and build output such as `dist/` bundles can appear.
 
-At completion, report the actual repo/worktree and map used, observed map
-freshness and any refresh, checks/tests actually run and their results, and
-remaining language/file or adapter limitations. Tie "no findings/errors" to
-the inspected scope and successful checks; unavailable, skipped, stale or
-unverified coverage remains unknown.
+At completion, report the repo/worktree and map used, its freshness and any
+refresh, checks and tests actually run with their results, which answers
+were compiler-resolved and which were matched by name, and any blind spot
+the task touched.
 
 ## Pattern rules and self-test
 
@@ -209,25 +140,16 @@ The unchanged fixture and 24-pattern pack are checked by
 
 - Use complete code patterns and pass `language`. `shell: true` alone parses
   as a JS label; `{ a: 1, $$$ }` at statement start parses as a block.
-  **`files_searched:0` means "didn't apply", never "clean".**
 - Wildcards inside template literals do not match: search `execSync($$$)`
   and read the first argument.
 - Known matcher canaries track the empty-`$$$`-beside-a-comma issue observed
   in Swan 839c4b0: `os.system($X, $$$)` misses `os.system(x)` and
   `{ $$$, shell: true }` misses `{ shell: true }`. Keep both variants or an
   `rg` check. The self-test reports PRESENT, FIXED or CHANGED; the JS-label
-  canary reports TRAP. These are observations to verify on the chosen binary.
+  canary reports TRAP.
 - For new patterns, add tagged fixture lines and a pack entry, then run
   `python3 -I <skill-directory>/scripts/selftest.py --swan <exact-binary>`.
-  Omit `--swan` to use `SWAN_BINARY`, then `swan` on `PATH`.
-  The default output is a new disposable temporary directory, removed at
-  exit. `--out DIR` (or `SWAN_SELFTEST_OUT`) retains a new, empty output
-  directory for inspection. The map is `DIR/map/swan.db`; the test requires
-  that exact existing map and refuses to build a replacement during searches.
-  It selects the map once with `build:false` in its private persistent server,
-  then omits `repo` during searches to prevent implicit rebuilding. This is
-  specific to the self-test; host wrappers follow the schema-aware routing above.
-  `--map-swan` may choose a separate builder, whose map must be compatible
-  with the server binary. Never point the output at shared maps.
-  Exit 0 means all 24 patterns match exactly; it does not qualify
+  Omit `--swan` to use `SWAN_BINARY`, then `swan` on `PATH`. Output goes to
+  a disposable temporary directory unless `--out DIR` is given; never point
+  it at shared maps. Exit 0 means all 24 patterns match; it does not qualify
   live diagnostics or index completeness for another repository.
