@@ -37,8 +37,11 @@ cmd_pack() {
   local rev; rev="$(git -C "$repo" rev-parse --verify "$ref^{commit}")" || die "unknown ref $ref"
   local short="${rev:0:12}"
   local work="$out/work-$short" dist="$out/swan-$short"
-  [ -e "$dist" ] && { say "package already exists: $dist"; echo "$dist"; return 0; }
-  mkdir -p "$out"
+  if [ -f "$dist/build-receipt.json" ] && [ -f "$dist/swan-up.sha256" ]; then
+    say "package already exists: $dist"; echo "$dist"; return 0
+  fi
+  [ -e "$dist" ] && die "$dist is incomplete; remove it and rerun"
+  mkdir -p "$out"; rm -rf "$dist.partial"
   local src="$work/src"
   if [ ! -d "$src" ]; then
     mkdir -p "$work"
@@ -90,12 +93,13 @@ PY
   done
   find "$src/.tools/goose-home/pkg" -path '*tree-sitter*' -iname 'LICENSE*' -type f 2>/dev/null | while read -r f; do
     cp "$f" "$lic/$(echo "${f#$src/.tools/goose-home/pkg/}" | tr '/' '_')"; done
-  python3 "$src/scripts/package.py" --binary "$src/bin/swan" --output "$dist" \
+  python3 "$src/scripts/package.py" --binary "$src/bin/swan" --output "$dist.partial" \
     --source-revision "$rev" --build-receipt "$work/build-receipt.json" \
     --licenses "$lic" --require-license Goose-LICENSE >/dev/null
-  cp "$work/build-receipt.json" "$dist/"
-  cp "$src/scripts/swan-up" "$dist/swan-up"
-  ( cd "$dist" && sha256sum swan-up > swan-up.sha256 )
+  cp "$work/build-receipt.json" "$dist.partial/"
+  cp "$src/scripts/swan-up" "$dist.partial/swan-up"
+  ( cd "$dist.partial" && sha256sum swan-up > swan-up.sha256 )
+  mv -T "$dist.partial" "$dist"     # only a complete package gets the final name
   git -C "$repo" worktree remove --force "$src" >/dev/null 2>&1 || true
   say "package ready: $dist"
   echo "$dist"
@@ -117,8 +121,14 @@ install_skill() {   # install_skill <from-skill-dir> <skills-parent-dir>
 connect_claude() {  # connect_claude <binary> <maps>
   local claude; claude="$(command -v claude || true)"
   [ -n "$claude" ] || { say "claude not found on PATH; skipped Claude Code"; return 0; }
+  local b; b="$(backup_dir)"; mkdir -p "$b"
+  "$claude" mcp get swan > "$b/claude-mcp-swan.txt" 2>&1 || true
   "$claude" mcp remove swan -s user >/dev/null 2>&1 || true
-  "$claude" mcp add swan -s user -- "$1" serve --maps "$2" >/dev/null
+  if ! "$claude" mcp add swan -s user -- "$1" serve --maps "$2" >/dev/null 2>"$b/claude-mcp-add.err"; then
+    say "WARNING: could not register Swan in Claude Code (see $b/claude-mcp-add.err);"
+    say "the previous entry is recorded in $b/claude-mcp-swan.txt. Continuing with the other steps."
+    return 0
+  fi
   say "Claude Code (user scope) now launches: $1 serve --maps $2"
   install_skill "$PREFIX/skills/swan-code-check" "$HOME/.claude/skills"
 }
@@ -139,15 +149,35 @@ PY
 
 smoke_mcp() {       # prove an MCP client can start this Swan and list its tools
   python3 - "$1" "$2" <<'PY'
-import json, subprocess, sys
+import json, select, subprocess, sys, time
 binary, maps = sys.argv[1:]
 p = subprocess.Popen([binary, "serve", "--maps", maps], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
-def call(i, method, params=None):
-    p.stdin.write(json.dumps({"jsonrpc": "2.0", "id": i, "method": method, "params": params or {}}) + "\n"); p.stdin.flush()
-    return json.loads(p.stdout.readline())
-init = call(1, "initialize", {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "swan-up", "version": "1"}})
-tools = call(2, "tools/list")["result"]["tools"]
-p.stdin.close(); p.wait(timeout=10)
+def send(msg):
+    p.stdin.write(json.dumps(msg) + "\n"); p.stdin.flush()
+def reply(i, timeout=30):
+    end = time.time() + timeout
+    while time.time() < end:
+        if not select.select([p.stdout], [], [], max(0, end - time.time()))[0]:
+            break
+        line = p.stdout.readline()
+        if not line:
+            sys.exit("swan-up: MCP check failed: server exited")
+        try:
+            msg = json.loads(line)
+        except ValueError:
+            continue                       # a log line, not a reply
+        if msg.get("id") == i:
+            return msg
+    p.kill(); sys.exit(f"swan-up: MCP check failed: no reply to request {i} in {timeout}s")
+send({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+      "params": {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "swan-up", "version": "1"}}})
+init = reply(1)
+send({"jsonrpc": "2.0", "method": "notifications/initialized"})
+send({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}})
+tools = reply(2)["result"]["tools"]
+p.stdin.close()
+try: p.wait(timeout=10)
+except subprocess.TimeoutExpired: p.kill()
 print(f"swan-up: MCP ok: {init['result']['serverInfo'].get('name')} answers with {len(tools)} tools")
 PY
 }
@@ -183,6 +213,12 @@ cmd_install() {
     [ -n "$src" ] && [ -f "$src" ] && [ "$(readlink -f "$src")" != "$(readlink -f "$trust")" ] \
       && sort -u "$trust" "$src" -o "$trust"
   done
+  # Prove the new version works before anything points at it.
+  "$PREFIX/bin/swan" doctor --profile "$profile" --json >/dev/null && say "doctor: ready ($profile)" \
+    || die "doctor failed; nothing was switched"
+  smoke_mcp "$PREFIX/bin/swan" "$maps" || die "MCP check failed; nothing was switched"
+  python3 -I "$PREFIX/skills/swan-code-check/scripts/selftest.py" --swan "$PREFIX/bin/swan" | tail -1 \
+    || die "skill self-test failed; nothing was switched"
   ln -sfn "versions/${rev:0:12}" "$root/current.new" && mv -T "$root/current.new" "$root/current"
   local bin="$root/current/bin/swan"
   mkdir -p "$HOME/.local/bin"
@@ -192,9 +228,6 @@ cmd_install() {
   say "active: ${rev:0:12} (swan on PATH -> $bin); maps in $maps"
   case ",$agents," in *,claude,*) connect_claude "$bin" "$maps";; esac
   case ",$agents," in *,pi,*) connect_pi "$bin" "$maps" "$pidir";; esac
-  "$bin" doctor --profile "$profile" --json >/dev/null && say "doctor: ready ($profile)" || die "doctor failed"
-  smoke_mcp "$bin" "$maps"
-  python3 -I "$PREFIX/skills/swan-code-check/scripts/selftest.py" --swan "$bin" | tail -1
   cmd_status --root "$root"
 }
 
