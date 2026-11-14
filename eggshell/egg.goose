@@ -37,9 +37,6 @@ fn make_config(repo: const u8[:], out: const u8[:], allow_net: bool, cmd: const 
                err: u8[>..]&) -> SandboxConfig {
     if repo.len == 0 { err.append("repo must not be empty"); }
     else if out.len == 0 { err.append("out must not be empty"); }
-    else if out == "/tmp" || starts_with(out, "/tmp/") {
-        err.append("out must not be under /tmp (ephemeral scratch lives there)");
-    }
     else if cmd.len == 0 { err.append("cmd must not be empty"); }
     return SandboxConfig { repo: repo, out: out, allow_net: allow_net, cmd: cmd };
 }

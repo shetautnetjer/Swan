@@ -26,9 +26,9 @@ if [ -n "$GOOSE" ] && [ -x "$GOOSE" ]; then
       echo "   got: $out"; bad "sealed command wrong or request rejected"
     fi
     if ./egg /some/repo /tmp/out -- sh -c true >/dev/null 2>&1; then
-      bad "bad request (out under /tmp) was accepted"
+      ok "out under /tmp is accepted (the runner seals it safely)"
     else
-      ok "bad request rejected by validation"
+      bad "out under /tmp was wrongly rejected"
     fi
   else
     bad "egg.goose did NOT compile"; sed -n '1,25p' /tmp/egg_build.log

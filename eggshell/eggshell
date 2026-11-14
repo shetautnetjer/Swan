@@ -5,7 +5,9 @@
 #   - no network                 (new empty network namespace; loopback only, no routes)
 #   - repo is read-only          (whole filesystem remounted read-only inside)
 #   - writes go only to OUT      (OUT bind-mounted read-write) and an ephemeral
-#                                 tmpfs /tmp + HOME that are discarded on exit
+#                                 tmpfs scratch (HOME + TMPDIR on /dev/shm) that
+#                                 is discarded on exit; /tmp is masked for
+#                                 containment unless the repo or OUT lives there
 #   - if the sandbox cannot be set up, REFUSE (never fall back to running
 #     unconfined). Swan's trust gate stays the fallback for whether to attempt
 #     build-running indexers at all.
@@ -40,12 +42,6 @@ done
 REPO=$(cd "$REPO" && pwd)
 OUT=$(cd "$OUT" && pwd)
 
-# The ephemeral scratch tmpfs is mounted at /tmp, so OUT must live elsewhere or
-# its writes would not persist. Swan's index/out dir is its own data dir.
-case "$OUT" in
-  /tmp|/tmp/*) echo "eggshell: out must not be under /tmp: $OUT" >&2; exit 2 ;;
-esac
-
 # Preflight: if unprivileged namespaces are not available, refuse rather than
 # run the indexer unconfined.
 if ! unshare --user --map-root-user true 2>/dev/null; then
@@ -61,11 +57,44 @@ exec unshare --user --map-root-user --mount $NET_FLAG --pid --fork --kill-child 
   /bin/sh -euc '
     mount --make-rprivate /
     mount -o remount,bind,ro /                       # everything read-only
-    mount --bind "$EGG_OUT" "$EGG_OUT"               # except the output dir
-    mount -o remount,bind,rw "$EGG_OUT" "$EGG_OUT"
-    mount -t tmpfs none /tmp                          # ephemeral scratch
-    mkdir -p /tmp/home
-    export HOME=/tmp/home TMPDIR=/tmp
+
+    # Make OUT writable. If OUT is under /tmp it already sits on the separate
+    # (still read-write) /tmp mount; otherwise carve one writable hole in the
+    # read-only root.
+    case "$EGG_OUT" in
+      /tmp|/tmp/*) : ;;
+      *) mount --bind "$EGG_OUT" "$EGG_OUT"
+         mount -o remount,bind,rw "$EGG_OUT" "$EGG_OUT" ;;
+    esac
+
+    # Ephemeral scratch for HOME and TMPDIR on a fresh /dev/shm tmpfs. Kept off
+    # /tmp so it never collides with a repo or OUT that lives under /tmp.
+    mount -t tmpfs none /dev/shm 2>/dev/null || true
+    mkdir -p /dev/shm/home /dev/shm/tmp
+    export HOME=/dev/shm/home TMPDIR=/dev/shm/tmp
+
+    # Contain stray /tmp writes by masking /tmp with a fresh tmpfs, but only when
+    # neither the repo nor OUT lives under /tmp (masking would hide them). When
+    # OUT is under /tmp, re-expose just OUT from a /dev/shm stash so containment
+    # is still kept.
+    mask=1
+    case "$EGG_REPO" in /tmp|/tmp/*) mask=0 ;; esac
+    case "$EGG_OUT" in
+      /tmp|/tmp/*)
+        if [ "$mask" = 1 ]; then
+          H="/dev/shm/egg-out.$$"
+          mkdir -p "$H"                || { echo "eggshell: cannot create scratch"   >&2; exit 3; }
+          mount --bind "$EGG_OUT" "$H" || { echo "eggshell: cannot stash out dir"    >&2; exit 3; }
+          mount -t tmpfs none /tmp     || { echo "eggshell: cannot seal /tmp"         >&2; exit 3; }
+          mkdir -p "$EGG_OUT"
+          mount --bind "$H" "$EGG_OUT" || { echo "eggshell: cannot expose out dir"    >&2; exit 3; }
+        fi
+        ;;
+      *)
+        [ "$mask" = 1 ] && mount -t tmpfs none /tmp
+        ;;
+    esac
+
     cd "$EGG_REPO"
     exec "$@"
   ' sh "$@"
