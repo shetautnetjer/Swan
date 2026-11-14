@@ -15,6 +15,11 @@ map of the repository, with live diagnostics and syntax-tree pattern search.
 Use `rg` to cross-check completeness. Available languages and live features
 depend on the installed indexers, checkers and language servers.
 
+Swan runs indexing sealed by default (no network, the repo read-only, writes
+only to the map dir), so an untrusted repo can be mapped headless with no
+`swan trust` step. `swan trust <repo>` still runs a repo's own build files
+(Cargo, Gradle, Maven, MSBuild) when you want the compiler-level map.
+
 This directory is maintained in the Swan repository at
 `skills/swan-code-check/`; see [PROVENANCE.md](PROVENANCE.md).
 
