@@ -867,29 +867,29 @@ fn plan_ts(repo: const u8[:], listing: const u8[:], k: i64, decls: u8[>..]&, ref
     return plan;
 }
 
-// "path\tsize\tmtime" for every .py file, in walk order (list_dir sorts).
-fn py_stamps(repo: const u8[:]) -> u8[>..] {
+// "path\tstamp" for every .py file, in walk order (list_dir sorts). S(path)
+// is the file's content stamp (map_main's `stamp`, src/change.goose).
+fn py_stamps<S>(repo: const u8[:]) -> u8[>..] {
     var s: u8[>..] = [];
     each_file(repo) { full, name =>
-        if ends_with(name, ".py") {
-            format(s, full[repo.len + 1..], "\t", swan_file_size(full), "\t", swan_mtime_ns(full), "\n");
-        }
+        if ends_with(name, ".py") { format(s, full[repo.len + 1..], "\t", S(full) as! i64, "\n"); }
     };
     return s;
 }
 
 // One fingerprint for every file with these endings (and the named build
-// files at the root): a whole-language index is reused while it is unchanged.
-fn lang_fingerprint(repo: const u8[:], endings: const u8[:][:], roots: const u8[:][:]) -> u64 {
+// files at the root): a whole-language index is reused while it is
+// unchanged. S(path) is a file's content stamp.
+fn lang_fingerprint<S>(repo: const u8[:], endings: const u8[:][:], roots: const u8[:][:]) -> u64 {
     var h: u64 = 0;
     each_file(repo) { full, name =>
         var hit = false;
         for e in endings { if ends_with(name, e) { hit = true; } }
-        if hit { h = hash_combine(h, hash(str(full, "\t", swan_file_size(full), "\t", swan_mtime_ns(full)))); }
+        if hit { h = hash_combine(h, hash_combine(hash(full), S(full))); }
     };
     for r in roots {
         let p = str(repo, "/", r);
-        if file_exists(p) { h = hash_combine(h, hash(str(p, "\t", swan_file_size(p), "\t", swan_mtime_ns(p)))); }
+        if file_exists(p) { h = hash_combine(h, hash_combine(hash(p[..]), S(p[..]))); }
     }
     return h;
 }
@@ -1145,8 +1145,9 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
         jobs.append(base); jobs.push(2);
     }
     // A whole-language job, unless its files have the fingerprint they had
-    // when its index was made.
-    fn add_lang_job(label: const u8[:], target: const u8[:], a: const u8[:], e: const u8[:], fp: u64) {
+    // when its index was made. `force` runs it anyway, with the fingerprint
+    // recorded as usual (a file whose indexed text is unknown, see below).
+    fn add_lang_job(label: const u8[:], target: const u8[:], a: const u8[:], e: const u8[:], fp: u64, force: bool = false) {
         let fps = str(fp);
         var hit = false;
         each_split(prev_index, '\n') { line =>
@@ -1154,11 +1155,260 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
             if f.len == 3 && f[0] == label && f[1] == fps && f[2] == target && file_exists(target) { hit = true; }
         };
         format(index_manifest, label, "\t", fps, "\t", target, "\n");
-        if hit {
+        if hit && !force {
             format(report, label, ": reused (no changes)\n");
             add_job("", target, "", "", "");
         } else {
             add_job(label, target, a, e, "");
+        }
+    }
+
+    // Content stamps (src/change.goose): what a file holds, not when it was
+    // saved. content-stamps.tsv keeps one line per file stamped, "path\tsize\t
+    // mtime\tstamp\traw\tc|b" (c: stamped by its code alone, b: by its bytes),
+    // so a file whose size and mtime are what the last map saw is not read
+    // again. The text of each file stamped by its code is kept in texts/, by
+    // its raw hash, to move its rows after a cosmetic edit.
+    let texts_dir = str(out, "/texts");
+    make_dir(texts_dir);
+    var stamp_prev: u8[>..] = [];
+    if !clean { read_file(str(out, "/content-stamps.tsv"), stamp_prev); }
+    var stamp_at = dictionary<u64, i64> {};
+    index_lines(stamp_prev, stamp_at);
+    var stamp_lines: u8[>..] = [];
+    var stamp_memo = dictionary<u64, u64> {};      // by the hash of the path
+    var raw_memo = dictionary<u64, u64> {};
+    var mtime_memo = dictionary<u64, i64> {};
+    var code_memo = dictionary<u64, bool> {};      // the files stamped by their code
+    fn stamp(full: const u8[:]) -> u64 {
+        guard full.len > repo.len + 1 && starts_with(full, repo) && full[repo.len] == '/' else { return hash(full); }
+        let rel = full[repo.len + 1..];
+        let key = hash(rel);
+        let m = stamp_memo.get(key);
+        if m { return m; }
+        let size = swan_file_size(full);
+        let mt = swan_mtime_ns(full);
+        var st: u64 = 0;
+        var raw: u64 = 0;
+        var by_code = false;
+        var known = false;
+        let line = line_of_path(stamp_prev, stamp_at, rel);
+        if line.len > 0 {
+            let f = split(line, '\t');
+            if f.len == 6 && f[1] == str(size) && f[2] == str(mt) {
+                let a, ok1 = parse_int(f[3]);
+                let b, ok2 = parse_int(f[4]);
+                if ok1 && ok2 { st = a as! u64; raw = b as! u64; by_code = f[5] == "c"; known = true; }
+            }
+        }
+        if !known {
+            var text: u8[>..] = [];
+            read_file(full, text);
+            raw = hash(text[..]);
+            st = raw;
+            let lang = cosmetic_lang(rel);
+            if lang.len > 0 {
+                let h, ok = code_hash(lang, text[..]);
+                if ok {
+                    st = h;
+                    by_code = true;
+                    let keep = str(texts_dir, "/t", raw as! i64, ".txt");
+                    if !file_exists(keep) { write_file(keep, text[..]); }
+                }
+            }
+        }
+        format(stamp_lines, rel, "\t", size, "\t", mt, "\t", st as! i64, "\t", raw as! i64, "\t", if by_code { "c" } else { "b" }, "\n");
+        stamp_memo.insert(key, st);
+        raw_memo.insert(key, raw);
+        mtime_memo.insert(key, mt);
+        if by_code { code_memo.insert(key, true); }
+        return st;
+    }
+    fn raw_text_of(key: u64) -> u8[>..] {
+        var s: u8[>..] = [];
+        let r = raw_memo.get(key);
+        if r { format(s, r as! i64); }
+        return s;
+    }
+
+    // Cosmetic edits. indexed-texts.tsv says, for each file stamped by its
+    // code, which text its rows were indexed from: "path\traw\tstamp", raw
+    // "?" when Swan cannot tell. row-basis.tsv lists the files whose rows
+    // Swan moved since the map was last written from indexer output:
+    // "path\traw\tmtime", the text the rows now match and the mtime recorded
+    // with it. A file whose rows could not be moved to match its text is
+    // reindexed (`forced`), whatever its stamp says.
+    var idx_prev: u8[>..] = [];
+    var basis_prev: u8[>..] = [];
+    if !clean {
+        read_file(str(out, "/indexed-texts.tsv"), idx_prev);
+        read_file(str(out, "/row-basis.tsv"), basis_prev);
+    }
+    var idx_at = dictionary<u64, i64> {};
+    var basis_at = dictionary<u64, i64> {};
+    index_lines(idx_prev, idx_at);
+    index_lines(basis_prev, basis_at);
+    var edited_at = dictionary<u64, i64> {};       // files.edited_mtime, where set
+    if !clean && file_exists(old_db) {
+        var e: u8[>..] = [];
+        let h = sqlite::open_existing(old_db, e);
+        if h != 0 {
+            let st = sqlite::prepare(h, "SELECT file, edited_mtime FROM files WHERE edited_mtime IS NOT NULL", e);
+            if st != 0 {
+                while sqlite::step(st, e) == 1 {
+                    var f: u8[>..] = [];
+                    sqlite::col_text(st, 0, f);
+                    edited_at.insert(hash(f[..]), sqlite::col_int(st, 1));
+                }
+                sqlite::finalize(st);
+            }
+            sqlite::close(h);
+        }
+    }
+    fn have_text(raw: const u8[:]) -> bool { raw.len > 0 && raw != "?" && file_exists(str(texts_dir, "/t", raw, ".txt")) }
+    // The text the map's rows for a file match while no rows are rewritten
+    // from indexer output: "" when that is its current text, "?" unknown.
+    fn rows_basis(rel: const u8[:], key: u64, full: const u8[:], idx_raw: const u8[:]) -> u8[>..] {
+        let et = edited_at.get(key);
+        guard et else { return str(idx_raw); }
+        let t: i64 = et;
+        let b = line_of_path(basis_prev, basis_at, rel);
+        if b.len > 0 {
+            let f = split(b, '\t');
+            if f.len == 3 && f[2] == str(t) { return str(f[1]); }
+        }
+        if t == swan_mtime_ns(full) { return str(""); }
+        return str("?");
+    }
+    var forced: u8[>..] = [];        // paths, one per line
+    var force_ts = false;
+    var n_cosmetic = 0;
+    each_file(repo) { full, name =>
+        guard cosmetic_lang(name).len > 0;
+        let st = stamp(full);
+        let rel = full[repo.len + 1..];
+        let key = hash(rel);
+        guard code_memo.contains(key);
+        let raw = raw_text_of(key);
+        let line = line_of_path(idx_prev, idx_at, rel);
+        guard line.len > 0;          // new since the last map: indexed anyway
+        let f = split(line, '\t');
+        guard f.len == 3;
+        var why = f[1] == "?";
+        if !why && f[2] == str(st as! i64) {     // its code is as indexed: no indexer would run for it
+            if f[1] != raw && !have_text(f[1]) { why = true; }
+            let b = rows_basis(rel, key, full, f[1]);
+            if b.len > 0 && b != raw && !have_text(b) { why = true; }
+            if !why && f[1] != raw { n_cosmetic++; }
+        }
+        if why {
+            format(forced, rel, "\n");
+            if cosmetic_lang(name) != "python" { force_ts = true; }
+        }
+    };
+    if n_cosmetic > 0 { format(report, "cosmetic edits: ", n_cosmetic, " file(s) changed only in comments or layout; no indexer runs for them\n"); }
+    if forced.len > 0 { format(report, "reindexing ", count_lines(forced), " file(s) whose indexed text is unknown\n"); }
+
+    // Which text each file's rows came from after this map, from the
+    // flattener's documents.tsv ("path\t1" when this map's indexers wrote
+    // its rows, "\t0" when they were kept from before).
+    var idx_new: u8[>..] = [];
+    fn note_indexed(docs: const u8[:]) {
+        each_split(docs, '\n') { line =>
+            let f = split(line, '\t');
+            guard f.len == 2;
+            let key = hash(f[0]);
+            guard code_memo.contains(key);
+            if f[1] == "1" {
+                let mt = mtime_memo.get(key);
+                let st = stamp_memo.get(key);
+                if mt && st {
+                    let then: i64 = mt;
+                    let s: u64 = st;
+                    // Changed while the indexers ran: which text they read is unknown.
+                    if swan_mtime_ns(str(repo, "/", f[0])) == then { format(idx_new, f[0], "\t", raw_text_of(key), "\t", s as! i64, "\n"); }
+                    else { format(idx_new, f[0], "\t?\t", s as! i64, "\n"); }
+                }
+            } else {
+                let p = line_of_path(idx_prev, idx_at, f[0]);
+                if p.len > 0 { idx_new.append(p); idx_new.push('\n'); }
+            }
+        };
+    }
+    // For the flattener: the indexed text of each file whose rows may be kept
+    // from before and whose text has changed since ("path\ttext file").
+    fn kept_texts() -> u8[>..] {
+        var t: u8[>..] = [];
+        each_split(idx_prev, '\n') { line =>
+            let f = split(line, '\t');
+            guard f.len == 3 && have_text(f[1]);
+            let key = hash(f[0]);
+            guard code_memo.contains(key) && raw_text_of(key) != f[1];
+            format(t, f[0], "\t", texts_dir, "/t", f[1], ".txt\n");
+        };
+        return t;
+    }
+    // Once the map is written: moves the rows of each file edited only in
+    // comments or layout since its rows were made, to match its text, and
+    // saves the records above. `rewritten`: every row was just written from
+    // indexer output, so the rows match the indexed texts.
+    fn finish_cosmetic(rewritten: bool) {
+        var err: u8[>..] = [];
+        let db = sqlite::open_existing(str(out, "/swan.db"), err);
+        guard db != 0 else { return; }
+        var basis_new: u8[>..] = [];
+        var unknown = dictionary<u64, bool> {};
+        var moved = 0;
+        each_split(idx_new, '\n') { line =>
+            let f = split(line, '\t');
+            guard f.len == 3;
+            let key = hash(f[0]);
+            guard code_memo.contains(key);
+            let full = str(repo, "/", f[0]);
+            let raw = raw_text_of(key);
+            let basis: u8[>..] = if rewritten { str(f[1]) } else { rows_basis(f[0], key, full[..], f[1]) };
+            guard basis.len > 0 && basis != raw;       // the rows already match the text
+            var old: u8[>..] = [];
+            var cur: u8[>..] = [];
+            guard read_file(full, cur) && str(hash(cur[..]) as! i64) == raw;   // changed again since: stale for now
+            if basis != "?" && read_file(str(texts_dir, "/t", basis, ".txt"), old) &&
+               shift_cosmetic(db, f[0], cosmetic_lang(f[0]), old[..], cur[..]) {
+                mark_edited(db, f[0], full[..]);
+                format(basis_new, f[0], "\t", raw, "\t", swan_mtime_ns(full), "\n");
+                moved++;
+            } else {
+                unknown.insert(key, true);
+            }
+        };
+        sqlite::close(db);
+        if moved > 0 { format(report, "\ncosmetic edits: rows moved to match ", moved, " file(s), no indexer run"); }
+        if unknown.count > 0 { format(report, "\ncosmetic edits: ", unknown.count, " file(s) could not be matched; they are reindexed next map"); }
+        // A file whose rows could not be moved is marked unknown: the next map reindexes it.
+        var idx_out: u8[>..] = [];
+        each_split(idx_new, '\n') { line =>
+            let f = split(line, '\t');
+            guard f.len == 3;
+            if unknown.contains(hash(f[0])) { format(idx_out, f[0], "\t?\t", f[2], "\n"); } else { format(idx_out, line, "\n"); }
+        };
+        if !rewritten {
+            var updated = dictionary<u64, bool> {};
+            each_split(basis_new, '\n') { line => let t = find(line, "\t"); if t > 0 { updated.insert(hash(line[..t]), true); } };
+            each_split(basis_prev, '\n') { line =>
+                let t = find(line, "\t");
+                if t > 0 && !updated.contains(hash(line[..t])) && edited_at.contains(hash(line[..t])) { format(basis_new, line, "\n"); }
+            };
+        }
+        write_file(str(out, "/indexed-texts.tsv"), idx_out);
+        write_file(str(out, "/row-basis.tsv"), basis_new);
+        // Kept texts no record names go.
+        var keep = dictionary<u64, bool> {};
+        fn keep_raw(r: const u8[:]) { if r.len > 0 && r != "?" { keep.insert(hash(str("t", r, ".txt")), true); } }
+        each_split(idx_out, '\n') { line => let f = split(line, '\t'); if f.len == 3 { keep_raw(f[1]); } };
+        each_split(basis_new, '\n') { line => let f = split(line, '\t'); if f.len == 3 { keep_raw(f[1]); } };
+        code_memo.each() { key, yes => keep_raw(raw_text_of(key)); };
+        var names: u8[>..] = [];
+        if list_dir(texts_dir, names) {
+            each_split(names, '\n') { nm => if nm.len > 0 && !keep.contains(hash(nm)) { delete_file(str(texts_dir, "/", nm)); } };
         }
     }
 
@@ -1205,7 +1455,7 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
             arg(a, repo);
             arg(a, dir);
         }
-        let ts_fp = lang_fingerprint(repo, [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"], ["tsconfig.json", "package.json"]);
+        let ts_fp = lang_fingerprint(repo, [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"], ["tsconfig.json", "package.json"]) { f => stamp(f) };
         // What tsc would compile, to split it.
         let base: u8[>..] = if l.tsconfig { str(repo, "/tsconfig.json") } else { str(out, "/tsproject/tsconfig.json") };
         var la: u8[>..] = [];
@@ -1229,7 +1479,7 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
         };
         for r in ["tsconfig.json", "package.json"] {
             let pth = str(repo, "/", r);
-            if file_exists(pth) { names_key = hash_combine(names_key, hash(str(pth, "\t", swan_file_size(pth), "\t", swan_mtime_ns(pth)))); }
+            if file_exists(pth) { names_key = hash_combine(names_key, hash_combine(hash(pth[..]), stamp(pth[..]))); }
         }
         var listing: u8[>..] = [];
         var cached: u8[>..] = [];
@@ -1257,7 +1507,7 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
             cache_write("typescript-chunks.txt", chunks);
         }
         if chunks.len == 0 {
-            add_lang_job("scip-typescript", target, a, child_env(l, ""), ts_fp);
+            add_lang_job("scip-typescript", target, a, child_env(l, ""), ts_fp, force_ts);
         } else {
             // Each chunk extends the project's tsconfig (or Swan's own) with its
             // own include list, plus every .d.ts, since declarations such as
@@ -1271,18 +1521,18 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
             var shared: u64 = 0;
             for r in ["tsconfig.json", "package.json"] {
                 let pth = str(repo, "/", r);
-                if file_exists(pth) { shared = hash_combine(shared, hash(str(r, "\t", swan_file_size(pth), "\t", swan_mtime_ns(pth)))); }
+                if file_exists(pth) { shared = hash_combine(shared, hash_combine(hash(r), stamp(pth[..]))); }
             }
             shared = hash_combine(shared, hash(base));
             each_split(decls, '\n') { f =>
                 if f.len > repo.len {
-                    let st = str(f[repo.len + 1..], "\t", swan_file_size(f), "\t", swan_mtime_ns(f));
+                    let st = str(f[repo.len + 1..], "\t", stamp(f) as! i64);
                     shared = hash_combine(shared, hash(st));
                     format(stamps, st, "\n");
                 }
             };
             each_split(chunks, '\n') { chunk => each_split(chunk, '\t') { f =>
-                if f.len > repo.len { format(stamps, f[repo.len + 1..], "\t", swan_file_size(f), "\t", swan_mtime_ns(f), "\n"); }
+                if f.len > repo.len { format(stamps, f[repo.len + 1..], "\t", stamp(f) as! i64, "\n"); }
             }; };
             // Layers index changed files against the last map's view of
             // everything else, so they are only used while the shared inputs
@@ -1293,7 +1543,8 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
             cache_write("typescript-shared.txt", str(shared));
             var prev_stamps: u8[>..] = [];
             read_file(str(out, "/typescript-files.tsv"), prev_stamps);
-            let dirty = dependents_of_changes(out, stamps, prev_stamps);
+            var dirty = dependents_of_changes(out, stamps, prev_stamps);
+            dirty.append(forced);
             cache_write("typescript-files.tsv", stamps);
             // A small edit: rather than rerun whole chunks (each loads the
             // shared code, about 7 s on AEON), index just the changed files
@@ -1404,7 +1655,7 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
                 each_split(chunk, '\t') { f =>
                     if f.len > repo.len {
                         let rel = f[repo.len + 1..];
-                        fp = hash_combine(fp, hash(str(rel, "\t", swan_file_size(f), "\t", swan_mtime_ns(f))));
+                        fp = hash_combine(fp, hash_combine(hash(rel), stamp(f)));
                         if !touched && contains_line(dirty, rel) { touched = true; }
                     }
                 };
@@ -1450,7 +1701,7 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
         }
         let slash = rfind(repo, "/");
         let pieces = plan_python(repo, min(jobs_limit(), 6));
-        let stamps = py_stamps(repo);
+        let stamps = py_stamps(repo) { f => stamp(f) };
         // A src layout (src/<package>/__init__.py) is importable only once
         // the package is installed, which Swan never does, so tests and
         // scripts that `import <package>` resolved to nothing. Putting src on
@@ -1478,12 +1729,13 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
 
         // Reuse: a piece whose files are unchanged since the last map, and
         // none of whose files use a symbol defined in a changed file, keeps
-        // its last index. Each file is stamped by size and mtime.
+        // its last index. Each file is stamped by its content (`stamp`).
         var prev_stamps: u8[>..] = [];
         read_file(str(out, "/python-files.tsv"), prev_stamps);
         var prev_manifest: u8[>..] = [];
         read_file(str(out, "/python-pieces.tsv"), prev_manifest);
         var dirty = dependents_of_changes(out, stamps, prev_stamps);
+        dirty.append(forced);
         cache_write("python-files.tsv", stamps);
         var manifest: u8[>..] = [];
         var reused = 0;
@@ -1528,7 +1780,7 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
         arg(a, "--output");
         arg(a, target);
         add_lang_job("rust-analyzer scip", target, a, child_env(l, env_entry("CARGO_TARGET_DIR", str(out, "/cargo-target"))),
-                     lang_fingerprint(repo, [".rs"], ["Cargo.toml", "Cargo.lock"]));
+                     lang_fingerprint(repo, [".rs"], ["Cargo.toml", "Cargo.lock"]) { f => stamp(f) });
     }
 
     // scip-java indexes Java, and Kotlin built with Gradle (its compiler
@@ -1575,7 +1827,7 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
         add_lang_job("scip-java", target, a, child_env(l, genv),
                      hash_combine(lang_fingerprint(repo, [".java", ".kt", ".kts", ".gradle"],
                                       ["pom.xml", "build.gradle", "build.gradle.kts", "settings.gradle",
-                                       "settings.gradle.kts", "gradle/libs.versions.toml"]), hash(a)));
+                                       "settings.gradle.kts", "gradle/libs.versions.toml"]) { f => stamp(f) }, hash(a)));
     }
 
     // C# (Unity, Godot C#, .NET): scip-dotnet over the solution or project at
@@ -1596,7 +1848,7 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
         arg(a, "--output");
         arg(a, target);
         add_lang_job("scip-dotnet", target, a, child_env(l, dotnet_env(home)),
-                     lang_fingerprint(repo, [".cs", ".csproj", ".sln", ".slnx", ".props", ".targets"], ["global.json", "NuGet.config"]));
+                     lang_fingerprint(repo, [".cs", ".csproj", ".sln", ".slnx", ".props", ".targets"], ["global.json", "NuGet.config"]) { f => stamp(f) });
     }
 
     if l.c || l.cuda {
@@ -1614,7 +1866,7 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
         arg(a, str("--index-output-path=", target));
         add_lang_job("scip-clang", target, a, child_env(l, ""),
                      lang_fingerprint(repo, [".c", ".cc", ".cpp", ".cxx", ".h", ".hpp", ".hh", ".cu", ".cuh"],
-                                      ["compile_commands.json", "build/compile_commands.json"]));
+                                      ["compile_commands.json", "build/compile_commands.json"]) { f => stamp(f) });
     }
 
     if skipped.len > 0 { format(report, untrusted_note(skipped, repo), "\n"); }
@@ -1629,7 +1881,7 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
         arg(a, target);
         var fp: u64 = hash(str(home, "/tools/syntax-index.ts\t", swan_file_size(str(home, "/tools/syntax-index.ts"))));
         each_file(repo) { full, name =>
-            if syntax_file(full, name) { fp = hash_combine(fp, hash(str(full, "\t", swan_file_size(full), "\t", swan_mtime_ns(full)))); }
+            if syntax_file(full, name) { fp = hash_combine(fp, hash_combine(hash(full), stamp(full))); }
         };
         add_lang_job("syntax-index", target, a, child_env(l, ""), fp);
     }
@@ -1697,6 +1949,7 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
 
     var scips: u8[>..] = [];      // NUL-separated index files, for the flattener
     var failed: u8[>..] = [];     // their index files, one per line
+    var fresh_scips: u8[>..] = [];  // the index files this map's indexers wrote, one per line
     var ok = true;
     var idx = 0;
     each_split(jobs[..jobs.len - 1], 2) { job =>
@@ -1704,6 +1957,7 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
         let code = codes[idx];
         if f[0].len > 0 { format(report, f[0], ": ", (took[idx] * 1000.0) as i64, " ms"); }
         if code == 0 && file_exists(f[1]) {
+            if f[0].len > 0 { format(fresh_scips, f[1], "\n"); }
             if f[4].len > 0 { arg(scips, str(f[1], "=", f[4])); } else { arg(scips, f[1]); }
         } else {
             ok = false;
@@ -1753,14 +2007,30 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
         };
     }
     let db = str(out, "/swan.db");
+    write_file(str(out, "/content-stamps.tsv"), stamp_lines);
     if !clean && reused_all && file_exists(db) && file_exists(str(out, "/occurrences.tsv")) {
-        format(report, "nothing changed since the last map\nswan map: ", ((clock() - t_start) * 1000.0) as i64, " ms in all");
+        // No indexer ran, but files edited only in comments or layout still
+        // need their rows moved.
+        idx_new.append(idx_prev);
+        finish_cosmetic(false);
+        format(report, if n_cosmetic > 0 { "\nno code changed since the last map" } else { "nothing changed since the last map" },
+               "\nswan map: ", ((clock() - t_start) * 1000.0) as i64, " ms in all");
         return ok;
     }
 
+    // The flattener reads some files' text itself (import statements, C
+    // bodies, Rust macros): for rows kept from before, the text they were
+    // indexed from.
+    write_file(str(out, "/fresh-indexes.txt"), fresh_scips);
+    write_file(str(out, "/kept-texts.tsv"), kept_texts());
+    delete_file(str(out, "/documents.tsv"));
     var fl: u8[>..] = [];
     arg(fl, "bun");
     arg(fl, str(home, "/tools/scip-flatten.ts"));
+    arg(fl, "--fresh");
+    arg(fl, str(out, "/fresh-indexes.txt"));
+    arg(fl, "--texts");
+    arg(fl, str(out, "/kept-texts.tsv"));
     arg(fl, "--root");
     arg(fl, repo);
     let parts = split(scips[..scips.len - 1], 0);
@@ -1788,6 +2058,10 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
         guard clean_rows_valid(out, report) else { return false; }
     }
     index_main_locked(out, db, repo, !clean && file_exists(db), report);
+    var docs: u8[>..] = [];
+    read_file(str(out, "/documents.tsv"), docs);
+    note_indexed(docs);
+    finish_cosmetic(true);
     if clean && pending_cache.len > 0 {
         let entries = split(pending_cache[..pending_cache.len - 1], 0);
         for i in entries.len / 2 {

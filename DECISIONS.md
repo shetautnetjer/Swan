@@ -293,3 +293,65 @@ Full numbers and the test code: the user's lab folder
 `aya/projects/developmental-lab/swan-storage-test-20261114/` (RESULTS.md,
 CRITERIA.md, box/). This supersedes the reasoning-only storage pick in
 `docs/modular-design.md`, which reached the same answer.
+
+## 2026-11-14 13:25 PT — A refresh reruns an indexer only when code changed
+
+Pick #1 from the Understand-Anything and rea study. The user's question was
+whether this belongs in Swan, a separate watcher for Brain, or a Rust core;
+the answer that settled it (his "Yes", 12:57 PT) was where the time goes: on
+rea's full map scip-typescript took 47 of 56 s and Swan's own steps about 8 s.
+So the saving is in not running the indexer, wherever the code lives.
+
+What changed: reuse used to key each file by size and mtime, so any save
+reran its indexer, and on rea TypeScript is one whole-program job (the other
+languages take all eight slots, so it is not split into chunks). Now each
+file is stamped by its content (src/change.goose). TypeScript, JavaScript and
+Python are stamped by their syntax tree with plain comments and layout left
+out; other languages, and files that do not parse cleanly, by their bytes.
+Comments indexers read stay in: doc comments become symbol docs, `@jsx` and
+`@ts-` pragmas change how code resolves, and Python `# type:` comments are
+read by pyright. C and C++ are bytes-only for now because scip-clang may read
+ordinary comments too and the flattener reads C text for bodies.
+
+A cosmetic edit leaves the indexed rows at old positions, so Swan keeps each
+indexed text (map folder `texts/`, about the code's size) and moves the rows
+token by token, as edit.goose does after Swan's own edits. The flattener now
+reads the indexed text, not the current one, for rows it keeps
+(markImports, cBodies, rustMacroUses), and says which index each document
+came from (documents.tsv). When Swan does not know which text a file's rows
+match (it changed while the indexers ran, or the copy is gone), that file is
+reindexed in the same map: "unknown" is never treated as fresh.
+
+Pass criteria, written before the run: a comment/format edit runs no
+indexer and the map equals a fresh build of the edited repo; a doc comment,
+a real change and a Python indent change do run the indexer and also equal a
+fresh build (tests/cosmetic_check.sh, 23 checks). Measured on a private copy
+of rea, unsealed on both sides (SWAN_SANDBOX=0: the seal cannot bind-mount
+from the root shell used), same machine, one run each:
+
+| Refresh | Before | After |
+|---|---|---|
+| full map | 57.2 s | 65.3 s (first run stamps and copies every file) |
+| nothing changed | 5.7 s | 5.7 s |
+| comment added to one .ts file | 51.3 s | 5.7 s |
+| that file reformatted | 52.1 s | 5.7 s |
+| real code added to it | 51.3 s | 52.0 s |
+| comment added to one .py file | 6.0 s | 5.7 s |
+| real code added to it | 5.8 s | 5.9 s |
+
+On rea, comment and spacing edits to 40 files at once (30 TypeScript, 10
+Python) left the map's rows for those files equal to a fresh map of the same
+text, twice: 17,817 rows in a first run (where four of the TypeScript files
+were stamped by bytes, so scip-typescript ran), and 19,724 rows in a second
+run on files that all parse, after the refresh (7.7 s, no scip-typescript)
+and one more refresh on top. None differed. Limit seen there: 213 of rea's TypeScript
+files (about 3%) do not parse cleanly with Swan's tree-sitter TypeScript
+grammar (which syntax trips it was not checked), so they are stamped by
+bytes and any edit to one of them still reruns scip-typescript.
+
+Not done here, and worth doing next: (1) a real TypeScript change on rea
+still reruns the whole program; the existing "layer" path (index only the
+changed files and their users) works only in chunk mode, and rea never gets
+chunks. (2) About 4.4 s of every rea refresh, even with nothing changed, is
+the flattener rerunning because scip-java fails on rea's Java files without a
+build tool and is retried every map.

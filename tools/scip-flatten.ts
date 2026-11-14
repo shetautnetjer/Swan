@@ -2,7 +2,7 @@
 // parses protobuf. No dependencies: a minimal wire-format reader for the few
 // fields Swan needs (field numbers from github.com/sourcegraph/scip scip.proto).
 //
-//   bun tools/scip-flatten.ts [--root <repo>] <index.scip> <out-dir> [more.scip ...]
+//   bun tools/scip-flatten.ts [--fresh <list>] [--texts <tsv>] [--root <repo>] <index.scip> <out-dir> [more.scip ...]
 //
 // With --root, Rust sources are read for one more pass: uses inside macro
 // calls (vec![...], matches!(...), assert!(...)) that rust-analyzer left out
@@ -99,11 +99,32 @@ const ROLE_IMPORT = 2;   // the name in an import statement: a use, not a call
 
 const argv = process.argv.slice(2);
 let repoRoot = "";
-if (argv[0] === "--root") { repoRoot = argv[1]; argv.splice(0, 2); setRepoRoot(repoRoot); }
+// --fresh names the index files `swan map` just wrote (one per line); the
+// rows of the others were kept from an earlier map. --texts gives, for a
+// file whose text changed since its kept rows were indexed, the text they
+// were indexed from ("path\ttext file"), which the passes below that read
+// a file's source then read instead (src/change.goose). documents.tsv says
+// which index each document's rows came from: "path\t1" for a fresh one.
+let freshIndexes: Set<string> | null = null;
+const keptTexts = new Map<string, string>();
+const readLines = (f: string) => readFileSync(f, "utf8").split("\n").filter((l) => l.length > 0);
+while (argv[0] === "--fresh" || argv[0] === "--texts" || argv[0] === "--root") {
+  const [flag, value] = argv.splice(0, 2);
+  if (flag === "--fresh") freshIndexes = new Set(readLines(value));
+  else if (flag === "--texts") for (const l of readLines(value)) { const t = l.indexOf("\t"); if (t > 0) keptTexts.set(l.slice(0, t), l.slice(t + 1)); }
+  else { repoRoot = value; setRepoRoot(repoRoot); }
+}
 const [indexPath, outDir, ...moreIndexes] = argv;
 if (!indexPath || !outDir) {
-  console.error("usage: bun tools/scip-flatten.ts [--root <repo>] <index.scip> <out-dir> [more.scip ...]");
+  console.error("usage: bun tools/scip-flatten.ts [--fresh <list>] [--texts <tsv>] [--root <repo>] <index.scip> <out-dir> [more.scip ...]");
   process.exit(2);
+}
+const docFresh = new Map<string, boolean>();
+let currentIndex = "";
+// A file's source, as the index its rows came from read it.
+function sourceOf(path: string): string {
+  const kept = docFresh.get(path) === false ? keptTexts.get(path) : undefined;
+  return readFileSync(kept ?? join(repoRoot, path), "utf8");
 }
 
 // Rows per document, in document order, so each file's rows stay together.
@@ -206,7 +227,7 @@ function markImports() {
     const form = IMPORT_FORMS.find(([ext]) => ext.test(path));
     if (!form || rows.length === 0) continue;
     let text: string;
-    try { text = readFileSync(join(repoRoot, path), "utf8"); } catch { continue; }
+    try { text = sourceOf(path); } catch { continue; }
     // Statement spans as [start line, start col, end line, end col].
     const starts = [0];
     for (let i = 0; i < text.length; i++) if (text[i] === "\n") starts.push(i + 1);
@@ -241,7 +262,7 @@ function cBodies() {
   for (const d of cDefs) {
     let lines = texts.get(d.path);
     if (!lines) {
-      try { lines = readFileSync(join(repoRoot, d.path), "utf8").split("\n"); } catch { continue; }
+      try { lines = sourceOf(d.path).split("\n"); } catch { continue; }
       texts.set(d.path, lines);
     }
     let l = d.line, c = d.col, depth = 0, started = false, done = false;
@@ -336,7 +357,7 @@ function rustMacroUses() {
   };
   for (const { path, taken } of rustDocs) {
     let text: string;
-    try { text = readFileSync(join(repoRoot, path), "utf8"); } catch { continue; }
+    try { text = sourceOf(path); } catch { continue; }
     const rows = occByDoc.get(path)!;
     const lines = text.split("\n");
     for (let ln = 0; ln < lines.length; ln++) {
@@ -411,6 +432,7 @@ for (const spec of [indexPath, ...moreIndexes]) {
   const [file, base] = eq > 0 ? [spec.slice(0, eq), spec.slice(eq + 1)] : [spec, ""];
   docBase = base;
   docBaseExplicit = base !== "";
+  currentIndex = file;
   flattenIndex(new Reader(new Uint8Array(readFileSync(file))));
 }
 
@@ -470,6 +492,7 @@ root.fields((f, _wt, r) => {
   // its restore); Swan skips them when walking a repo, so the map does too.
   if (/(^|\/)obj\//.test(path)) return;
   seenDocs.add(path);
+  docFresh.set(path, freshIndexes === null || freshIndexes.has(currentIndex));
   docs++;
   for (const info of infos) symbolInfo(info, path);
   rustImplLinks(path, pending);
@@ -505,6 +528,7 @@ writeFileSync(join(outDir, "occurrences.tsv"), occ.join("\n") + "\n");
 writeFileSync(join(outDir, "symbols.tsv"), [...syms.values()].join("\n") + "\n");
 writeFileSync(join(outDir, "extents.tsv"), ext.join("\n") + "\n");
 writeFileSync(join(outDir, "relationships.tsv"), rel.join("\n") + "\n");
+writeFileSync(join(outDir, "documents.tsv"), [...docFresh].map(([p, f]) => `${p}\t${f ? 1 : 0}\n`).join(""));
 console.error(
   `scip-flatten: ${docs} documents${dupDocs ? ` (${dupDocs} repeats dropped)` : ""}, ${occ.length} occurrences, ${syms.size} symbols, ${ext.length} extents, ${rel.length} relationships in ${Math.round(performance.now() - t0)} ms`,
 );
