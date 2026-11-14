@@ -34,7 +34,7 @@ answer.
 ## Where Swan is today
 
 - Exact and fast: compiler-made maps, answers in milliseconds, symbol edits,
-  live diagnostics. After today's fixes it scored 0.85 against Graphify's 0.70
+  live diagnostics. After today's fixes it scored 0.91 against Graphify's 0.70
   on the cold test's 14 questions.
 - Not modular at its edges: `src/pipeline.goose` (about 2,100 lines) hard-codes
   every language's detection, tool paths, environment and reuse rules. The
