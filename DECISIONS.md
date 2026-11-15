@@ -422,3 +422,50 @@ outside the layer can get another number than the full run gave it; the
 layered map differs from a one-chunk fresh map in 101 rows, these and
 type-print order. About 5.7 s of every rea refresh is still Swan's own
 steps and the flattener rerunning because scip-java fails on rea every map.
+
+## 2026-11-15 12:20 PT — Swan's own steps use every core; the flattener is Rust
+
+Asked: rebuild Swan in Rust on a branch and see whether it is faster.
+Measured first (strace timeline of `swan map`, rea / Understand-Anything /
+caura): 80 to 98% of a full map is the outside indexers (scip-typescript,
+scip-python), which a Rust Swan would run just the same; Goose already
+compiles to native code. Swan's own slow parts were three: stamping every
+TS/JS/Python file on one core (6.6 s on a first rea map), the TypeScript
+flattener under bun (4.4 to 6.7 s on every map that indexed anything), and
+the SQLite write (3.9 s on a full rea map, left as it is).
+
+Decided:
+- Stamping runs on every core in Goose (`prestamp`, `swan stamp-worker`
+  processes; `SWAN_STAMP_MODE=threads` does the same on Goose threads with
+  typed queues). Not Rust: a stamp must be Goose's code_hash exactly, or
+  every existing map would rebuild, and the same code in the workers makes
+  content-stamps.tsv byte for byte what one core writes. Processes are the
+  default because a failed worker only leaves its files to the main process.
+- The flattener is Rust (native/swan-flatten, rayon), byte for byte the
+  TypeScript one's output; build.sh builds it when cargo is there, and
+  `SWAN_NATIVE_FLATTEN=0` keeps the TypeScript one.
+- A refresh where only failed indexers ran (rea's scip-java on the PC) no
+  longer reflattens the same index files (flattened-inputs.txt).
+
+Measured in a throwaway Omarchy box (16 cores, 10 GB), rea, unsealed:
+
+| | main | branch, 1 core | branch, 16 cores | branch, 16 threads |
+|---|---|---|---|---|
+| full map | 88.2 s | 74.9 s | 65.9 s | 65.5 s |
+| code edit in one .ts file | 9.10 s | 3.95 s | 2.97 s | 2.73 s |
+| flatten | 5.3 to 6.7 s | 1.5 s | 0.47 to 0.61 s | 0.40 s |
+| stamping a first map | 7.0 s | 7.0 s | 0.60 s | 0.56 s |
+
+scip-typescript alone took 57 to 67 s across these runs, so full-map wall
+times carry about 10 s of indexer noise; the step times are the comparison.
+Stamping by workers: 2: 3.6 s, 4: 1.85 s, 8: 0.98 s, 16: 0.60 s (threads
+within 7%); 32 on the PC 0.48 s. A worker process costs 0.7 to 0.8 ms.
+On the PC, where scip-java fails on rea, a nothing-changed refresh went
+from 5.6 s to 0.57 s and a comment edit from 5.7 s to 0.65 s.
+
+Accuracy: content stamps identical to main's in every run and mode. Maps
+differ from main's in 8 to 12 of 1,880,390 rows in the box (38 on the PC,
+where two runs of main differ in 30): scip-clang's choice between duplicate
+C definitions, as before. Swan's checks pass with the workers on and forced
+on (SWAN_STAMP_MIN=1), except mcp_smoke, structural_check and
+kotlin_live_check, which fail the same way on main on the PC.

@@ -16,3 +16,8 @@ fi
 "$GOOSE" build src/swan.goose -o bin/swan "$@"
 # the egg-shell sealing runner sits beside the swan binary (swan_home/bin)
 install -m 755 eggshell/eggshell bin/eggshell
+# the native flattener, when cargo is here; without it Swan uses tools/scip-flatten.ts
+if command -v cargo >/dev/null 2>&1 && [ -f native/swan-flatten/Cargo.toml ]; then
+    CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-$PWD/build/swan-flatten} cargo build --release --quiet --manifest-path native/swan-flatten/Cargo.toml
+    install -m 755 "${CARGO_TARGET_DIR:-$PWD/build/swan-flatten}/release/swan-flatten" bin/swan-flatten
+fi
