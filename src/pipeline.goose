@@ -2316,9 +2316,18 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
     write_file(str(out, "/fresh-indexes.txt"), fresh_scips);
     write_file(str(out, "/kept-texts.tsv"), kept_texts());
     delete_file(str(out, "/documents.tsv"));
+    // bin/swan-flatten (native/swan-flatten, Rust) writes the same files as
+    // tools/scip-flatten.ts, a core per index file; SWAN_NATIVE_FLATTEN=0
+    // runs the TypeScript one.
     var fl: u8[>..] = [];
-    arg(fl, "bun");
-    arg(fl, str(home, "/tools/scip-flatten.ts"));
+    let native_flat = str(home, "/bin/swan-flatten");
+    var nf: u8[>..] = [];
+    if file_exists(native_flat) && !(env("SWAN_NATIVE_FLATTEN", nf) && nf == "0") {
+        arg(fl, native_flat);
+    } else {
+        arg(fl, "bun");
+        arg(fl, str(home, "/tools/scip-flatten.ts"));
+    }
     arg(fl, "--fresh");
     arg(fl, str(out, "/fresh-indexes.txt"));
     arg(fl, "--texts");

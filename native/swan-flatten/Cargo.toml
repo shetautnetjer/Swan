@@ -1,0 +1,18 @@
+[package]
+name = "swan-flatten"
+version = "0.1.0"
+edition = "2021"
+description = "Rust port of tools/scip-flatten.ts: SCIP index to TSV, multi-core"
+
+[[bin]]
+name = "swan-flatten"
+path = "src/main.rs"
+
+[dependencies]
+rayon = "1.10"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
