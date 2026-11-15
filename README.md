@@ -107,14 +107,18 @@ shims; a literal port of Serena was not the aim. Swan's reading of the idea:
   formatting, testing and live analysis require their external tools.
 
 ```
-TS repo ──scip-typescript──▶ index.scip ──tools/scip-flatten.ts──▶ TSV rows
+TS repo ──scip-typescript──▶ index.scip ──bin/swan-flatten (Rust)──▶ TSV rows
                                                                      │
                                          bin/swan index (Goose) ◀────┘
                                                 │
                                          swan.db (SQLite) ◀── bin/swan serve (Goose, MCP stdio) ◀── AYA
 ```
 
-The SCIP flattener is TypeScript run by Bun. Native C also supplies SQLite,
+The SCIP flattener is `bin/swan-flatten`, Rust in `native/swan-flatten/`,
+using every core. `scripts/build.sh` builds it when cargo is installed;
+without it, or with `SWAN_NATIVE_FLATTEN=0`, Swan runs the original
+`tools/scip-flatten.ts` under Bun, which writes the same files byte for byte.
+Native C also supplies SQLite,
 tree-sitter and its grammars, process/file helpers and the LSP bridge.
 The matcher and LSP client logic are Goose; the language servers they use
 are separate programs, not Goose ports. See [package boundaries](docs/packages.md)
@@ -308,7 +312,8 @@ git clone --recurse-submodules https://github.com/shetautnetjer/Swan   # lsp/ is
 cd Swan
 scripts/fetch-tools.sh                          # Goose and the indexers and servers (sha256-pinned) into .tools/, the npm tools into tools/
 # SWAN_LANGS=rust,c scripts/fetch-tools.sh      # only some language groups (rust, java, c, game, csharp); TS/JS and Python always come
-scripts/build.sh                                # bin/swan; the first build fetches goose-sqlite and goose-treesitter
+scripts/build.sh                                # bin/swan; the first build fetches goose-sqlite and goose-treesitter; bin/swan-flatten too when cargo is installed
+# SWAN_FLATTEN_PROFILE=quick scripts/build.sh   # while changing native/swan-flatten: ~1.6 s rebuilds instead of ~8 s; plain build.sh is what ships
 bin/swan map <repo> data/<name>                 # every indexer the repo needs -> map (refreshes if it exists)
 bin/swan check <repo> data/<name>               # tsc / cargo check / pyright -> diagnostics in the map
 scripts/index-repo.sh <ts-repo> data/<name>     # index.scip, TSV rows, swan.db
@@ -514,8 +519,9 @@ src/serve.goose      MCP JSON-RPC over stdio
 src/db.goose         map helpers over the imported SQLite package
 src/swan.build       Goose sidecar: native file/process helpers and LSP bridge
 native/swan_sys.c    file/process helpers
+native/swan-flatten/ the Rust SCIP flattener (bin/swan-flatten); release profile ships, quick profile for trying changes
 lsp/                goose-lsp submodule; standalone Goose client + C bridge
-tools/              scip-flatten.ts, modules.json, external npm tool manifest
+tools/              scip-flatten.ts (fallback flattener), modules.json, external npm tool manifest
 tests/               MCP smoke test, refresh-vs-fresh check, latency bench
 fixtures/tiny-ts/    a small repo with the tricky cases (re-export, rename, same-name method and function)
 skills/swan-code-check/  the agent skill for using Swan (single source; copies follow it, see its PROVENANCE.md)

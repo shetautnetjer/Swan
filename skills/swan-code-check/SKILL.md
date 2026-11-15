@@ -66,6 +66,19 @@ Maps are how Swan answers. Build and refresh them without asking:
 - Check one known symbol with `find_symbol` and confirm its file and line,
   then cross-check important references with `rg -l <name>`.
 
+**Refreshing is cheap.** Since 2026-11-15 Swan stamps files on every core
+and flattens indexes with a native Rust flattener (`bin/swan-flatten`), so a
+refresh after a code edit takes a few seconds even on a large repo (about
+3 s on rea, down from 9 s). Refresh after each batch of edits rather than
+answering from a stale map. The outside indexers still take most of a first
+map's time. Leave Swan's speed settings at their defaults. To check whether
+a wrong answer comes from the new steps, map once with
+`SWAN_STAMP_JOBS=1 SWAN_NATIVE_FLATTEN=0` (the old one-process stamping and
+the Bun flattener) and compare. `SWAN_FLATTEN_PROFILE=quick` only matters
+to someone changing Swan's own Rust code: it makes `scripts/build.sh`
+rebuild the flattener faster and does not change how Swan answers. See
+`docs/speed.md` for the numbers and every setting.
+
 **Trust is separate from maps.** Some indexers and checkers run the repo's
 own build files (Cargo, Maven, Gradle, MSBuild, a repo `.venv`). Swan skips
 those until the repo is trusted, and lists them under `skipped`. Run
