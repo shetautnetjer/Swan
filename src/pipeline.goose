@@ -1148,6 +1148,11 @@ fn prestamp(repo: const u8[:], out: const u8[:], texts_dir: const u8[:], prev: c
     }
     guard n >= min_files else { return; }
     let k = max(1, min(k_max, n / max(1, min(64, min_files))));
+    var mode: u8[>..] = [];
+    if env("SWAN_STAMP_MODE", mode) && mode == "threads" {
+        prestamp_threads(repo, texts_dir, todo, n, k, pre, report);
+        return;
+    }
     var exe: u8[>..] = [];
     guard swan_exe_path(exe) else { return; }
     let t0 = clock();
@@ -1197,6 +1202,46 @@ fn prestamp(repo: const u8[:], out: const u8[:], texts_dir: const u8[:], prev: c
     format(report, "stamps: ", n, " files on ", used, " of ", k, " workers in ", ((clock() - t0) * 1000.0) as i64, " ms\n");
 }
 
+// The same work on Goose threads instead of processes: the files go into a
+// queue, k workers take them and send each stamp line back. Goose threads
+// share no memory, so a job and a line are copied through the queue.
+struct StampJob { spec: u8[] }      // repo \x01 texts dir \x01 relative path; empty: stop
+struct StampDone { line: u8[] }
+
+thread_fn stamp_thread() {
+    loop {
+        let job = qget<StampJob>();
+        guard job.spec.len > 0 else { break; }
+        let f = split(job.spec, 1);
+        var line: u8[>..] = [];
+        stamp_line(f[0], f[2], f[1], line);
+        qput(StampDone { line: copy(line) });
+    }
+}
+
+fn prestamp_threads(repo: const u8[:], texts_dir: const u8[:], todo: const u8[:], n: i64, k_want: i64,
+                    pre: u8[>..]&, report: u8[>..]&) {
+    let t0 = clock();
+    let k = max(1, min(k_want, hardware_threads()));
+    var queued = 0;
+    each_split(todo, '\n') { rel =>
+        guard rel.len > 0;
+        var spec: u8[>..] = [];
+        spec.append(repo); spec.push(1); spec.append(texts_dir); spec.push(1); spec.append(rel);
+        qput(StampJob { spec: copy(spec) });
+        queued++;
+    };
+    for i in k { qput(StampJob { spec: [] }); }
+    var ids: i64[>..] = [];
+    for i in k { ids.push(thread_spawn(stamp_thread)); }
+    for d in queued {
+        let r = qget<StampDone>();
+        pre.append(r.line);
+    }
+    for id in ids { thread_wait(id); }
+    format(report, "stamps: ", n, " files on ", k, " threads in ", ((clock() - t0) * 1000.0) as i64, " ms\n");
+}
+
 // One file's stamp line, as map_main's `stamp` writes it to
 // content-stamps.tsv: "path\tsize\tmtime\tstamp\traw\tc|b". Keeps the text
 // of a file stamped by its code in texts_dir.
@@ -1220,6 +1265,37 @@ fn stamp_line(repo: const u8[:], rel: const u8[:], texts_dir: const u8[:], line:
         }
     }
     format(line, rel, "\t", size, "\t", mt, "\t", st as! i64, "\t", raw as! i64, "\t", if by_code { "c" } else { "b" }, "\n");
+}
+
+// swan stamp-bench <repo> <out-dir>: the stamping a first map does, alone,
+// timed, its lines written to <out-dir>/stamps.tsv. SWAN_STAMP_JOBS=1 stamps
+// in this process, file after file; otherwise prestamp runs with
+// SWAN_STAMP_MODE (processes, the default, or threads).
+fn stamp_bench_main(repo_arg: const u8[:], out_arg: const u8[:]) -> bool {
+    let repo = abs_path(repo_arg);
+    make_dir(out_arg);
+    let out = abs_path(out_arg);
+    let texts = str(out, "/texts");
+    make_dir(texts);
+    var prev: u8[>..] = [];
+    var prev_at = dictionary<u64, i64> {};
+    var pre: u8[>..] = [];
+    var report: u8[>..] = [];
+    let t0 = clock();
+    if stamp_jobs() == 1 {
+        var n = 0;
+        each_file(repo) { full, name =>
+            guard cosmetic_lang(name).len > 0;
+            stamp_line(repo, full[repo.len + 1..], texts, pre);
+            n++;
+        };
+        format(report, "stamps: ", n, " files in this process\n");
+    } else {
+        prestamp(repo, out, texts, prev, prev_at, pre, report);
+    }
+    format(report, "stamp-bench: ", ((clock() - t0) * 1000.0) as i64, " ms");
+    print(report);
+    return write_file(str(out, "/stamps.tsv"), pre);
 }
 
 // swan stamp-worker <repo> <list> <out.tsv> <texts-dir>: a stamp line for
