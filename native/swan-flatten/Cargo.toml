@@ -16,3 +16,12 @@ opt-level = 3
 lto = true
 codegen-units = 1
 panic = "abort"
+
+# For trying changes: optimized like release but without LTO and with 16
+# codegen units, so a rebuild after an edit takes seconds instead of ~9 s.
+#   cargo build --profile quick     (or SWAN_FLATTEN_PROFILE=quick scripts/build.sh)
+# The binary Swan ships is still built with the release profile above.
+[profile.quick]
+inherits = "release"
+lto = false
+codegen-units = 16

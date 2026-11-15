@@ -18,6 +18,8 @@ fi
 install -m 755 eggshell/eggshell bin/eggshell
 # the native flattener, when cargo is here; without it Swan uses tools/scip-flatten.ts
 if command -v cargo >/dev/null 2>&1 && [ -f native/swan-flatten/Cargo.toml ]; then
-    CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-$PWD/build/swan-flatten} cargo build --release --quiet --manifest-path native/swan-flatten/Cargo.toml
-    install -m 755 "${CARGO_TARGET_DIR:-$PWD/build/swan-flatten}/release/swan-flatten" bin/swan-flatten
+    # SWAN_FLATTEN_PROFILE=quick builds faster for trying changes (no LTO); release is what ships.
+    flatten_profile=${SWAN_FLATTEN_PROFILE:-release}
+    CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-$PWD/build/swan-flatten} cargo build --profile "$flatten_profile" --quiet --manifest-path native/swan-flatten/Cargo.toml
+    install -m 755 "${CARGO_TARGET_DIR:-$PWD/build/swan-flatten}/$flatten_profile/swan-flatten" bin/swan-flatten
 fi
