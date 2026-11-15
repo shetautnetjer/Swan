@@ -20,6 +20,8 @@ install -m 755 eggshell/eggshell bin/eggshell
 if command -v cargo >/dev/null 2>&1 && [ -f native/swan-flatten/Cargo.toml ]; then
     # SWAN_FLATTEN_PROFILE=quick builds faster for trying changes (no LTO); release is what ships.
     flatten_profile=${SWAN_FLATTEN_PROFILE:-release}
+    # Cargo puts the built-in dev and test profiles in target/debug.
+    case "$flatten_profile" in dev|test) flatten_dir=debug ;; *) flatten_dir=$flatten_profile ;; esac
     CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-$PWD/build/swan-flatten} cargo build --profile "$flatten_profile" --quiet --manifest-path native/swan-flatten/Cargo.toml
-    install -m 755 "${CARGO_TARGET_DIR:-$PWD/build/swan-flatten}/$flatten_profile/swan-flatten" bin/swan-flatten
+    install -m 755 "${CARGO_TARGET_DIR:-$PWD/build/swan-flatten}/$flatten_dir/swan-flatten" bin/swan-flatten
 fi
