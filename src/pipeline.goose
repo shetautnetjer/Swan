@@ -1292,6 +1292,23 @@ fn stamp_bench_main(repo_arg: const u8[:], out_arg: const u8[:]) -> bool {
         format(report, "stamps: ", n, " files in this process\n");
     } else {
         prestamp(repo, out, texts, prev, prev_at, pre, report);
+        // prestamp stamps nothing below SWAN_STAMP_MIN files, and leaves a
+        // failed worker's files out: stamp them all here then, so stamps.tsv
+        // always holds every eligible file.
+        var n_all = 0;
+        each_file(repo) { full, name =>
+            guard cosmetic_lang(name).len > 0;
+            n_all++;
+        };
+        let got = count_lines(pre);
+        if got != n_all {
+            format(report, "stamps: workers stamped ", got, " of ", n_all, " files; stamped them all in this process\n");
+            pre.clear();
+            each_file(repo) { full, name =>
+                guard cosmetic_lang(name).len > 0;
+                stamp_line(repo, full[repo.len + 1..], texts, pre);
+            };
+        }
     }
     format(report, "stamp-bench: ", ((clock() - t0) * 1000.0) as i64, " ms");
     print(report);
