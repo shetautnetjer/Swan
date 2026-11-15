@@ -704,3 +704,12 @@ edit to a file 38 others use from 53.2 s to 7.3 s; after both, the map
 differs from a fresh build in 88 of 1,876,863 rows (two whole runs differ
 in 22 to 59). An edit to a file imported from outside the include reruns
 every chunk. Details and limits in DECISIONS.md.
+
+## 2026-11-15: Swan's own steps use every core; the flattener is Rust
+
+- Code stamping runs in one worker process per core; the flattener is
+  `native/swan-flatten` (Rust), with `tools/scip-flatten.ts` as the fallback.
+  On rea, a 16-core box: full map 88.2 s to 65.5 s, map after a code edit
+  9.10 s to 2.7 s. Details and settings in docs/speed.md. (PR 31)
+- `[profile.quick]` for the flattener: `SWAN_FLATTEN_PROFILE=quick` rebuilds
+  in about 1.6 s instead of 8 s; the shipped build is unchanged. (PR 32)

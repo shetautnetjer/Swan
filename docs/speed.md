@@ -136,9 +136,44 @@ search_pattern names each match's symbol from one query per file instead of
 one per match: `await $X` over AEON (16,054 matches) went from 0.27 s to
 0.14 s, output byte for byte the same. ast-grep takes 0.1 s.
 
-A Goose flattener was weighed and not built. On AEON the Bun flattener
+A Goose flattener was weighed and not built (superseded 2026-11-15: the
+flattener is now Rust; see "Every core for Swan's own steps" below). On AEON the Bun flattener
 reads 128 MB of SCIP and writes 108 MB of rows in 1.2 s, the larger part of
 a 2 s small-edit re-map. Moving it to Goose could save part of that second,
 for a rewrite of its ~480 lines and every language repair in it. Writing
 rows straight into the map, without the TSV step, is the bigger lever if
 small-edit maps need to get faster still.
+
+## Every core for Swan's own steps (2026-11-15)
+
+Measured on rea (a large mixed-language repo) in a 16-core Omarchy test box.
+The outside indexers are still 80 to 98% of a full map; this work sped up
+the parts that are Swan's own.
+
+| | Before | After |
+|---|---|---|
+| Full map | 88.2 s | 65.5 to 65.9 s |
+| Map after one code edit | 9.10 s | 2.7 to 3.0 s |
+| Code stamping (first map) | 7.0 s | 0.6 s |
+| Flatten | 5.3 to 6.7 s | 0.4 to 0.6 s |
+| Refresh with nothing changed (development PC) | 5.6 s | 0.57 s |
+
+Stamps are identical to before. Maps match within 8 to 12 of 1.88 million
+rows, which is scip-clang's own duplicate-definition noise between runs.
+
+- **Stamping.** A first map stamps every TypeScript, JavaScript and Python
+  file in `swan stamp-worker` processes, one per core.
+  `SWAN_STAMP_JOBS` sets how many (default every core, at most 32; 1 stamps
+  in one process as before). `SWAN_STAMP_MIN` (default 256) is the file count
+  below which starting workers costs more than it saves.
+  `SWAN_STAMP_MODE=threads` uses Goose threads instead; it ties with
+  processes at every core count. `swan stamp-bench <repo> <out-dir>` times
+  the stamping alone.
+- **Flatten.** `bin/swan-flatten` (Rust, rayon) replaces the Bun flattener,
+  a core per index file. `SWAN_NATIVE_FLATTEN=0` goes back to
+  `tools/scip-flatten.ts`. A refresh where only failed indexers reran skips
+  the flatten (`flattened-inputs.txt` records what was last flattened).
+- **Rebuilding the flattener.** The release profile (full LTO, one codegen
+  unit) is what ships and takes about 8 s to rebuild after an edit.
+  `SWAN_FLATTEN_PROFILE=quick scripts/build.sh` rebuilds in about 1.6 s for
+  trying changes. blaze was tried and was slower than cargo for this crate.
