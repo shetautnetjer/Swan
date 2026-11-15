@@ -1139,8 +1139,15 @@ fn prestamp(repo: const u8[:], out: const u8[:], texts_dir: const u8[:], prev: c
         format(todo, rel, "\n");
         n++;
     };
-    guard n >= 256 else { return; }
-    let k = min(k_max, n / 64);
+    // Below a few hundred files starting processes costs more than it saves.
+    var min_files: i64 = 256;
+    var mv: u8[>..] = [];
+    if env("SWAN_STAMP_MIN", mv) {
+        let m, ok = parse_int(mv);
+        if ok && m > 0 { min_files = m; }
+    }
+    guard n >= min_files else { return; }
+    let k = max(1, min(k_max, n / max(1, min(64, min_files))));
     var exe: u8[>..] = [];
     guard swan_exe_path(exe) else { return; }
     let t0 = clock();
