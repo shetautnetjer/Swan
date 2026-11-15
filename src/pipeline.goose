@@ -1098,6 +1098,136 @@ fn clean_rows_valid(out: const u8[:], report: u8[>..]&) -> bool {
     return true;
 }
 
+// ---- Stamping on several cores -------------------------------------------
+
+// Whether content-stamps.tsv already holds this file's stamp (same size and
+// mtime), so map_main's `stamp` would not read it.
+fn stamp_known(prev: const u8[:], prev_at: dictionary<u64, i64>&, rel: const u8[:], full: const u8[:]) -> bool {
+    let line = line_of_path(prev, prev_at, rel);
+    guard line.len > 0 else { return false; }
+    let f = split(line, '\t');
+    return f.len == 6 && f[1] == str(swan_file_size(full)) && f[2] == str(swan_mtime_ns(full));
+}
+
+// How many stamp workers to start: $SWAN_STAMP_JOBS, else every core, at
+// most 32. 1 stamps in this process, as before.
+fn stamp_jobs() -> i64 {
+    var v: u8[>..] = [];
+    if env("SWAN_STAMP_JOBS", v) {
+        let n, ok = parse_int(v);
+        if ok && n > 0 { return n; }
+    }
+    return max(1, min(32, swan_cpu_count() as i64));
+}
+
+// A first map parses every TypeScript, JavaScript and Python file to stamp
+// its code (src/change.goose), one after another: 6.6 s on rea. This stamps
+// the files content-stamps.tsv does not already hold in `swan stamp-worker`
+// processes, one per core, and leaves their lines in `pre`. The workers run
+// the same code (stamp_file), so a stamp is the same whichever process made
+// it; a worker that fails leaves its files to be stamped here.
+fn prestamp(repo: const u8[:], out: const u8[:], texts_dir: const u8[:], prev: const u8[:], prev_at: dictionary<u64, i64>&,
+            pre: u8[>..]&, report: u8[>..]&) {
+    let k_max = stamp_jobs();
+    guard k_max > 1 else { return; }
+    var todo: u8[>..] = [];        // relative paths, one per line
+    var n = 0;
+    each_file(repo) { full, name =>
+        guard cosmetic_lang(name).len > 0;
+        let rel = full[repo.len + 1..];
+        guard !stamp_known(prev, prev_at, rel, full);
+        format(todo, rel, "\n");
+        n++;
+    };
+    guard n >= 256 else { return; }
+    let k = min(k_max, n / 64);
+    var exe: u8[>..] = [];
+    guard swan_exe_path(exe) else { return; }
+    let t0 = clock();
+    var started = 0;
+    var pids: i64[>..] = [];
+    for w in k {
+        let list = str(out, "/prestamp-", w, ".txt");
+        delete_file(str(out, "/prestamp-", w, ".tsv"));
+        var mine: u8[>..] = [];    // every k-th file, so big and small files spread evenly
+        var i = 0;
+        each_split(todo, '\n') { rel =>
+            guard rel.len > 0;
+            if i % k == w { format(mine, rel, "\n"); }
+            i++;
+        };
+        guard write_file(list, mine) else { pids.push(0); continue; }
+        var a: u8[>..] = [];
+        arg(a, exe);
+        arg(a, "stamp-worker");
+        arg(a, repo);
+        arg(a, list);
+        arg(a, str(out, "/prestamp-", w, ".tsv"));
+        arg(a, texts_dir);
+        let pid = swan_spawn(a[..], repo, "", str(out, "/prestamp-log-", w, ".txt"));
+        pids.push(pid);
+        if pid > 0 { started++; }
+    }
+    var codes: i32[>..] = [];
+    for w in k { codes.push(-1); }
+    while started > 0 {
+        var code: i32 = 0;
+        let pid = swan_wait_any(code);
+        guard pid > 0 else { started = 0; continue; }
+        for p, w in pids { if p == pid { codes[w] = code; started--; } }
+    }
+    var used = 0;
+    for w in k {
+        let part = str(out, "/prestamp-", w, ".tsv");
+        if codes[w] == 0 {
+            var t: u8[>..] = [];
+            if read_file(part, t) { pre.append(t); used++; }
+        }
+        delete_file(part);
+        delete_file(str(out, "/prestamp-", w, ".txt"));
+        delete_file(str(out, "/prestamp-log-", w, ".txt"));
+    }
+    format(report, "stamps: ", n, " files on ", used, " of ", k, " workers in ", ((clock() - t0) * 1000.0) as i64, " ms\n");
+}
+
+// One file's stamp line, as map_main's `stamp` writes it to
+// content-stamps.tsv: "path\tsize\tmtime\tstamp\traw\tc|b". Keeps the text
+// of a file stamped by its code in texts_dir.
+fn stamp_line(repo: const u8[:], rel: const u8[:], texts_dir: const u8[:], line: u8[>..]&) {
+    let full = str(repo, "/", rel);
+    let size = swan_file_size(full);
+    let mt = swan_mtime_ns(full);
+    var text: u8[>..] = [];
+    read_file(full, text);
+    let raw = hash(text[..]);
+    var st = raw;
+    var by_code = false;
+    let lang = cosmetic_lang(rel);
+    if lang.len > 0 {
+        let h, ok = code_hash(lang, text[..]);
+        if ok {
+            st = h;
+            by_code = true;
+            let keep = str(texts_dir, "/t", raw as! i64, ".txt");
+            if !file_exists(keep) { write_file(keep, text[..]); }
+        }
+    }
+    format(line, rel, "\t", size, "\t", mt, "\t", st as! i64, "\t", raw as! i64, "\t", if by_code { "c" } else { "b" }, "\n");
+}
+
+// swan stamp-worker <repo> <list> <out.tsv> <texts-dir>: a stamp line for
+// each relative path in list.
+fn stamp_worker_main(repo: const u8[:], list: const u8[:], out_path: const u8[:], texts_dir: const u8[:]) -> bool {
+    var names: u8[>..] = [];
+    guard read_file(list, names) else { return false; }
+    var lines: u8[>..] = [];
+    each_split(names, '\n') { rel =>
+        guard rel.len > 0;
+        stamp_line(repo, rel, texts_dir, lines);
+    };
+    return write_file(out_path, lines);
+}
+
 fn map_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&, clean: bool = false) -> bool {
     map_held.clear();
     let repo = abs_path(repo_arg);
@@ -1240,6 +1370,10 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
     var raw_memo = dictionary<u64, u64> {};
     var mtime_memo = dictionary<u64, i64> {};
     var code_memo = dictionary<u64, bool> {};      // the files stamped by their code
+    // Stamps worked out ahead on several cores (prestamp), in the same
+    // format as content-stamps.tsv and checked the same way.
+    var stamp_pre: u8[>..] = [];
+    var stamp_pre_at = dictionary<u64, i64> {};
     fn stamp(full: const u8[:]) -> u64 {
         guard full.len > repo.len + 1 && starts_with(full, repo) && full[repo.len] == '/' else { return hash(full); }
         let rel = full[repo.len + 1..];
@@ -1259,6 +1393,17 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
                 let a, ok1 = parse_int(f[3]);
                 let b, ok2 = parse_int(f[4]);
                 if ok1 && ok2 { st = a as! u64; raw = b as! u64; by_code = f[5] == "c"; known = true; }
+            }
+        }
+        if !known && stamp_pre.len > 0 {
+            let pl = line_of_path(stamp_pre, stamp_pre_at, rel);
+            if pl.len > 0 {
+                let f = split(pl, '\t');
+                if f.len == 6 && f[1] == str(size) && f[2] == str(mt) {
+                    let a, ok1 = parse_int(f[3]);
+                    let b, ok2 = parse_int(f[4]);
+                    if ok1 && ok2 { st = a as! u64; raw = b as! u64; by_code = f[5] == "c"; known = true; }
+                }
             }
         }
         if !known {
@@ -1343,6 +1488,8 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
     var forced: u8[>..] = [];        // paths, one per line
     var force_ts = false;
     var n_cosmetic = 0;
+    prestamp(repo, out, texts_dir, stamp_prev, stamp_at, stamp_pre, report);
+    index_lines(stamp_pre, stamp_pre_at);
     each_file(repo) { full, name =>
         guard cosmetic_lang(name).len > 0;
         let st = stamp(full);
@@ -2139,6 +2286,22 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
                "\nswan map: ", ((clock() - t_start) * 1000.0) as i64, " ms in all");
         return ok;
     }
+    // Only failed indexers ran (rea's scip-java fails every map): the index
+    // files are the ones the map's rows were flattened from, so flattening
+    // them again would write the same rows. flattened-inputs.txt is written
+    // after the rows are in the database, and removed before a flatten.
+    let flat_marker = str(out, "/flattened-inputs.txt");
+    var flat_prev: u8[>..] = [];
+    if !clean && fresh_scips.len == 0 && file_exists(db) && file_exists(str(out, "/occurrences.tsv")) &&
+       read_file(flat_marker, flat_prev) && flat_prev == scips {
+        idx_new.append(idx_prev);
+        finish_cosmetic(false);
+        format(report, "\nflatten: skipped (only failed indexers ran; rows as last flattened)",
+               "\nswan map: ", ((clock() - t_start) * 1000.0) as i64, " ms in all, up to ", limit, " indexers at once");
+        if !ok { report.append("\n(some indexers failed; see above)"); }
+        return ok;
+    }
+    delete_file(flat_marker);
 
     // The flattener reads some files' text itself (import statements, C
     // bodies, Rust macros): for rows kept from before, the text they were
@@ -2180,6 +2343,7 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
         guard clean_rows_valid(out, report) else { return false; }
     }
     index_main_locked(out, db, repo, !clean && file_exists(db), report);
+    write_file(flat_marker, scips);
     var docs: u8[>..] = [];
     read_file(str(out, "/documents.tsv"), docs);
     note_indexed(docs);

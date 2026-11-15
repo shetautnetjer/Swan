@@ -137,6 +137,8 @@ fn main() {
         let ok = map_main(a[2], a[3], report, a.len == 5);
         print(report);
         if !ok { exit(1); }
+    } else if a[1] == "stamp-worker" && a.len == 6 {
+        if !stamp_worker_main(a[2], a[3], a[4], a[5]) { exit(1); }
     } else if a[1] == "trust" && a.len == 3 {
         var report: u8[>..] = [];
         let ok = trust_main(a[2], report);
