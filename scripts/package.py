@@ -151,7 +151,7 @@ def collect_licenses(directory, required):
     return {"licenses/" + name: value for name, value in result.items()}
 
 
-def build_package(root, binary, output, revision, receipt_path, licenses, required_licenses=()):
+def build_package(root, binary, output, revision, receipt_path, licenses, required_licenses=(), flatten=None):
     """Export a deterministic candidate bound to its clean source and binary receipt."""
     root = Path(root).resolve()
     output = Path(os.path.abspath(output))
@@ -175,6 +175,21 @@ def build_package(root, binary, output, revision, receipt_path, licenses, requir
     # can seal indexers via <swan_home>/bin/eggshell. Source is tracked at
     # eggshell/eggshell; packaged with a deterministic executable mode.
     payload["bin/eggshell"] = (regular_file(root / "eggshell/eggshell")[0], 0o755)
+    # The native flattener (native/swan-flatten, Rust), installed beside bin/swan
+    # so pipeline.goose uses <swan_home>/bin/swan-flatten instead of
+    # tools/scip-flatten.ts. Optional: a build without cargo has none, and Swan
+    # then falls back to the TypeScript flattener. When the receipt says one was
+    # built, the exact binary it names must be supplied.
+    flatten_sha256 = None
+    if flatten is not None:
+        flatten_data, flatten_mode = regular_file(flatten)
+        validate_elf(flatten_data, flatten_mode)
+        flatten_sha256 = sha256(flatten_data)
+        if receipt.get("flatten_sha256") != flatten_sha256:
+            raise PackageError("build receipt does not match the swan-flatten binary")
+        payload["bin/swan-flatten"] = (flatten_data, 0o755)
+    elif receipt.get("flatten_sha256"):
+        raise PackageError("build receipt names a swan-flatten binary but none was supplied")
     skill_files = sorted(name for name in tracked if name.startswith("skills/swan-code-check/"))
     if "skills/swan-code-check/SKILL.md" not in skill_files:
         raise PackageError("tracked canonical skill is missing")
@@ -195,6 +210,7 @@ def build_package(root, binary, output, revision, receipt_path, licenses, requir
         "source_revision": revision,
         "tracked_source_clean": True,
         "binary_sha256": sha256(binary_data),
+        "flatten_sha256": flatten_sha256,
         "installer_sha256": sha256(installer),
         "installer_support_sha256": sha256(payload["scripts/package_support.py"][0]),
         "files": {name: {"sha256": sha256(data), "size": len(data), "mode": mode}
@@ -244,10 +260,12 @@ def main():
     parser.add_argument("--licenses", type=Path, required=True, help="Curated compiled third-party license directory")
     parser.add_argument("--require-license", action="append", default=[], metavar="RELATIVE_PATH",
                         help="Refuse export if this expected license is missing (repeatable)")
+    parser.add_argument("--flatten", type=Path,
+                        help="Built native flattener (bin/swan-flatten); its checksum must be in the build receipt")
     options = parser.parse_args()
     try:
         build_package(root, options.binary, options.output, options.source_revision,
-                      options.build_receipt, options.licenses, options.require_license)
+                      options.build_receipt, options.licenses, options.require_license, options.flatten)
     except (PackageError, OSError) as error:
         parser.exit(1, "package: " + str(error) + "\n")
     print("Candidate exported: " + str(options.output / ARCHIVE))

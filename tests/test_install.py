@@ -264,7 +264,7 @@ class PackagingTests(unittest.TestCase):
         spec.loader.exec_module(builder)
         source = self.root / "source"
         source.mkdir()
-        for name in (*builder.RUNTIME_FILES, builder.INSTALLER, "skills/swan-code-check/SKILL.md"):
+        for name in (*builder.RUNTIME_FILES, builder.INSTALLER, "skills/swan-code-check/SKILL.md", "eggshell/eggshell"):
             path = source / name
             path.parent.mkdir(parents=True, exist_ok=True)
             original = SCRIPTS.parent / name
@@ -281,15 +281,19 @@ class PackagingTests(unittest.TestCase):
         revision = git("rev-parse", "HEAD")
         binary = Path("/usr/bin/true")
         receipt = self.root / "build.json"
-        receipt.write_text(json.dumps({"source_revision": revision, "binary_sha256": install.sha256(binary)}))
+        # Any real x86-64 ELF stands in for the native flattener.
+        flatten = Path("/usr/bin/false")
+        receipt.write_text(json.dumps({"source_revision": revision, "binary_sha256": install.sha256(binary),
+                                       "flatten_sha256": install.sha256(flatten)}))
         licenses = self.root / "licenses"
         licenses.mkdir()
         (licenses / "test-license").write_text("fixture license\n")
         output = self.root / "builder-output"
-        built = builder.build_package(source, binary, output, revision, receipt, licenses)
+        built = builder.build_package(source, binary, output, revision, receipt, licenses, flatten=flatten)
         archive = output / builder.ARCHIVE
         checked = install.inspect_archive(archive, install.sha256(archive))
         self.assertEqual(built, checked)
+        self.assertEqual(checked["files"]["bin/swan-flatten"]["mode"], 0o755)
 
 
 if __name__ == "__main__":
