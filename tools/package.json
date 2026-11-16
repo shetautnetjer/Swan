@@ -1,12 +1,15 @@
 {
   "name": "swan-tools",
   "private": true,
-  "description": "Swan's indexer-side helpers: SCIP generation and flattening",
+  "description": "Swan's indexer-side helpers: SCIP generation and flattening, and ast-grep as the structural-search reference for tests",
   "dependencies": {
     "@biomejs/biome": "2.6.3",
     "@sourcegraph/scip-python": "0.6.8",
     "@sourcegraph/scip-typescript": "0.5.2",
     "pyright": "1.1.414",
     "typescript-language-server": "6.0.2"
+  },
+  "devDependencies": {
+    "@ast-grep/cli": "0.51.3"
   }
 }

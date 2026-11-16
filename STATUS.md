@@ -750,3 +750,9 @@ see each environment variable once. See DECISIONS.md.
   `structural_check` and `kotlin_live_check` fail as on main.
 - Still waiting for trust: Gradle/Maven/MSBuild indexers, `swan check`,
   live language servers.
+
+## 2026-11-16: the whole suite passes
+
+`scripts/test.sh`: all 16 check scripts pass on an Omarchy machine (first
+time every script actually ran; see DECISIONS.md). `tests/test_install.py`
+and `tests/test_package.py` pass.

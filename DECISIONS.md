@@ -539,3 +539,18 @@ the test machine) and `kotlin_live_check` fail identically on main.
 Ideas behind it: Pydantic Monty's "no ambient authority, the host grants
 named capabilities", applied to OS processes, where Monty itself defers to an
 OS layer.
+
+## 2026-11-16 — The test suite runs everything, and its references are pinned
+
+- `scripts/test.sh` ran under `set -e`, so the long-standing `rust_check`
+  failure stopped it and nine check scripts after it went unrun. It now runs
+  every script, lists the failures and exits nonzero if any failed.
+- rust-analyzer's 2026-10 builds resolve uses inside `vec![...]`, so the
+  check that expected a by-name match now accepts a compiler-resolved one.
+- JetBrains' Kotlin server builds expire; 263.7084.0 had. Pinned 271.2085.0
+  (its published SHA-256). The Kotlin check now reports a tool error as a
+  failure instead of crashing on it.
+- `structural_check` compares Swan with ast-grep but nothing installed
+  ast-grep. `@ast-grep/cli` 0.51.3 is now a dev dependency in `tools/`
+  (works with `--ignore-scripts`); installs use `npm ci --omit=dev`, so it
+  doesn't ship to users.

@@ -8,6 +8,11 @@
 
 import { cpSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 
+// The reference: Swan's pinned ast-grep (a dev dependency in tools/), else one on PATH.
+const AST_GREP = [
+  `${process.cwd()}/tools/node_modules/@ast-grep/cli-linux-x64-gnu/ast-grep`,
+  `${process.cwd()}/tools/node_modules/.bin/ast-grep`,
+].find((p) => existsSync(p)) ?? "ast-grep";
 const sh = (cmd: string[], cwd?: string) => {
   const r = Bun.spawnSync(cmd, { stdout: "pipe", stderr: "pipe", cwd });
   return { code: r.exitCode, out: r.stdout.toString(), err: r.stderr.toString() };
@@ -76,7 +81,7 @@ function compare(db: string, root: string, rel: string, label: string) {
         [...ours].sort().join(",") === c.expect.join(","), [...ours]);
       continue;
     }
-    const g = sh(["ast-grep", "run", "-p", c.pattern, "-l", c.sg, "--json=compact", rel || "."], root);
+    const g = sh([AST_GREP, "run", "-p", c.pattern, "-l", c.sg, "--json=compact", rel || "."], root);
     const theirs = new Set<string>((JSON.parse(g.out || "[]") as any[])
       .filter((m) => EXT[c.lang].test(m.file))
       .map((m) => `${rel && !m.file.startsWith(rel) ? `${rel}/` : ""}${m.file.replace(/^\.\//, "")}:${m.range.start.line + 1}:${m.range.start.column + 1}`));

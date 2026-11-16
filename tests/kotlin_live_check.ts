@@ -26,7 +26,11 @@ async function tool(name: string, args: any) {
   const r = JSON.parse(line).result;
   const ms = performance.now() - t0;
   console.log(`  ${name} ${JSON.stringify(args)}: ${ms.toFixed(0)} ms`);
-  return { ok: !r.isError, body: JSON.parse(r.content[0].text), ms };
+  const text = r.content[0].text;
+  let body: any;
+  try { body = JSON.parse(text); } catch { body = { error: text }; }   // e.g. "the kotlin language server did not start"
+  if (r.isError) console.log(`FAIL ${name}: ${text.slice(0, 300)}`);
+  return { ok: !r.isError, body, ms };
 }
 
 

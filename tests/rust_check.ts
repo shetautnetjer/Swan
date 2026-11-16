@@ -28,8 +28,10 @@ check("impl methods are named by their type: Tile/new", q("symbol", "Tile/new").
 
 const shape = q("uses", "/Shape")[0].references;
 const lines = (rs: any[]) => rs.map((r: any) => r.line);
-check("Shape::Square inside vec![...] counts as a use of Shape, by name",
-  shape.some((r: any) => r.line === 42 && r.via === "Shape/Square" && r.by_name), shape);
+// rust-analyzer resolves uses inside vec![...] since its 2026-10 builds; older
+// ones left them to Swan's by-name fallback. Either way it must be found.
+check("Shape::Square inside vec![...] counts as a use of Shape (compiler-resolved or by name)",
+  shape.some((r: any) => r.line === 42 && r.via === "Shape/Square"), shape);
 check("Shape::Circle inside assert!(matches!(...)) is found too", lines(shape).includes(55), shape);
 
 const tile = q("uses", "/Tile")[0].references;
