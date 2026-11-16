@@ -43,6 +43,12 @@ cmd_pack() {
   [ -e "$dist" ] && die "$dist is incomplete; remove it and rerun"
   mkdir -p "$out"; rm -rf "$dist.partial"
   local src="$work/src"
+  # build.sh builds the native flattener only when cargo is on PATH; a rustup
+  # install often lives in ~/.cargo/bin outside a non-login PATH. Set it here,
+  # not in the build subshell, so the license step below finds cargo too.
+  if ! command -v cargo >/dev/null 2>&1 && [ -x "$HOME/.cargo/bin/cargo" ]; then
+    PATH="$HOME/.cargo/bin:$PATH"; export PATH
+  fi
   if [ ! -d "$src" ]; then
     mkdir -p "$work"
     git -C "$repo" worktree add --detach "$src" "$rev" >/dev/null
@@ -68,9 +74,12 @@ cmd_pack() {
 import hashlib, json, platform, subprocess, sys
 src, rev, goose, work = sys.argv[1:]
 h = lambda p: hashlib.sha256(open(p, "rb").read()).hexdigest()
+import os
+flatten = f"{src}/bin/swan-flatten"
 json.dump({
   "source_revision": rev,
   "binary_sha256": h(f"{src}/bin/swan"),
+  "flatten_sha256": h(flatten) if os.path.isfile(flatten) else None,
   "goose_binary_sha256": h(goose),
   "gcc": subprocess.run(["gcc", "--version"], capture_output=True, text=True).stdout.splitlines()[0],
   "system": platform.platform(), "libc": list(platform.libc_ver()),
@@ -93,9 +102,30 @@ PY
   done
   find "$src/.tools/goose-home/pkg" -path '*tree-sitter*' -iname 'LICENSE*' -type f 2>/dev/null | while read -r f; do
     cp "$f" "$lic/$(echo "${f#$src/.tools/goose-home/pkg/}" | tr '/' '_')"; done
+  # The native flattener ships when it was built; its compiled-in Rust crates
+  # (rayon and what it pulls in) bring their own license files.
+  local flatten_args=()
+  if [ -f "$src/bin/swan-flatten" ]; then
+    flatten_args=(--flatten "$src/bin/swan-flatten")
+    ( cd "$src/native/swan-flatten" && cargo metadata --offline --locked --format-version 1 2>/dev/null ) \
+      | python3 -c '
+import json, os, shutil, sys
+lic = sys.argv[1]
+for p in json.load(sys.stdin)["packages"]:
+    if p["source"] is None:
+        continue  # swan-flatten itself
+    d = os.path.dirname(p["manifest_path"])
+    for f in sorted(os.listdir(d)):
+        if f.upper().startswith(("LICENSE", "COPYING", "NOTICE")) and os.path.isfile(os.path.join(d, f)):
+            shutil.copyfile(os.path.join(d, f), os.path.join(lic, "rust-%s-%s-%s" % (p["name"], p["version"], f)))
+' "$lic" || say "warning: could not collect Rust crate licenses for swan-flatten"
+    say "swan-flatten built; the package ships the native flattener"
+  else
+    say "warning: swan-flatten was not built (no cargo); this package uses tools/scip-flatten.ts"
+  fi
   python3 "$src/scripts/package.py" --binary "$src/bin/swan" --output "$dist.partial" \
     --source-revision "$rev" --build-receipt "$work/build-receipt.json" \
-    --licenses "$lic" --require-license Goose-LICENSE >/dev/null
+    --licenses "$lic" --require-license Goose-LICENSE "${flatten_args[@]}" >/dev/null
   cp "$work/build-receipt.json" "$dist.partial/"
   cp "$src/scripts/swan-up" "$dist.partial/swan-up"
   ( cd "$dist.partial" && sha256sum swan-up > swan-up.sha256 )

@@ -33,7 +33,7 @@ class PackageTests(unittest.TestCase):
         self.root.mkdir()
         for name in (*package.RUNTIME_FILES, package.INSTALLER,
                      "scripts/verify-live-trust.py", "skills/swan-code-check/SKILL.md",
-                     "skills/swan-code-check/fixture/sec.py"):
+                     "skills/swan-code-check/fixture/sec.py", "eggshell/eggshell"):
             path = self.root / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("fixture " + name + "\n")
@@ -74,7 +74,7 @@ class PackageTests(unittest.TestCase):
     def test_inventory_checksums_modes_and_candidate_provenance(self):
         """Verify that inventory checksums modes and candidate provenance."""
         manifest = self.build()
-        expected = {*package.RUNTIME_FILES, "scripts/verify-live-trust.py", "bin/swan",
+        expected = {*package.RUNTIME_FILES, "scripts/verify-live-trust.py", "bin/swan", "bin/eggshell",
                     "BUILD-RECEIPT.json", "licenses/Goose-LICENSE",
                     "skills/swan-code-check/SKILL.md", "skills/swan-code-check/fixture/sec.py"}
         with tarfile.open(self.output / package.ARCHIVE) as archive:
@@ -102,6 +102,45 @@ class PackageTests(unittest.TestCase):
                          (self.root / package.INSTALLER).read_bytes())
         self.assertEqual(manifest["installer_support_sha256"],
                          package.sha256((self.output / "package_support.py").read_bytes()))
+
+    def test_native_flattener_ships_only_when_bound_to_the_receipt(self):
+        """Verify that bin/swan-flatten ships executable when the receipt names its exact checksum."""
+        flatten = self.base / "swan-flatten"
+        flatten.write_bytes(elf_header() + b"flatten")
+        flatten.chmod(0o755)
+        self.write_receipt(flatten_sha256=package.sha256(flatten.read_bytes()))
+        manifest = self.build(flatten=flatten)
+        with tarfile.open(self.output / package.ARCHIVE) as archive:
+            self.assertEqual(archive.extractfile("bin/swan-flatten").read(), flatten.read_bytes())
+            self.assertEqual(archive.getmember("bin/swan-flatten").mode, 0o755)
+        self.assertEqual(manifest["flatten_sha256"], package.sha256(flatten.read_bytes()))
+        self.assertEqual(manifest["files"]["bin/swan-flatten"]["mode"], 0o755)
+
+    def test_native_flattener_must_match_receipt_and_be_supplied_when_named(self):
+        """Verify that a mismatched, missing, or non-ELF flattener is refused without output."""
+        flatten = self.base / "swan-flatten"
+        flatten.write_bytes(elf_header() + b"flatten")
+        flatten.chmod(0o755)
+        self.write_receipt(flatten_sha256="0" * 64)
+        with self.assertRaisesRegex(package.PackageError, "swan-flatten"):
+            self.build(flatten=flatten)
+        self.assertFalse(self.output.exists())
+        self.write_receipt(flatten_sha256=package.sha256(flatten.read_bytes()))
+        with self.assertRaisesRegex(package.PackageError, "none was supplied"):
+            self.build()
+        self.assertFalse(self.output.exists())
+        flatten.write_text("not an executable\n")
+        self.write_receipt(flatten_sha256=package.sha256(flatten.read_bytes()))
+        with self.assertRaisesRegex(package.PackageError, "ELF64"):
+            self.build(flatten=flatten)
+        self.assertFalse(self.output.exists())
+
+    def test_package_without_flattener_records_none(self):
+        """Verify that a build without cargo still packages, falling back to the TypeScript flattener."""
+        manifest = self.build()
+        self.assertIsNone(manifest["flatten_sha256"])
+        with tarfile.open(self.output / package.ARCHIVE) as archive:
+            self.assertNotIn("bin/swan-flatten", archive.getnames())
 
     def test_private_and_generated_inputs_never_enter_archive(self):
         """Verify that private and generated inputs never enter archive."""
