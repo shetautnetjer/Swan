@@ -2,19 +2,28 @@
 # eggshell — run one command sealed off so a code indexer is safe headless.
 #
 # Guarantees (safe by default):
-#   - no network                 (new empty network namespace; loopback only, no routes)
-#   - repo is read-only          (whole filesystem remounted read-only inside)
+#   - no network                 (new empty network namespace; loopback only,
+#                                 no routes) and no host services reached
+#                                 through unix sockets: /run is replaced by an
+#                                 empty tmpfs, so name lookups through
+#                                 systemd-resolved, D-Bus, avahi or nscd, and
+#                                 every other host daemon socket, are gone
+#   - repo is read-only          (EVERY mount remounted read-only inside, not
+#                                 just /: a separate /home, /var or /srv mount
+#                                 is covered too), and the runner checks the
+#                                 repo's mount really is read-only before
+#                                 running anything
 #   - writes go only to OUT      (OUT bind-mounted read-write) and an ephemeral
 #                                 tmpfs scratch (HOME + TMPDIR on /dev/shm) that
-#                                 is discarded on exit; /tmp is masked for
-#                                 containment unless the repo or OUT lives there
+#                                 is discarded on exit
 #   - if the sandbox cannot be set up, REFUSE (never fall back to running
 #     unconfined). Swan's trust gate stays the fallback for whether to attempt
 #     build-running indexers at all.
 #
 # Usage:  eggshell <repo-dir> <out-dir> [--allow-net] -- <cmd> [args...]
-#   --allow-net   loosen only (share host network). Use this for an explicitly
-#                 trusted repo that must fetch dependencies; off by default.
+#   --allow-net   loosen only (share host network and leave /run visible, so
+#                 DNS works). Use this for an explicitly trusted repo that must
+#                 fetch dependencies; off by default.
 #
 # Exit codes: 2 usage/precondition error; 3 sandbox unavailable (REFUSED);
 #             otherwise the wrapped command's own exit code.
@@ -39,8 +48,8 @@ done
 
 [ -d "$REPO" ] || { echo "eggshell: repo is not a directory: $REPO" >&2; exit 2; }
 [ -d "$OUT" ]  || { echo "eggshell: out is not a directory: $OUT"  >&2; exit 2; }
-REPO=$(cd "$REPO" && pwd)
-OUT=$(cd "$OUT" && pwd)
+REPO=$(cd "$REPO" && pwd -P)
+OUT=$(cd "$OUT" && pwd -P)
 
 # Preflight: if unprivileged namespaces are not available, refuse rather than
 # run the indexer unconfined.
@@ -52,25 +61,78 @@ fi
 NET_FLAG="--net"
 [ "$ALLOW_NET" = "1" ] && NET_FLAG=""   # trust loosening: share host network
 
-export EGG_REPO="$REPO" EGG_OUT="$OUT"
+# Sealed runs hide /run. A repo or OUT inside /run would vanish with it, so
+# refuse instead of guessing.
+if [ "$ALLOW_NET" = "0" ]; then
+  for p in "$REPO" "$OUT"; do
+    case "$p/" in /run/*|/var/run/*)
+      echo "eggshell: $p is under /run, which a sealed run hides; REFUSING" >&2
+      exit 3 ;;
+    esac
+  done
+fi
+
+# Mount points from /proc/self/mountinfo (field 5), with the kernel's octal
+# escapes (\040 for a space and so on) decoded, each prefixed by its length
+# so the caller can sort parents before children.
+EGG_MOUNTS_AWK='{
+  mp = $5; out = ""
+  while (match(mp, /\\[0-7][0-7][0-7]/)) {
+    code = substr(mp, RSTART + 1, 1) * 64 + substr(mp, RSTART + 2, 1) * 8 + substr(mp, RSTART + 3, 1)
+    out = out substr(mp, 1, RSTART - 1) sprintf("%c", code)
+    mp = substr(mp, RSTART + 4)
+  }
+  out = out mp
+  print length(out) "\t" out
+}'
+
+export EGG_REPO="$REPO" EGG_OUT="$OUT" EGG_ALLOW_NET="$ALLOW_NET" EGG_MOUNTS_AWK
 exec unshare --user --map-root-user --mount $NET_FLAG --pid --fork --kill-child \
   /bin/sh -euc '
-    mount --make-rprivate /
-    mount -o remount,bind,ro /                       # everything read-only
+    refuse() { echo "eggshell: $*; REFUSING to run unconfined" >&2; exit 3; }
 
-    # Make OUT writable. When OUT is on the read-only root mount (the usual
-    # case, and /tmp too where /tmp is part of root) this carves one read-write
-    # hole. When OUT is on its own already-writable mount (e.g. a separate
-    # tmpfs /tmp), the bind is refused and OUT is used as it is.
+    mount --make-rprivate /
+
+    # Make every mount read-only. Remounting / alone leaves separate mounts
+    # (a btrfs /home subvolume, /var, /srv, a data disk) writable, and repos
+    # usually live on one of them. Walk the mount table, parents first.
+    # Kernel filesystems that refuse a read-only remount are left as they are;
+    # the check below makes sure the repo is not one of them.
+    mount -o remount,bind,ro / || refuse "cannot make / read-only"
+    # EGG_MOUNTS_AWK prints every mount point (decoded), shortest first.
+    awk "$EGG_MOUNTS_AWK" /proc/self/mountinfo | sort -n | cut -f2- \
+      | while IFS= read -r mp; do
+          [ "$mp" = / ] && continue
+          mount -o remount,bind,ro "$mp" 2>/dev/null || true
+        done
+
+    # The repo must now sit on a read-only mount; if not, refuse.
+    repo_opts=$(findmnt -n -o OPTIONS --target "$EGG_REPO" 2>/dev/null) \
+      || refuse "cannot inspect the mount holding $EGG_REPO"
+    case ",$repo_opts," in
+      *,ro,*) ;;
+      *) refuse "could not make the mount holding $EGG_REPO read-only" ;;
+    esac
+
+    # Hide host services reached through unix sockets (DNS via
+    # systemd-resolved, D-Bus, avahi, nscd, container daemons, the user
+    # runtime dir). Abstract sockets are already cut off by the new network
+    # namespace. Trusted runs keep /run so name lookups work.
+    if [ "$EGG_ALLOW_NET" = "0" ]; then
+      mount -t tmpfs -o ro,mode=0755 none /run || refuse "cannot hide /run"
+      unset XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS DBUS_SYSTEM_BUS_ADDRESS
+    fi
+
+    # Make OUT writable: one read-write hole in the read-only tree. When OUT
+    # is on its own mount the bind may be refused; then it must already be
+    # writable, which the probe below checks.
     if mount --bind "$EGG_OUT" "$EGG_OUT" 2>/dev/null; then
       mount -o remount,bind,rw "$EGG_OUT" "$EGG_OUT" 2>/dev/null || true
     fi
 
-    # Ephemeral scratch (HOME + TMPDIR) on a fresh /dev/shm tmpfs: a separate
-    # read-write mount in every environment, so it never collides with a repo
-    # or OUT under /tmp and /tmp never needs masking. Everything stays
-    # read-only except the single OUT hole and this scratch.
-    mount -t tmpfs none /dev/shm 2>/dev/null || true
+    # Ephemeral scratch (HOME + TMPDIR) on a fresh /dev/shm tmpfs, discarded
+    # on exit.
+    mount -t tmpfs none /dev/shm 2>/dev/null || refuse "cannot mount scratch on /dev/shm"
     mkdir -p /dev/shm/home /dev/shm/tmp
     export HOME=/dev/shm/home TMPDIR=/dev/shm/tmp
 

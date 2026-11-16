@@ -50,7 +50,35 @@ else
   "$EGG" fixtures/benign-map "$OUT" -- sh -c 'grep -nE "^(def|class) " *.py > "$EGG_OUT/index.txt"' >/dev/null 2>&1
   [ -s "$OUT/index.txt" ] && ok "benign map still builds ($(wc -l < "$OUT/index.txt") symbols)" || bad "benign map did not build"
   "$EGG" fixtures/benign-map "$OUT" -- sh -c 'echo tampered >> a.py 2>/dev/null; true' >/dev/null 2>&1
-  grep -q tampered fixtures/benign-map/a.py 2>/dev/null && bad "repo was modified" || ok "repo stayed read-only"
+  grep -q tampered fixtures/benign-map/a.py 2>/dev/null && { bad "repo was modified"; git -C "$HERE" checkout -- fixtures/benign-map/a.py 2>/dev/null || true; } || ok "repo stayed read-only"
+
+  # The seal must cover every mount, not only /: on many systems (btrfs
+  # subvolumes, a separate /home or data disk) the repo and the real home sit
+  # on their own mount. Write to the real home by absolute path, and to /tmp.
+  REAL_HOME="$HOME"
+  probe="$REAL_HOME/.eggshell_leak_probe2.$$"
+  tprobe="/tmp/.eggshell_leak_probe3.$$"
+  trap 'rm -rf "$OUT" "$HOME/eggshell_leak_probe" "$probe" "$tprobe"' EXIT
+  "$EGG" fixtures/writes-outside "$OUT" -- sh -c "echo x > '$probe' 2>/dev/null; echo x > '$tprobe' 2>/dev/null; true" >/dev/null 2>&1
+  [ -e "$probe" ] && bad "write to the real home (a separate mount here: $(findmnt -n -o TARGET --target "$REAL_HOME")) leaked" || ok "write to the real home blocked"
+  [ -e "$tprobe" ] && bad "write to /tmp leaked" || ok "write to /tmp blocked"
+
+  # Host services over unix sockets (DNS through systemd-resolved, D-Bus,
+  # the user runtime dir) must be out of reach in a sealed run.
+  seen=$("$EGG" fixtures/benign-map "$OUT" -- sh -c '
+    for s in /run/systemd/resolve/io.systemd.Resolve /run/dbus/system_bus_socket /run/user; do
+      [ -e "$s" ] && echo "$s"
+    done; true' 2>/dev/null)
+  [ -n "$seen" ] && bad "host sockets visible in sandbox: $seen" || ok "host sockets under /run hidden"
+
+  # Trusted runs (--allow-net) still work and still keep the repo read-only.
+  "$EGG" fixtures/benign-map "$OUT" --allow-net -- sh -c 'echo tampered >> a.py 2>/dev/null; echo ran > "$EGG_OUT/allow-net.txt"' >/dev/null 2>&1
+  { [ -s "$OUT/allow-net.txt" ] && ! grep -q tampered fixtures/benign-map/a.py; } && ok "--allow-net runs, repo still read-only" || bad "--allow-net run wrong"
+  git -C "$HERE" checkout -- fixtures/benign-map/a.py 2>/dev/null || true
+
+  # A repo under /run would disappear with it: refuse rather than guess.
+  "$EGG" /run "$OUT" -- true >/dev/null 2>&1; rc=$?
+  [ "$rc" = 3 ] && ok "repo under /run refused" || bad "repo under /run not refused (exit $rc)"
 fi
 
 echo

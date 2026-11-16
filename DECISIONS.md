@@ -469,3 +469,26 @@ where two runs of main differ in 30): scip-clang's choice between duplicate
 C definitions, as before. Swan's checks pass with the workers on and forced
 on (SWAN_STAMP_MIN=1), except mcp_smoke, structural_check and
 kotlin_live_check, which fail the same way on main on the PC.
+
+## 2026-11-16 — The seal covers every mount and hides host sockets
+
+Found on an Omarchy (Arch, btrfs) machine, where `/home` is its own mount:
+eggshell's own test failed "repo stayed read-only" and "network blocked".
+
+- **Repo writable.** eggshell remounted only `/` read-only. Separate mounts
+  (`/home`, `/tmp`, `/var`, data disks) stayed writable inside the seal, so a
+  repo under `/home` could be changed by its indexer. The old README said a
+  separate mount "can't be made read-only from an unprivileged user
+  namespace"; that is only true for *clearing* an inherited read-only flag.
+  Setting it works. eggshell now remounts every mount read-only (parents
+  first) and refuses unless the repo's own mount reports `ro`.
+- **Names resolved.** TCP was blocked by the network namespace, but
+  `getent hosts github.com` still answered: glibc's `resolve` (and `mdns`)
+  NSS modules ask systemd-resolved (or avahi) over unix sockets in `/run`,
+  which a network namespace does not cut off. That is a DNS side channel out
+  of the seal. Sealed runs now mount an empty read-only tmpfs over `/run`
+  (and unset `XDG_RUNTIME_DIR` and the D-Bus addresses). `--allow-net`
+  keeps `/run`, since a trusted build may need DNS.
+
+The extended `eggshell/test.sh` has 13 checks; against the old runner 7
+fail on this machine, against the new one all pass.

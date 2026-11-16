@@ -12,18 +12,27 @@ Two parts, both pure (no Monty, no cmake, nothing to install):
   "code mode": one checked call instead of many ad-hoc tool calls. Builds with
   just `goose build egg.goose` (a C compiler; no packages, no cmake).
 - **`eggshell`** — the sealing runner (POSIX sh on `unshare`). It runs each
-  indexer with **no network**, the **repo read-only**, writes **only to the
-  output dir** (OUT may live anywhere, `/tmp` included) plus an ephemeral
-  scratch on `/dev/shm` (HOME + TMPDIR) discarded on exit, and **refuses**
-  (exit 3) rather than running unconfined if the kernel can't seal.
+  indexer with **no network** and **no host unix sockets**, the **repo
+  read-only**, writes **only to the output dir** (OUT may live anywhere,
+  `/tmp` included) plus an ephemeral scratch on `/dev/shm` (HOME + TMPDIR)
+  discarded on exit, and **refuses** (exit 3) rather than running unconfined
+  if the kernel can't seal.
 
-  The read-only-repo guarantee comes from remounting the root filesystem
-  read-only, so it holds for any repo on the root fs — i.e. every normal
-  workspace (`/home`, `/opt`, `/srv`, …). A repo placed on a *separate*
-  read-write mount such as `/tmp` can't be made read-only from an
-  unprivileged user namespace on current kernels (its mount is locked), so
-  keep repos on the root filesystem; the host-protection seals (no network,
-  system read-only, writes contained) hold regardless.
+  Read-only covers **every mount**, not only `/`: the runner walks the mount
+  table and remounts each one read-only, parents first, then checks that the
+  mount holding the repo really is read-only and refuses if it isn't. This
+  matters on systems where `/home` is its own mount (btrfs subvolumes, as on
+  Omarchy/Arch, Fedora and openSUSE, or a separate disk): before, a repo
+  there stayed writable inside the seal. Adding the read-only flag is allowed
+  from an unprivileged user namespace; only clearing an inherited one is not.
+
+  "No network" is a new network namespace plus an empty, read-only `/run`.
+  The empty `/run` matters because name lookups through systemd-resolved,
+  D-Bus, avahi or nscd go over unix sockets under `/run`, which a network
+  namespace alone does not cut off: before, `getent hosts` still resolved
+  names inside the seal (a DNS side channel). `--allow-net` keeps `/run`
+  visible so trusted builds can resolve names. A repo or OUT under `/run`
+  is refused in a sealed run.
 
 Goose has no subprocess library (Swan's `src/run.goose` notes this), so the
 Goose layer hands a sealed argv to the runner rather than spawning itself.
@@ -41,7 +50,10 @@ Goose layer hands a sealed argv to the runner rather than spawning itself.
 - `egg.goose` — pure-Goose validator + sealed-argv builder.
 - `eggshell` — the unshare-based sealing runner (the proven piece).
 - `test.sh` — A: builds `egg.goose` and checks its validation; B: proves the
-  runner blocks an outside-write and a network call while a benign map builds.
+  runner blocks outside writes (scratch home, the real home by absolute path,
+  `/tmp`), network calls and name lookups, hides host sockets under `/run`,
+  keeps the repo read-only (also with `--allow-net`), refuses a repo under
+  `/run`, and still lets a benign map build.
 - `fixtures/` — non-hostile: a build that writes outside the repo, one that
   calls the network, and a benign repo whose static map should build.
 - `swan-wiring.md` — the exact `pipeline.goose` patch to route `swan_spawn`
