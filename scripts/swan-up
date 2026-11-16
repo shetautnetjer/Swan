@@ -43,6 +43,12 @@ cmd_pack() {
   [ -e "$dist" ] && die "$dist is incomplete; remove it and rerun"
   mkdir -p "$out"; rm -rf "$dist.partial"
   local src="$work/src"
+  # build.sh builds the native flattener only when cargo is on PATH; a rustup
+  # install often lives in ~/.cargo/bin outside a non-login PATH. Set it here,
+  # not in the build subshell, so the license step below finds cargo too.
+  if ! command -v cargo >/dev/null 2>&1 && [ -x "$HOME/.cargo/bin/cargo" ]; then
+    PATH="$HOME/.cargo/bin:$PATH"; export PATH
+  fi
   if [ ! -d "$src" ]; then
     mkdir -p "$work"
     git -C "$repo" worktree add --detach "$src" "$rev" >/dev/null
@@ -58,11 +64,6 @@ cmd_pack() {
       if [ -d "$repo/.tools/goose-home/pkg" ]; then
         mkdir -p .tools/goose-home && cp -a "$repo/.tools/goose-home/pkg" .tools/goose-home/pkg
       else mkdir -p .tools/goose-home; fi
-    fi
-    # build.sh builds the native flattener only when cargo is on PATH; a
-    # rustup install often lives in ~/.cargo/bin outside a non-login PATH.
-    if ! command -v cargo >/dev/null 2>&1 && [ -x "$HOME/.cargo/bin/cargo" ]; then
-      PATH="$HOME/.cargo/bin:$PATH"; export PATH
     fi
     say "building $short (log: $work/build.log)"
     GOOSE="$goose" GOOSE_HOME="$src/.tools/goose-home" bash scripts/build.sh > "$work/build.log" 2>&1 \
