@@ -713,3 +713,22 @@ every chunk. Details and limits in DECISIONS.md.
   9.10 s to 2.7 s. Details and settings in docs/speed.md. (PR 31)
 - `[profile.quick]` for the flattener: `SWAN_FLATTEN_PROFILE=quick` rebuilds
   in about 1.6 s instead of 8 s; the shipped build is unchanged. (PR 32)
+
+## 2026-11-16: the seal covers every mount and hides host sockets
+
+On an Omarchy machine (btrfs, `/home` its own mount) `eggshell/test.sh`
+failed two checks: the repo under `/home` was writable inside the seal, and
+`getent hosts` resolved names through systemd-resolved's unix socket. Fixed
+in `eggshell/eggshell`: every mount is remounted read-only and the repo's
+mount is checked, and sealed runs get an empty read-only `/run`. See
+DECISIONS.md.
+
+- `eggshell/test.sh`: 13 passed, 0 failed (7 of them fail on the old runner).
+- `scripts/test.sh`: everything passes except one Rust check, "Shape::Square
+  inside vec![...] counts as a use of Shape, by name", which fails the same
+  way with the old runner: that check runs trusted, so it doesn't go through
+  eggshell. rust-analyzer now resolves that use inside the macro, so the row
+  has no `by_name` flag.
+- A sealed map of a small Rust/shell repo gives the same symbols and
+  references as before (39 symbols, 134 occurrences).
+
