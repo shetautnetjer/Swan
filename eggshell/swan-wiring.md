@@ -1,5 +1,13 @@
 # Wiring eggshell into Swan (pipeline.goose)
 
+**Status (2026-11-16):** partly done. Every indexer launch, and the tsc and
+Python probes of `swan map`, now go through `seal_argv`, trusted or not;
+trust adds `--allow-net` and `--rw` grants. Rust runs sealed and offline for
+untrusted repos. Still open: Gradle/Maven/MSBuild for untrusted repos,
+`swan check` (`run_step` checkers), live language servers, wiring
+`egg.goose`'s `run_sealed` as the single front end, and refusals (exit 3)
+reported as skipped. The original spec follows.
+
 A patch **spec**, not a tested change, written against `src/pipeline.goose` as
 of this branch's base.
 

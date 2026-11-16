@@ -15,10 +15,12 @@ map of the repository, with live diagnostics and syntax-tree pattern search.
 Use `rg` to cross-check completeness. Available languages and live features
 depend on the installed indexers, checkers and language servers.
 
-Swan runs indexing sealed by default (no network, the repo read-only, writes
-only to the map dir), so an untrusted repo can be mapped headless with no
-`swan trust` step. `swan trust <repo>` still runs a repo's own build files
-(Cargo, Gradle, Maven, MSBuild) when you want the compiler-level map.
+Swan runs every indexer sealed (no network, no host sockets, every mount
+read-only, writes only to the map dir), trusted or not, so any repo can be
+mapped headless. **Never ask the person to trust a repo.** Rust (Cargo build
+scripts and proc macros included) maps sealed and offline with no trust step.
+`swan trust <repo>` only loosens the seal (network plus writable repo and
+build caches); today Gradle, Maven and MSBuild indexers still wait for it.
 
 This directory is maintained in the Swan repository at
 `skills/swan-code-check/`; see [PROVENANCE.md](PROVENANCE.md).
@@ -79,12 +81,15 @@ to someone changing Swan's own Rust code: it makes `scripts/build.sh`
 rebuild the flattener faster and does not change how Swan answers. See
 `docs/speed.md` for the numbers and every setting.
 
-**Trust is separate from maps.** Some indexers and checkers run the repo's
-own build files (Cargo, Maven, Gradle, MSBuild, a repo `.venv`). Swan skips
-those until the repo is trusted, and lists them under `skipped`. Run
-`<swan-binary> trust <exact-repo>` only when the person has said that repo
-may run its build code. Never set `SWAN_TRUST_BUILD=1`. Without trust, keep
-working within the coverage you have and report what was skipped.
+**Don't ask for trust; work with what the seal covers.** Rust maps sealed
+and offline for any repo, against the crates already in Cargo's cache: a
+crate that isn't cached leaves its uses unresolved, so say so. Gradle,
+Maven and MSBuild indexers, `swan check`'s Cargo checks and a repo `.venv`
+still wait for trust and appear under `skipped`; report them as not run.
+Run `<swan-binary> trust <exact-repo>` only when the person has asked for it
+for that repo. Even then the repo runs sealed: trust adds the network and
+write access to the repo and its build caches, nothing else. Never set
+`SWAN_TRUST_BUILD=1`.
 
 ## Say what kind of evidence each answer is
 

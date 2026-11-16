@@ -87,6 +87,7 @@ if (run("java")) {
   const home2 = `${w}/home2`;
   sh(["mkdir", "-p", `${home2}/bin`]);
   sh(["cp", "bin/swan", `${home2}/bin/swan`]);
+  sh(["cp", "bin/eggshell", `${home2}/bin/eggshell`]);   // every run is sealed, trusted or not
   for (const d of ["tools", ".tools"]) sh(["ln", "-s", `${process.cwd()}/${d}`, `${home2}/${d}`]);
   const moved = sh([`${home2}/bin/swan`, "map", `${w}/repo`, `${w}/map`]);
   check("java: the same files with another scip-java argv are indexed again, not reused",

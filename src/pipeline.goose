@@ -711,20 +711,54 @@ fn sandbox_on() -> bool {
     return true;
 }
 
-// Wrap an indexer's argv so it runs sealed via <swan_home>/bin/eggshell:
-//   eggshell <repo> <out> -- <inner argv...>
-// No network, the repo read-only, writes only to the map dir. The runner
-// refuses (exit 3) if the kernel cannot seal, which surfaces as a failed
-// indexer rather than an unconfined run. Used only for untrusted repos; a
-// trusted repo runs as before (the user accepted its build files).
-fn seal_argv(inner: const u8[:], repo: const u8[:], out: const u8[:]) -> u8[>..] {
+// Wrap a child's argv so it runs sealed via <swan_home>/bin/eggshell:
+//   eggshell <repo> <out> [--allow-net --rw <dir>...] -- <inner argv...>
+// Every repo is sealed: no host writes except the map dir, no host sockets.
+// Trust only loosens the seal: a trusted repo gets the network and the
+// writable directories its build tools need (the repo itself for obj/ and
+// build/, Cargo's home, Swan's Gradle and .NET caches); it never runs
+// unsealed. The runner refuses (exit 3) if the kernel cannot seal, which
+// surfaces as a failed step rather than an unconfined run.
+fn seal_argv(inner: const u8[:], repo: const u8[:], out: const u8[:], trusted: bool) -> u8[>..] {
     var a: u8[>..] = [];
     arg(a, str(swan_home(), "/bin/eggshell"));
     arg(a, repo);
     arg(a, out);
+    if trusted {
+        arg(a, "--allow-net");
+        let t = str(swan_home(), "/.tools");
+        arg(a, "--rw"); arg(a, repo);
+        arg(a, "--rw"); arg(a, toolchain_home("CARGO_HOME", ".cargo"));
+        arg(a, "--rw"); arg(a, str(t, "/gradle-home"));
+        arg(a, "--rw"); arg(a, str(t, "/dotnet-home"));
+        arg(a, "--rw"); arg(a, str(t, "/nuget"));
+    }
     arg(a, "--");
     a.append(inner);
     return a;
+}
+
+// $VAR if set, else $HOME/<sub>: where rustup and Cargo keep toolchains and
+// crates. Sealed children get a scratch HOME, so these are passed explicitly.
+fn toolchain_home(name: const u8[:], sub: const u8[:]) -> u8[>..] {
+    var v: u8[>..] = [];
+    if env(name, v) && v.len > 0 { return v; }
+    var h: u8[>..] = [];
+    env("HOME", h);
+    return str(h, "/", sub);
+}
+
+// Run one step of the map sealed when the sandbox is on (see seal_argv).
+fn sealed_run(argv: const u8[:], repo: const u8[:], out: const u8[:], trusted: bool, env: const u8[:],
+              timeout_ms: i64, o: u8[>..]&, e: u8[>..]&) -> i32 {
+    if !sandbox_on() { return swan_run(argv, repo, env, timeout_ms, o, e); }
+    return swan_run(seal_argv(argv, repo, out, trusted)[..], repo, env, timeout_ms, o, e);
+}
+
+fn sealed_step(label: const u8[:], argv: const u8[:], repo: const u8[:], out: const u8[:], trusted: bool,
+               env: const u8[:], timeout_ms: i64, o: u8[>..]&) -> i32 {
+    if !sandbox_on() { return run_step(label, argv, repo, env, timeout_ms, o); }
+    return run_step(label, seal_argv(argv, repo, out, trusted)[..], repo, env, timeout_ms, o);
 }
 
 // How many indexers run at once: $SWAN_JOBS, else half the cores, at most 8
@@ -1731,7 +1765,7 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
         arg(probe, "--showConfig");
         var po: u8[>..] = [];
         var pe: u8[>..] = [];
-        if swan_run(probe, repo, child_env(l, ""), 60000, po, pe) != 0 {
+        if sealed_run(probe, repo, out, trusted, child_env(l, ""), 60000, po, pe) != 0 {
             let first = find(po, "\n");
             format(report, "typescript: the repo's tsconfig.json cannot be read (",
                    trim(if first > 0 { po[..first] } else { po }), "); indexing with Swan's own config\n");
@@ -1826,7 +1860,7 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
             // count, not a timeout or a crash, which could cut the list
             // short, and a listing with none of the repo's files (a broken
             // config) is not used.
-            let code = run_step("tsc --listFilesOnly", la, repo, child_env(l, ""), 600000, listing);
+            let code = sealed_step("tsc --listFilesOnly", la, repo, out, trusted, child_env(l, ""), 600000, listing);
             if code == 0 || ((code == 1 || code == 2) && contains_line_prefix(listing, str(repo, "/"))) {
                 var sa: u8[>..] = [];
                 arg(sa, str(bin, "tsc"));
@@ -1834,7 +1868,7 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
                 arg(sa, base);
                 arg(sa, "--showConfig");
                 var show: u8[>..] = [];
-                if run_step("tsc --showConfig", sa, repo, child_env(l, ""), 600000, show) == 0 {
+                if sealed_step("tsc --showConfig", sa, repo, out, trusted, child_env(l, ""), 600000, show) == 0 {
                     let cfg_dir: u8[>..] = if l.tsconfig { str(repo) } else { str(out, "/tsproject") };
                     let roots = ts_root_listing(listing, show, cfg_dir);
                     program.append(listing);
@@ -2053,14 +2087,16 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
         arg(probe, "--version");
         var o: u8[>..] = [];
         var e: u8[>..] = [];
-        if swan_run(probe, repo, child_env(l, ""), 30000, o, e) != 0 {
+        // Sealed: run with the repo as working directory, `python -m pip`
+        // and `python -c` would import a repo file named pip.py or json.py.
+        if sealed_run(probe, repo, out, trusted, child_env(l, ""), 30000, o, e) != 0 {
             var p: u8[>..] = [];
             arg(p, python);
             arg(p, "-c");
             arg(p, PY_ENV_SNIPPET);
             var listing: u8[>..] = [];
             let env_file = str(out, "/python-env.json");
-            if run_step("python packages (importlib.metadata)", p, repo, child_env(l, ""), 60000, listing) == 0 {
+            if sealed_step("python packages (importlib.metadata)", p, repo, out, trusted, child_env(l, ""), 60000, listing) == 0 {
                 write_file(env_file, listing);
             } else {
                 write_file(env_file, "[]");
@@ -2137,7 +2173,7 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
         }
     }
 
-    if l.cargo && !trusted {
+    if l.cargo && !trusted && !sandbox_on() {
         skipped.append(" rust-analyzer scip (Rust: cargo build scripts, proc macros)");
         delete_file(str(out, "/index-rust.scip"));   // this map drops it; after trust it is rebuilt, not reused
     } else if l.cargo {
@@ -2148,7 +2184,15 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
         arg(a, ".");
         arg(a, "--output");
         arg(a, target);
-        add_lang_job("rust-analyzer scip", target, a, child_env(l, env_entry("CARGO_TARGET_DIR", str(out, "/cargo-target"))),
+        // Build scripts and proc macros run inside the seal. Untrusted repos
+        // run offline against the crates already cached in Cargo's home;
+        // a missing crate leaves those uses unresolved, never unsealed.
+        var renv: u8[>..] = [];
+        renv.append(env_entry("CARGO_TARGET_DIR", str(out, "/cargo-target")));
+        renv.append(env_entry("RUSTUP_HOME", toolchain_home("RUSTUP_HOME", ".rustup")));
+        renv.append(env_entry("CARGO_HOME", toolchain_home("CARGO_HOME", ".cargo")));
+        if !trusted { renv.append(env_entry("CARGO_NET_OFFLINE", "true")); }
+        add_lang_job("rust-analyzer scip", target, a, child_env(l, renv),
                      lang_fingerprint(repo, [".rs"], ["Cargo.toml", "Cargo.lock"]) { f => stamp(f) });
     }
 
@@ -2307,7 +2351,7 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
         } else {
             while running >= limit { wait_one(); }
             var launch: u8[>..] = [];
-            if sandbox_on() && !build_trusted(repo, out) { launch = seal_argv(f[2], repo, out); } else { launch.append(f[2]); }
+            if sandbox_on() { launch = seal_argv(f[2], repo, out, trusted); } else { launch.append(f[2]); }
             pids[idx] = swan_spawn(launch[..], repo, f[3], str(out, "/log-", idx, ".txt"));
             codes[idx] = -999;
             began[idx] = clock();

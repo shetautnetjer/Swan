@@ -130,6 +130,7 @@ static int64_t now_ms(void) {
     return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
 
+static int env_overridden(char **ours, int64_t a, const char *e);
 /* Splits "a\0b\0c\0" into a NULL-terminated array of pointers into buf. */
 static char **split_nul(char *buf, int64_t len, char **extra_from) {
     int64_t n = 0;
@@ -168,8 +169,9 @@ int32_t swan_run(swan_slice argv_nul, swan_slice cwd, swan_slice env_nul, int64_
         while (ours && ours[a]) a++;
         while (environ[b]) b++;
         envp = calloc((size_t)(a + b + 1), sizeof *envp);
-        for (int64_t i = 0; i < a; i++) envp[i] = ours[i];
-        for (int64_t i = 0; i < b; i++) envp[a + i] = environ[i];
+        int64_t k = 0;
+        for (int64_t i = 0; i < a; i++) envp[k++] = ours[i];
+        for (int64_t i = 0; i < b; i++) if (!env_overridden(ours, a, environ[i])) envp[k++] = environ[i];
         free(ours);
     }
     int po[2], pe[2];
@@ -269,6 +271,18 @@ bool swan_realpath(swan_slice path, gs_rref out) {
 
 /* Starts argv like swan_run, with stdout and stderr going to log_path.
    Returns its pid, or -1. */
+/* True when environment entry `e` ("NAME=value") names a variable that one
+ * of `ours` sets. The child must see each variable once: getenv() takes the
+ * first copy but a shell (eggshell, for one) takes the last, so a duplicate
+ * PATH meant the seal ran with the host PATH instead of Swan's. */
+static int env_overridden(char **ours, int64_t a, const char *e) {
+    const char *eq = strchr(e, '=');
+    size_t n = eq ? (size_t)(eq - e) + 1 : strlen(e);
+    for (int64_t i = 0; i < a; i++)
+        if (strncmp(ours[i], e, n) == 0) return 1;
+    return 0;
+}
+
 int64_t swan_spawn(swan_slice argv_nul, swan_slice cwd, swan_slice env_nul, swan_slice log_path) {
     char *abuf = malloc((size_t)argv_nul.len + 1), *ebuf = malloc((size_t)env_nul.len + 1);
     char cwdbuf[4096], logbuf[4096];
@@ -285,8 +299,9 @@ int64_t swan_spawn(swan_slice argv_nul, swan_slice cwd, swan_slice env_nul, swan
     while (ours && ours[a]) a++;
     while (environ[b]) b++;
     char **envp = calloc((size_t)(a + b + 1), sizeof *envp);
-    for (int64_t i = 0; i < a; i++) envp[i] = ours[i];
-    for (int64_t i = 0; i < b; i++) envp[a + i] = environ[i];
+    int64_t k = 0;
+    for (int64_t i = 0; i < a; i++) envp[k++] = ours[i];
+    for (int64_t i = 0; i < b; i++) if (!env_overridden(ours, a, environ[i])) envp[k++] = environ[i];
     const char *path_env = NULL;
     for (char **e = envp; *e; e++) if (strncmp(*e, "PATH=", 5) == 0) { path_env = *e + 5; break; }
     pid_t pid = fork();

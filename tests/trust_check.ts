@@ -82,14 +82,22 @@ if (existsSync(".tools/dotnet-tools/scip-dotnet") && existsSync(".tools/dotnet-t
     !m2.includes("not run:") && !m2.includes("scip-dotnet: reused") && callers() === 3, m2);
 } else console.log("skipped C#: no .tools/dotnet-tools (csharp-ls, scip-dotnet)");
 
-// Rust unchecked: its saved diagnostics stay while the Python check runs.
+// Rust: maps sealed with no trust; unchecked, its saved diagnostics stay while the Python check runs.
 {
   const dir = "data/trust-check/rs";
   rmSync(dir, { recursive: true, force: true });
   cpSync("fixtures/tiny-rs", `${dir}/repo`, { recursive: true });
   writeFileSync(`${dir}/repo/helper.py`, "def helper() -> int:\n    return 1\n");
   const repo = resolve(`${dir}/repo`), out = `${dir}/out`;
-  run(untrusted, "map", repo, out);
+  const mapped = run(untrusted, "map", repo, out);
+  const mreport = mapped.stdout.toString() + mapped.stderr.toString();
+  // No trust needed: rust-analyzer (build scripts, proc macros) runs sealed and offline.
+  check("untrusted Rust: the map runs rust-analyzer sealed, with no trust step",
+    mreport.includes("rust-analyzer scip:") && !mreport.includes("not run: rust-analyzer"), mreport.slice(0, 600));
+  const refs = JSON.parse(run(untrusted, "query", `${out}/swan.db`, "refs", "Shape").stdout.toString() || "[]");
+  check("untrusted Rust: uses of Shape are compiler-resolved (not matched by name)",
+    refs.length > 0 && refs[0].references.some((r: any) => !r.by_name), JSON.stringify(refs).slice(0, 400));
+  check("untrusted Rust: the sealed build wrote nothing into the repo (no target/)", !existsSync(`${dir}/repo/target`));
   const saved = "src/lib.rs\t0\t0\t0\t1\terror\tcargo\tE0061\ta saved cargo error\n";
   mkdirSync(out, { recursive: true });
   writeFileSync(`${out}/diagnostics.tsv`, saved);
@@ -107,7 +115,10 @@ if (existsSync(".tools/dotnet-tools/scip-dotnet") && existsSync(".tools/dotnet-t
   rmSync(dir, { recursive: true, force: true });
   cpSync("fixtures/tiny-py", `${dir}/repo`, { recursive: true });
   const repo = resolve(`${dir}/repo`), out = `${dir}/out`;
-  const marker = resolve(`${dir}/venv-python-ran`);
+  // In the map folder: the one place every sealed run (trusted or not) and the
+  // live server can write, so the marker shows any run of the virtualenv.
+  mkdirSync(out, { recursive: true });
+  const marker = resolve(`${out}/venv-python-ran`);
   mkdirSync(`${dir}/repo/.venv/bin`, { recursive: true });
   writeFileSync(`${dir}/repo/.venv/pyvenv.cfg`, "home = /usr/bin\n");
   // Exec the system python by absolute path: with the virtualenv first on PATH a bare `python3` is this
