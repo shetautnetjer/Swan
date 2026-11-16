@@ -492,3 +492,50 @@ eggshell's own test failed "repo stayed read-only" and "network blocked".
 
 The extended `eggshell/test.sh` has 13 checks; against the old runner 7
 fail on this machine, against the new one all pass.
+
+## 2026-11-16 — Seal everything; trust only loosens
+
+Agents should never have to ask a person to trust a repo. The seal, not a
+human, is what makes running a repo's build code safe.
+
+- **Trusted runs are sealed too.** Before, `seal_argv` was used only for
+  untrusted repos, so `swan trust` switched every protection off: network,
+  writes anywhere in the home. Now every indexer launch is sealed; trust adds
+  `--allow-net` and `--rw` grants for the repo (Gradle writes `build/`,
+  dotnet `obj/`), Cargo's home and Swan's Gradle and .NET caches, through a
+  new `eggshell --rw DIR`.
+- **Rust needs no trust.** rust-analyzer scip (which runs build scripts and
+  proc macros) runs sealed and offline (`CARGO_NET_OFFLINE`) for untrusted
+  repos, with `RUSTUP_HOME`/`CARGO_HOME` passed in because the seal's HOME is
+  scratch, and its target dir in the map. Cargo's home stays read-only, so a
+  repo can't poison the crate cache. On a small Rust workspace the untrusted
+  map went from 39 symbols (syntax only) to 825, with callers matching `rg`.
+- **The map's probes are sealed.** `tsc --showConfig/--listFilesOnly` and
+  the Python package probe ran unsealed with the repo as working directory;
+  `python -m pip` and `python -c` would import a repo file named `pip.py` or
+  `json.py`, running repo code before any trust check.
+- **Still waiting for trust:** Gradle/Maven/MSBuild indexers (they need
+  writable caches without cross-repo poisoning, likely an overlay over a
+  shared cache, and an offline mode), `swan check`'s checkers and live
+  language servers.
+
+Two fixes the change needed, found by running the whole suite sealed:
+
+- **Each variable once in a child's environment.** `swan_spawn` and
+  `swan_run` passed Swan's entries *and then* the whole inherited
+  environment, so `PATH` appeared twice. `getenv()` takes the first copy, a
+  shell the last; eggshell is a shell script, so sealed runs got the host
+  `PATH` without Swan's tool directories (scip-clang lost its `clang++`
+  stand-in and indexed CUDA half). Inherited entries that Swan overrides are
+  now dropped (`native/swan_sys.c`).
+- **A private `/tmp` per sealed run.** scip-java writes to `/tmp` whatever
+  `TMPDIR` says, and the seal had made `/tmp` read-only.
+
+The test runner (`scripts/test.sh`, `set -e`) stopped at the long-standing
+Rust macro failure, so nine checks after it had not run on main either; they
+were run one by one for this change. `structural_check` (no `ast-grep` on
+the test machine) and `kotlin_live_check` fail identically on main.
+
+Ideas behind it: Pydantic Monty's "no ambient authority, the host grants
+named capabilities", applied to OS processes, where Monty itself defers to an
+OS layer.

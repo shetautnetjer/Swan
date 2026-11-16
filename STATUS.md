@@ -732,3 +732,21 @@ DECISIONS.md.
 - A sealed map of a small Rust/shell repo gives the same symbols and
   references as before (39 symbols, 134 occurrences).
 
+## 2026-11-16: every run sealed; Rust maps with no trust
+
+Trusted runs are sealed too (trust adds network and `--rw` grants); Rust's
+rust-analyzer runs sealed and offline for untrusted repos; the map's tsc and
+Python probes are sealed; sealed runs get a private `/tmp`; child processes
+see each environment variable once. See DECISIONS.md.
+
+- Untrusted map of a small Rust workspace: 825 symbols, compiler-resolved
+  (39, syntax only, before); direct callers match `rg`; repo untouched.
+- `eggshell/test.sh`: 15 passed (two new `--rw` checks).
+- `tests/trust_check.ts`: 12 passed, including three new untrusted-Rust
+  checks that fail on main.
+- `lang_check` 61, `diag_check` 8, `agnostic_check` 13, `split_check` 2,
+  `live_check` 13, `game_live_check` 8, the checks before `rust_check` all
+  pass. `rust_check` keeps its one known failure (as on main);
+  `structural_check` and `kotlin_live_check` fail as on main.
+- Still waiting for trust: Gradle/Maven/MSBuild indexers, `swan check`,
+  live language servers.

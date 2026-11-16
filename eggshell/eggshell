@@ -13,17 +13,22 @@
 #                                 is covered too), and the runner checks the
 #                                 repo's mount really is read-only before
 #                                 running anything
-#   - writes go only to OUT      (OUT bind-mounted read-write) and an ephemeral
-#                                 tmpfs scratch (HOME + TMPDIR on /dev/shm) that
-#                                 is discarded on exit
+#   - writes go only to OUT      (OUT bind-mounted read-write), --rw grants,
+#                                 and ephemeral scratch discarded on exit
+#                                 (HOME + TMPDIR on /dev/shm, a private /tmp)
 #   - if the sandbox cannot be set up, REFUSE (never fall back to running
 #     unconfined). Swan's trust gate stays the fallback for whether to attempt
 #     build-running indexers at all.
 #
-# Usage:  eggshell <repo-dir> <out-dir> [--allow-net] -- <cmd> [args...]
+# Usage:  eggshell <repo-dir> <out-dir> [--allow-net] [--rw DIR]... -- <cmd> [args...]
 #   --allow-net   loosen only (share host network and leave /run visible, so
 #                 DNS works). Use this for an explicitly trusted repo that must
 #                 fetch dependencies; off by default.
+#   --rw DIR      loosen only: make DIR (and what is under it) writable, for a
+#                 build tool's own cache or, for a trusted build that writes
+#                 its outputs (obj/, build/), the repo itself. Repeatable.
+#                 Refused for /, the user's home and anything that contains
+#                 OUT's parent tree; DIR is created if missing.
 #
 # Exit codes: 2 usage/precondition error; 3 sandbox unavailable (REFUSED);
 #             otherwise the wrapped command's own exit code.
@@ -37,9 +42,15 @@ REPO=$1; shift
 OUT=$1; shift
 
 ALLOW_NET=0
+RW_LIST=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --allow-net) ALLOW_NET=1; shift ;;
+    --rw)
+      [ $# -ge 2 ] || { echo "eggshell: --rw needs a directory" >&2; exit 2; }
+      RW_LIST="$RW_LIST$2
+"
+      shift 2 ;;
     --) shift; break ;;
     *) echo "eggshell: unexpected argument before --: $1" >&2; exit 2 ;;
   esac
@@ -60,6 +71,26 @@ fi
 
 NET_FLAG="--net"
 [ "$ALLOW_NET" = "1" ] && NET_FLAG=""   # trust loosening: share host network
+
+# Check every --rw directory now, outside the seal: absolute, not / or the
+# whole home, created if missing, symlinks resolved.
+RW_CHECKED=""
+if [ -n "$RW_LIST" ]; then
+  while IFS= read -r d; do
+    [ -n "$d" ] || continue
+    case "$d" in /*) ;; *) echo "eggshell: --rw needs an absolute path: $d" >&2; exit 2 ;; esac
+    mkdir -p "$d" || { echo "eggshell: cannot create --rw directory $d" >&2; exit 2; }
+    d=$(cd "$d" && pwd -P)
+    case "$d" in
+      /|"${HOME%/}"|/home|/root|/usr|/etc|/var|/opt)
+        echo "eggshell: --rw $d is too broad; REFUSING" >&2; exit 2 ;;
+    esac
+    RW_CHECKED="$RW_CHECKED$d
+"
+  done <<EOF
+$RW_LIST
+EOF
+fi
 
 # Sealed runs hide /run. A repo or OUT inside /run would vanish with it, so
 # refuse instead of guessing.
@@ -86,7 +117,7 @@ EGG_MOUNTS_AWK='{
   print length(out) "\t" out
 }'
 
-export EGG_REPO="$REPO" EGG_OUT="$OUT" EGG_ALLOW_NET="$ALLOW_NET" EGG_MOUNTS_AWK
+export EGG_REPO="$REPO" EGG_OUT="$OUT" EGG_ALLOW_NET="$ALLOW_NET" EGG_MOUNTS_AWK EGG_RW="$RW_CHECKED"
 exec unshare --user --map-root-user --mount $NET_FLAG --pid --fork --kill-child \
   /bin/sh -euc '
     refuse() { echo "eggshell: $*; REFUSING to run unconfined" >&2; exit 3; }
@@ -106,7 +137,8 @@ exec unshare --user --map-root-user --mount $NET_FLAG --pid --fork --kill-child 
           mount -o remount,bind,ro "$mp" 2>/dev/null || true
         done
 
-    # The repo must now sit on a read-only mount; if not, refuse.
+    # The repo must now sit on a read-only mount; if not, refuse. (A --rw
+    # grant of the repo comes later and is deliberate.)
     repo_opts=$(findmnt -n -o OPTIONS --target "$EGG_REPO" 2>/dev/null) \
       || refuse "cannot inspect the mount holding $EGG_REPO"
     case ",$repo_opts," in
@@ -130,11 +162,31 @@ exec unshare --user --map-root-user --mount $NET_FLAG --pid --fork --kill-child 
       mount -o remount,bind,rw "$EGG_OUT" "$EGG_OUT" 2>/dev/null || true
     fi
 
+    # Explicit --rw grants: one writable hole each, like OUT.
+    if [ -n "$EGG_RW" ]; then
+      printf "%s" "$EGG_RW" | while IFS= read -r d; do
+        [ -n "$d" ] || continue
+        mount --bind "$d" "$d" || refuse "cannot grant --rw $d"
+        mount -o remount,bind,rw "$d" "$d" || refuse "cannot make --rw $d writable"
+      done
+    fi
+
     # Ephemeral scratch (HOME + TMPDIR) on a fresh /dev/shm tmpfs, discarded
     # on exit.
     mount -t tmpfs none /dev/shm 2>/dev/null || refuse "cannot mount scratch on /dev/shm"
     mkdir -p /dev/shm/home /dev/shm/tmp
     export HOME=/dev/shm/home TMPDIR=/dev/shm/tmp
+
+    # A private, empty /tmp: tools that ignore TMPDIR (the JVM writes to
+    # /tmp) still work, and nothing reaches the host /tmp. Skipped when the
+    # repo or OUT lives under /tmp, since the mount would hide them; then the
+    # JVM is pointed at the scratch dir instead.
+    case "$EGG_REPO/:$EGG_OUT/" in
+      /tmp/*|*:/tmp/*)
+        export JAVA_TOOL_OPTIONS="${JAVA_TOOL_OPTIONS:+$JAVA_TOOL_OPTIONS }-Djava.io.tmpdir=$TMPDIR" ;;
+      *)
+        mount -t tmpfs -o mode=1777 none /tmp || refuse "cannot mount a private /tmp" ;;
+    esac
 
     cd "$EGG_REPO"
     exec "$@"

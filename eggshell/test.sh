@@ -76,6 +76,16 @@ else
   { [ -s "$OUT/allow-net.txt" ] && ! grep -q tampered fixtures/benign-map/a.py; } && ok "--allow-net runs, repo still read-only" || bad "--allow-net run wrong"
   git -C "$HERE" checkout -- fixtures/benign-map/a.py 2>/dev/null || true
 
+  # --rw grants exactly the named directory; the repo stays read-only
+  # unless it is the one granted; broad grants are refused.
+  rwdir="$OUT.rw"; mkdir -p "$rwdir"
+  "$EGG" fixtures/benign-map "$OUT" --rw "$rwdir" -- sh -c "echo ok > '$rwdir/granted'; echo tampered >> a.py 2>/dev/null; true" >/dev/null 2>&1
+  { [ -s "$rwdir/granted" ] && ! grep -q tampered fixtures/benign-map/a.py; } && ok "--rw grants only the named directory" || bad "--rw grant wrong"
+  git -C "$HERE" checkout -- fixtures/benign-map/a.py 2>/dev/null || true
+  "$EGG" fixtures/benign-map "$OUT" --rw "$HOME" -- true >/dev/null 2>&1; rc=$?
+  [ "$rc" = 2 ] && ok "--rw of the whole home refused" || bad "--rw of the whole home allowed (exit $rc)"
+  rm -rf "$rwdir"
+
   # A repo under /run would disappear with it: refuse rather than guess.
   "$EGG" /run "$OUT" -- true >/dev/null 2>&1; rc=$?
   [ "$rc" = 3 ] && ok "repo under /run refused" || bad "repo under /run not refused (exit $rc)"

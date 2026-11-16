@@ -70,7 +70,20 @@ namespaces, part B skips and the runner would REFUSE (the safe outcome).
 ## How it maps to Swan's trust gate
 
 - **Untrusted (default, headless):** run sealed, no network. The static map
-  builds; network-dependent build steps degrade safely (skipped), never run
-  unconfined.
-- **Trusted (`swan trust <repo>`):** still sealed, but `--allow-net` lets a
-  trusted repo fetch dependencies. Trust loosens; it is never required to run.
+  builds, and Rust's rust-analyzer (build scripts, proc macros) runs sealed
+  and offline against Cargo's existing cache. Network-dependent steps
+  degrade (unresolved), never run unconfined.
+- **Trusted (`swan trust <repo>`):** still sealed, with `--allow-net` and
+  `--rw` for the repo (Gradle's `build/`, dotnet's `obj/`), Cargo's home and
+  Swan's Gradle and .NET caches. Trust loosens; it never unseals.
+- **Not yet sealed for untrusted repos:** Gradle, Maven and MSBuild indexers
+  (they need their caches and an offline mode), `swan check`, and live
+  language servers. These still wait for trust.
+
+Each sealed run also gets a private, empty `/tmp` (the JVM writes there
+whatever `TMPDIR` says), except when the repo or OUT lives under `/tmp`;
+then the JVM's temp dir is pointed at the scratch dir instead.
+
+`eggshell --rw DIR` (repeatable) opens one writable hole per directory, like
+OUT. It refuses `/`, the whole home and system roots, and creates DIR if
+missing.
