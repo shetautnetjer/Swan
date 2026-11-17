@@ -31,6 +31,7 @@ let TOOLS = """
      {"name":"format_file","description":"Run a file through its language's formatter from tools/modules.json (ruff format, biome format, rustfmt). The file's positions in the map are stale afterwards until update_map.","inputSchema":{"type":"object","properties":{"repo":{"type":"string","description":"A repo path: answer about that repo's map instead (as use_repo; the choice persists)."},"build":{"type":"boolean","description":"Allow an implicit build when no usable map covers the repo (default true). Applies only to repository selection, not explicit tool actions or live warm-up."},"relative_path":{"type":"string"}},"required":["relative_path"]}},
      {"name":"search_pattern","description":"Structural search, ast-grep style: a pattern is code in the target language with metavariables, $X for any one node and $$$X for any run of nodes (none included); $_ matches without capturing, and a name used twice must match the same text. Matches by syntax tree, not text (so spacing and comments do not matter), in TS/TSX/JS, Python, Rust, Java, Kotlin, C, C++, CUDA, C#, PHP, Lua, GDScript and the GLSL, HLSL and WGSL shading languages via tree-sitter. Each match has its position, what each metavariable captured, and the symbol it sits in.","inputSchema":{"type":"object","properties":{"repo":{"type":"string","description":"A repo path: answer about that repo's map instead (as use_repo; the choice persists)."},"build":{"type":"boolean","description":"Allow an implicit build when no usable map covers the repo (default true). Applies only to repository selection, not explicit tool actions or live warm-up."},"pattern":{"type":"string"},"language":{"type":"string","description":"typescript, tsx, javascript, python, rust, java, kotlin, c, cpp, cuda, csharp, php, lua, gdscript, glsl, hlsl or wgsl; default every language the pattern parses in."},"relative_path":{"type":"string","description":"A file or directory to search; default the whole repo."},"max_results":{"type":"integer"}},"required":["pattern"]}},
      {"name":"rewrite_pattern","description":"Structural rewrite: every match of pattern (as in search_pattern) replaced by rewrite, where $X and $$$X stand for what they captured. Without apply it only plans the edits (before and after for each); apply writes them, refused when a file changed since the map was built. Nested matches are left to the outer one. Rewritten files are stale in the map until update_map.","inputSchema":{"type":"object","properties":{"repo":{"type":"string","description":"A repo path: answer about that repo's map instead (as use_repo; the choice persists)."},"build":{"type":"boolean","description":"Allow an implicit build when no usable map covers the repo (default true). Applies only to repository selection, not explicit tool actions or live warm-up."},"pattern":{"type":"string"},"rewrite":{"type":"string"},"language":{"type":"string"},"relative_path":{"type":"string"},"apply":{"type":"boolean"}},"required":["pattern","rewrite"]}},
+     {"name":"edit_batch","description":"Several edits as one change, all or nothing: the way to make a change that reaches more than one place. edits is a list; each item has op (rename_symbol, replace_symbol_body, insert_after_symbol, insert_before_symbol or rewrite_pattern) and that tool's own arguments. Without apply every edit is planned against the code as it is now and nothing is written. With apply they run in the order given, each seeing what the earlier ones changed; if one fails or is refused, the map and every file already written go back to what they were. Afterwards: update_map, then get_diagnostics or run_tests for the files written.","inputSchema":{"type":"object","properties":{"repo":{"type":"string","description":"A repo path: answer about that repo's map instead (as use_repo; the choice persists)."},"build":{"type":"boolean","description":"Allow an implicit build when no usable map covers the repo (default true). Applies only to repository selection, not explicit tool actions or live warm-up."},"edits":{"type":"array","items":{"type":"object","properties":{"op":{"type":"string"},"name_path":{"type":"string"},"relative_path":{"type":"string"},"new_name":{"type":"string"},"body":{"type":"string"},"pattern":{"type":"string"},"rewrite":{"type":"string"},"language":{"type":"string"}},"required":["op"]}},"apply":{"type":"boolean"}},"required":["edits"]}},
      {"name":"index_info","description":"When and from what the code map was built: repo root, build time, counts, and the files changed since the SCIP run or added since then (stale_files; new_file_count of them are new, so no answer covers them yet). Answers about a stale file carry \"stale\": true; refresh the map or reread the file.","inputSchema":{"type":"object","properties":{"repo":{"type":"string","description":"A repo path: answer about that repo's map instead (as use_repo; the choice persists)."},"build":{"type":"boolean","description":"Allow an implicit build when no usable map covers the repo (default true). Applies only to repository selection, not explicit tool actions or live warm-up."}}}}]
     """;
 
@@ -356,7 +357,168 @@ fn reply_head(out: u8[>..]&, id: json::Node?) {
     format_id(out, id);
 }
 
+// Several edits as one change: planned together, applied in the order
+// given, all or nothing. The usual way to make a change that reaches more
+// than one place: rename this, replace that body, insert a helper, rewrite
+// a pattern, in one call.
+//
+// Without `apply` each edit is planned against the code as it is now: a
+// rename's sites, a rewrite's edits, whether a symbol edit's target is
+// there and its file fresh. Nothing is written.
+//
+// With `apply` the edits run in order; an edit sees what the ones before
+// it changed (Swan moves its rows as it edits). If one fails or is refused,
+// the map goes back to where it was (one savepoint around them all) and
+// every file already written gets its old text back, so there is never
+// half a change on disk.
+fn edit_batch(db: i64, args: json::Node?, out: u8[>..]&) -> bool {
+    let edits = json::member(args, "edits");
+    guard edits else {
+        out.append("edits is required: a list of {\"op\": ...} where op is rename_symbol, replace_symbol_body, insert_after_symbol, insert_before_symbol or rewrite_pattern, each with that tool's own arguments");
+        return false;
+    }
+    let apply = arg_bool(args, "apply");
+    var root: u8[>..] = [];
+    meta_value(db, "root", root);
+
+    // The text of every file an edit is about to write, taken before it does.
+    var snap_names: u8[>..] = [];      // relative paths, one per line, in order
+    var snap_text: u8[>..] = [];
+    var snap_at: i64[>..] = [];
+    var snap_len: i64[>..] = [];
+    fn snapshot(rel: const u8[:]) {
+        guard rel.len > 0;
+        var have = false;
+        each_split(snap_names, '\n') { n => if n == rel { have = true; } };
+        guard !have;
+        var text: u8[>..] = [];
+        guard read_file(str(root, "/", rel), text);
+        format(snap_names, rel, "\n");
+        snap_at.push(snap_text.len);
+        snap_len.push(text.len);
+        snap_text.append(text);
+    }
+    // The files a planned rename or rewrite names ("sites" or "edits").
+    fn snapshot_plan(plan: const u8[:]) {
+        var doc: json::Node[>..] = [];
+        var dec: u8[>..] = [];
+        let r, perr = json::parse(plan, doc, dec);
+        guard r;
+        for key in ["sites", "edits"] {
+            let list = json::member(r, key);
+            if list { json::each(list) { it => let f, f_ok = json::as_string(json::member(it, "relative_path")); if f_ok { snapshot(f); } }; }
+        }
+    }
+
+    var results: u8[>..] = [];
+    var n = 0;
+    var failed_at = 0;                 // 1-based, 0 = none
+    if apply { exec_or_die(db, "SAVEPOINT swan_batch;"); }
+    // The edits, copied out of the request first (fields 0x1f apart, edits
+    // 0x1e apart): the edit functions reuse buffers the request's JSON may
+    // sit in.
+    var packed: u8[>..] = [];
+    json::each(edits) { e =>
+        for key in ["op", "relative_path", "name_path", "new_name", "body", "pattern", "rewrite", "language"] {
+            packed.append(arg_text(e, key));
+            packed.push(0x1f);
+        }
+        packed.push(0x1e);
+    };
+    each_split(packed, 0x1e) { rec =>
+        let f = split(rec, 0x1f);
+        if failed_at == 0 && f.len >= 8 {
+            n++;
+            let op = f[0];
+            let rel = f[1];
+            let name_path = f[2];
+            var sub: u8[>..] = [];
+            var ok = false;
+            if op == "rename_symbol" {
+                if apply {
+                    var plan: u8[>..] = [];
+                    rename_symbol(db, name_path, rel, f[3], false, plan);
+                    snapshot_plan(plan);
+                }
+                ok = rename_symbol(db, name_path, rel, f[3], apply, sub);
+            } else if op == "rewrite_pattern" {
+                if apply {
+                    var plan: u8[>..] = [];
+                    rewrite_pattern(db, f[5], f[6], f[7], rel, false, plan);
+                    snapshot_plan(plan);
+                }
+                ok = rewrite_pattern(db, f[5], f[6], f[7], rel, apply, sub);
+            } else if op == "replace_symbol_body" || op == "insert_after_symbol" || op == "insert_before_symbol" {
+                let mode = if op == "replace_symbol_body" { EDIT_REPLACE } else if op == "insert_after_symbol" { EDIT_AFTER } else { EDIT_BEFORE };
+                if apply {
+                    snapshot(rel);
+                    ok = edit_symbol(db, mode, name_path, rel, f[4], sub);
+                } else {
+                    // Planned: the target is there and its file can be edited.
+                    var terr: u8[>..] = [];
+                    let t = resolve_target(db, name_path, rel, terr);
+                    if t.id < 0 { sub.append(terr); }
+                    else if is_stale(rel) { format(sub, rel, " changed since the map was built; refresh the map first"); }
+                    else {
+                        sub.append("{\"target\":");
+                        json::format_string(sub, name_path);
+                        sub.append(",\"relative_path\":");
+                        json::format_string(sub, rel);
+                        sub.push('}');
+                        ok = true;
+                    }
+                }
+            } else {
+                format(sub, "unknown op '", op, "': use rename_symbol, replace_symbol_body, insert_after_symbol, insert_before_symbol or rewrite_pattern");
+            }
+            // An applied rename or rewrite that was refused says so in its answer.
+            if apply && ok && find(sub, "\"applied\":false") >= 0 { ok = false; }
+            if !ok && apply { failed_at = n; }
+            if results.len > 0 { results.push(','); }
+            results.append("{\"op\":");
+            json::format_string(results, op);
+            results.append(",\"ok\":");
+            json::format_bool(results, ok);
+            results.append(",\"result\":");
+            if sub.len > 0 && sub[0] == '{' { results.append(sub); } else { json::format_string(results, sub); }
+            results.push('}');
+        }
+    };
+
+    var files: u8[>..] = [];
+    each_split(snap_names, '\n') { f => if f.len > 0 { if files.len > 0 { files.push(','); } json::format_string(files, f); } };
+    if !apply {
+        format(out, "{\"applied\":false,\"edits\":[", results, "],\"note\":\"each edit is planned against the code as it is now; with apply they run in this order, all or nothing\"}");
+        return true;
+    }
+    if failed_at == 0 {
+        exec_or_die(db, "RELEASE swan_batch;");
+        format(out, "{\"applied\":true,\"edits\":[", results, "],\"files_written\":[", files,
+               "],\"next\":\"update_map, then get_diagnostics or run_tests for these files\"}");
+        return true;
+    }
+    // One edit failed: the map and the files go back.
+    exec_or_die(db, "ROLLBACK TO swan_batch; RELEASE swan_batch;");
+    var restored = 0;
+    var k = 0;
+    each_split(snap_names, '\n') { f =>
+        if f.len > 0 {
+            let path = str(root, "/", f);
+            let was = snap_text[snap_at[k]..snap_at[k] + snap_len[k]];
+            var now: u8[>..] = [];
+            if !read_file(path, now) || now != was {
+                if write_file_atomic(path, was) { mark_edited(db, f, path); restored++; }
+            }
+            k++;
+        }
+    };
+    format(out, "{\"applied\":false,\"failed_at\":", failed_at, ",\"rolled_back\":true,\"files_restored\":", restored,
+           ",\"edits\":[", results, "]}");
+    return false;
+}
+
 fn call_tool(db: i64, name: const u8[:], args: json::Node?, out: u8[>..]&) -> bool {
+    if name == "edit_batch" { return edit_batch(db, args, out); }
     if name == "find_symbol" {
         let pattern = arg_text(args, "name_path_pattern");
         guard pattern.len > 0 else { out.append("name_path_pattern is required"); return false; }

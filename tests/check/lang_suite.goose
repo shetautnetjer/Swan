@@ -17,6 +17,7 @@ fn lang_suite() {
     lang_js();
     lang_python();
     lang_java();
+    lang_java_batch();
     lang_gradle();
     lang_cuda();
     lang_modules();
@@ -103,6 +104,49 @@ fn lang_python() {
     if dl { json::each(dl) { d => if jstr(d, "severity") == "error" { format(in_syms, jstr(d, "in_symbol"), "\n"); } }; }
     check("python: pyright's errors land in Square's callers, report and ShapeTests.test_square",
           has_line(in_syms, "report") && has_line(in_syms, "ShapeTests/test_square"), t);
+}
+
+// edit_batch: several edits as one change, all or nothing.
+fn lang_java_batch() {
+    let w = "data/java-batch";
+    rm_rf(w);
+    mkdir_p(w);
+    var o: u8[>..] = [];
+    guard sh(argv(["cp", "-r", "fixtures/tiny-java", str(w, "/repo")]), "", o) else { return; }
+    guard sh(argv(["bin/swan", "map", str(w, "/repo"), str(w, "/map")]), "", o) else { return; }
+    let db = str(w, "/map/swan.db");
+    let good = """{"op":"rename_symbol","name_path":"/Shape/area","relative_path":"src/main/java/shapes/Shape.java","new_name":"surface"},{"op":"insert_after_symbol","name_path":"Shapes/totalArea","relative_path":"src/main/java/shapes/Shapes.java","body":"    public static int count(List<Shape> shapes) {\n        return shapes.size();\n    }"},{"op":"rewrite_pattern","pattern":"side * side","rewrite":"Math.pow(side, 2)","language":"java"}""";
+    var pt: u8[>..] = [];
+    let pr = serve_once(db, "edit_batch", str("{\"edits\":[", good, "]}"), pt);
+    var same: u8[>..] = [];
+    var e0: u8[>..] = [];
+    let unchanged = run(argv(["diff", "-r", "fixtures/tiny-java", str(w, "/repo")]), "", same, e0) == 0;
+    check("batch: three edits are planned together and nothing is written",
+          pr == 1 && find(pt, "\"applied\":false") >= 0 && find(pt, "\"ok\":false") < 0 && find(pt, "\"files\":4") >= 0 && unchanged, pt);
+
+    // The third edit names a method that is not there: the first two are undone.
+    var ft: u8[>..] = [];
+    let fr = serve_once(db, "edit_batch", """{"edits":[{"op":"rename_symbol","name_path":"/Shape/area","relative_path":"src/main/java/shapes/Shape.java","new_name":"surface"},{"op":"insert_after_symbol","name_path":"Shapes/totalArea","relative_path":"src/main/java/shapes/Shapes.java","body":"    // added"},{"op":"replace_symbol_body","name_path":"Shapes/noSuchMethod","relative_path":"src/main/java/shapes/Shapes.java","body":"x"}],"apply":true}""", ft);
+    let back = run(argv(["diff", "-r", "fixtures/tiny-java", str(w, "/repo")]), "", same, e0) == 0;
+    var info: u8[>..] = [];
+    serve_once(db, "index_info", "{}", info);
+    var t: u8[>..] = [];
+    lg_db_query(db, "callers", "/Shape/area", "", t);
+    check("batch: when one edit fails, every file and the map go back, and nothing is left stale",
+          fr == 0 && find(ft, "\"failed_at\":3") >= 0 && find(ft, "\"rolled_back\":true") >= 0 && back &&
+          find(info, "\"stale_file_count\":0") >= 0 && find(t, "\"name_path\":\"Shapes/totalArea\"") >= 0, str(ft, "\n     ", info));
+
+    var at: u8[>..] = [];
+    let ar = serve_once(db, "edit_batch", str("{\"edits\":[", good, "],\"apply\":true}"), at);
+    check("batch: the three edits apply as one change to four files", ar == 1 && find(at, "\"applied\":true") >= 0 &&
+          find(at, "Circle.java") >= 0 && find(at, "Square.java") >= 0 && find(at, "Shape.java") >= 0 && find(at, "Shapes.java") >= 0, at);
+    guard sh(argv(["bin/swan", "map", str(w, "/repo"), str(w, "/map")]), "", o) else { return; }
+    guard sh(argv(["bin/swan", "check", str(w, "/repo"), str(w, "/map")]), "", o) else { return; }
+    lg_db_query(db, "diagfile", ".", "", t);
+    var sq: u8[>..] = [];
+    read_file(str(w, "/repo/src/main/java/shapes/Square.java"), sq);
+    check("batch: after it, javac finds no errors and the later edits saw the earlier ones",
+          find(t, "\"errors\":0") >= 0 && find(sq, "public double surface()") >= 0 && find(sq, "Math.pow(side, 2)") >= 0, t);
 }
 
 fn lang_java() {
