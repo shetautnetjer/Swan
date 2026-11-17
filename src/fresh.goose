@@ -31,7 +31,7 @@ fn load_freshness(db: i64) {
     meta_value(db, "scip_time", t);
     let n, ok = parse_int(t);
     if ok { fresh_scip_time = n; }
-    fresh_edited = prepare_or_die(db, "SELECT edited_mtime FROM files WHERE file = ?1");
+    fresh_edited = prepare_or_die(db, "SELECT edited_mtime, hash FROM files WHERE file = ?1");
 }
 
 // Lets go of the freshness state before its db closes: the prepared
@@ -43,8 +43,15 @@ fn drop_freshness() {
     if fresh_edited != 0 { sqlite::finalize(fresh_edited); fresh_edited = 0; }
 }
 
-// The mtime Swan left on a file it edited, or -1.
-fn edited_mtime(file: const u8[:]) -> i64 {
+// What mark_edited stores for the text Swan left in a file.
+fn edit_mark(text: const u8[:]) -> u8[>..] {
+    return str("e", hash(text));
+}
+
+// The mtime Swan left on a file it edited, or -1; mark gets what it stored
+// for the text it left ("" in a map written before Swan stored one).
+fn edited_mtime(file: const u8[:], mark: u8[>..]&) -> i64 {
+    mark.clear();
     guard fresh_edited != 0 else { return -1; }
     var err: u8[>..] = [];
     var t = -1;
@@ -52,7 +59,10 @@ fn edited_mtime(file: const u8[:]) -> i64 {
     if step_checked(fresh_edited, err) == 1 {
         var v: u8[>..] = [];
         sqlite::col_text(fresh_edited, 0, v);
-        if v.len > 0 { t = sqlite::col_int(fresh_edited, 0); }
+        if v.len > 0 {
+            t = sqlite::col_int(fresh_edited, 0);
+            sqlite::col_text(fresh_edited, 1, mark);
+        }
     }
     sqlite::reset(fresh_edited);
     return t;
@@ -65,7 +75,17 @@ fn is_stale(file: const u8[:]) -> bool {
     p.append(file);
     let m = swan_mtime_ns(p);
     if m < 0 { return true; }
-    return m > fresh_scip_time && m != edited_mtime(file);
+    guard m > fresh_scip_time else { return false; }
+    // Changed since the SCIP run: fresh only if it is still what Swan's own
+    // edit left. Same mtime, and the same text: another write in the same
+    // clock tick keeps the mtime (found 2026-11-17 on a 6.1 kernel, where
+    // six writes in a row shared one).
+    var mark: u8[>..] = [];
+    guard m == edited_mtime(file, mark) else { return true; }
+    guard mark.len > 1 && mark[0] == 'e' else { return false; }
+    var text: u8[>..] = [];
+    guard read_file(p, text) else { return true; }
+    return edit_mark(text) != mark;
 }
 
 // Files added since the map was built: in the repo, never in the map, with

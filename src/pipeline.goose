@@ -749,6 +749,20 @@ fn toolchain_home(name: const u8[:], sub: const u8[:]) -> u8[>..] {
     return str(h, "/", sub);
 }
 
+// Passes $VAR to a sealed child when this machine keeps that folder where
+// toolchain_home says: $VAR is set, or $HOME/<sub> is there. Otherwise the
+// variable is left alone. A machine with rustup installed for everyone has
+// no ~/.rustup: its `cargo` is a small script that sets RUSTUP_HOME itself
+// when nothing else did, and naming ~/.rustup made rustup try to create it
+// inside the seal ("could not create home directory ... Read-only file
+// system"), so every Rust map there failed (found 2026-11-17 in a clean
+// Ubuntu microVM).
+fn add_toolchain_env(renv: u8[>..]&, name: const u8[:], sub: const u8[:]) {
+    var v: u8[>..] = [];
+    let p = toolchain_home(name, sub);
+    if (env(name, v) && v.len > 0) || is_dir(p) { renv.append(env_entry(name, p)); }
+}
+
 // Run one step of the map sealed when the sandbox is on (see seal_argv).
 fn sealed_run(argv: const u8[:], repo: const u8[:], out: const u8[:], trusted: bool, env: const u8[:],
               timeout_ms: i64, o: u8[>..]&, e: u8[>..]&) -> i32 {
@@ -2419,8 +2433,8 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
         // a missing crate leaves those uses unresolved, never unsealed.
         var renv: u8[>..] = [];
         renv.append(env_entry("CARGO_TARGET_DIR", str(out, "/cargo-target")));
-        renv.append(env_entry("RUSTUP_HOME", toolchain_home("RUSTUP_HOME", ".rustup")));
-        renv.append(env_entry("CARGO_HOME", toolchain_home("CARGO_HOME", ".cargo")));
+        add_toolchain_env(renv, "RUSTUP_HOME", ".rustup");
+        add_toolchain_env(renv, "CARGO_HOME", ".cargo");
         if !trusted { renv.append(env_entry("CARGO_NET_OFFLINE", "true")); }
         add_lang_job("rust-analyzer scip", target, a, child_env(l, renv),
                      lang_fingerprint(repo, [".rs"], ["Cargo.toml", "Cargo.lock"]) { f => stamp(f) });
