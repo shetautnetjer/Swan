@@ -215,8 +215,17 @@ fn mcp_call(name: const u8[:], arguments: const u8[:], out: u8[>..]&) -> i64 {
     let failed = jtrue(result, "isError");
     out.clear();
     out.append(text);
-    print(str("  ", name, " ", arguments, ": ", ms, " ms"));
+    if m_verbose { print(str("  ", name, " ", arguments, ": ", ms, " ms")); }
     return if failed { 0 } else { 1 };
+}
+
+// mcp_call without its timing line (for the benchmark's tight loops).
+var m_verbose: bool = true;
+fn mcp_call_quiet(name: const u8[:], arguments: const u8[:], out: u8[>..]&) -> i64 {
+    m_verbose = false;
+    let r = mcp_call(name, arguments, out);
+    m_verbose = true;
+    return r;
 }
 
 // Calls a tool (arguments as JSON text) and puts the text of its answer in

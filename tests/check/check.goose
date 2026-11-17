@@ -3,6 +3,7 @@
 //
 //   bin/swan-check            every suite
 //   bin/swan-check rust split   the named suites
+//   bin/swan-check bench <db> <name_path>...   timings, not a test
 //
 // Unlike a shell script that stops at the first failing suite, every suite
 // named runs, and the totals come at the end. Exit 1 if any check failed.
@@ -25,6 +26,7 @@ import .edit_suite;
 import .maps_suite;
 import .lang_suite;
 import .structural_suite;
+import .bench;
 
 let SUITES = ["mcp", "rust", "split", "agnostic", "diag", "kotlin", "game", "live", "trust", "edit", "maps", "lang", "structural"];
 
@@ -47,6 +49,12 @@ fn run_suite(name: const u8[:]) -> bool {
 
 fn main() {
     let a = args();
+    if a.len >= 4 && a[1] == "bench" {
+        var ns: u8[>..] = [];
+        for k in 3..a.len { format(ns, a[k], "\n"); }
+        bench_main(a[2], ns);
+        return;
+    }
     var names: u8[>..] = [];
     if a.len <= 1 { for s in SUITES { format(names, s, "\n"); } }
     else { for k in 1..a.len { format(names, a[k], "\n"); } }

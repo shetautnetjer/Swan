@@ -18,7 +18,7 @@ matched those hashes at closeout; original checkouts stayed clean.
 | `scripts/index-repo.sh fixtures/tiny-ts data/tiny-ts` | real TypeScript SCIP map, 56 symbols / 139 occurrences |
 | `bin/swan-check mcp` | all existing MCP smoke assertions |
 | `bash tests/refresh_check.sh` | refreshed and fresh maps equal across 202 dumped rows |
-| `bun tests/edit_check.ts` | edits/rename/conflict/staleness; tsc passes; 27 symbols' shifted positions compared with fresh SCIP |
+| `bin/swan-check edit` | edits/rename/conflict/staleness; tsc passes; 27 symbols' shifted positions compared with fresh SCIP |
 | `bin/swan-check split` | split/single maps equal across 503 rows |
 | Package build harness | 28 builds and 28 executable checks; cold/warm evidence in packages.md |
 | Swan build | cold and three warm builds; default AOT optimization, private package cache |
