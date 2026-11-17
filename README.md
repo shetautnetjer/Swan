@@ -420,7 +420,12 @@ lists them per language, with the conditions under which each applies and
 how its output is read. Adding a language or swapping a tool is an edit to
 that table. Today: ruff, ruff format and pytest for Python; biome and
 `bun test` (vitest when configured) for TypeScript/JavaScript; clippy,
-rustfmt and `cargo test` for Rust.
+rustfmt and `cargo test` for Rust. The same table names the language
+servers `swan serve` keeps running for live answers (`live: true`), among
+them Eclipse JDT LS for Java: with a trusted repo it imports Gradle and
+Maven builds; otherwise it opens the repo as plain folders (source folders
+read from the files' `package` lines) inside the eggshell seal, so live
+Java errors need no trust. A candidate marked `"sealed": true` runs that way.
 
 A question about one symbol's impact (`get_callers`, `get_callees`,
 `get_diagnostics`), asked with a name several symbols share, comes back with
@@ -490,7 +495,7 @@ for a user who needs only one language. See DECISIONS.md.
   project's obj/ folders as a build would.
 - Some tools run the repo's own build files, and a repo can run any code
   that way: scip-java with Maven or Gradle, rust-analyzer and cargo (build
-  scripts, proc macros), the Kotlin server (Gradle) and the C# map and
+  scripts, proc macros), the Kotlin server (Gradle), JDT LS's build import and the C# map and
   server (MSBuild through `dotnet restore`). They wait until you trust the
   repo once: `swan trust <repo>` (kept in Swan's data/trusted-repos). Until then `swan map` and
   `swan check` say what they skipped and how to trust it, and a live

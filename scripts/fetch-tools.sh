@@ -161,6 +161,30 @@ if [ -z "$runtime_only" ] && want java && [ ! -x ".tools/kotlin-lsp/kotlin-serve
   tar -xzf "$tgz" -C .tools/kotlin-lsp
   rm "$tgz"
 fi
+# Eclipse JDT LS for live Java answers (the server Serena's SolidLSP uses),
+# on its own Temurin 25 runtime: since 1.62 it needs Java 25, and Swan's JDK
+# 21 stays as scip-java and Gradle want it. About 120 MB unpacked.
+JDTLS=1.63.0
+JDTLS_BUILD=202610191322
+JDTLS_SHA256=b1f2abe0b3cccb462cf64fb4a5587c7d09df60cf8be7748b152cbd89d018bdc4
+JDTLS_JRE=25.0.5_8
+JDTLS_JRE_SHA256=6fac98f0c8202efc3135a9e9e42aa61963ec42d1c5cbb40caf231e7b14a24ef6
+if [ -z "$runtime_only" ] && want java && [ ! -d ".tools/jdtls/$JDTLS/plugins" ]; then
+  mkdir -p ".tools/jdtls/$JDTLS"
+  tgz=.tools/jdtls/jdtls.tgz
+  curl -fsSL -o "$tgz" "https://download.eclipse.org/jdtls/milestones/$JDTLS/jdt-language-server-$JDTLS-$JDTLS_BUILD.tar.gz"
+  echo "$JDTLS_SHA256  $tgz" | sha256sum -c -
+  tar -xzf "$tgz" -C ".tools/jdtls/$JDTLS"
+  rm "$tgz"
+fi
+if [ -z "$runtime_only" ] && want java && [ ! -x ".tools/jdtls/jre/jdk-${JDTLS_JRE/_/+}-jre/bin/java" ]; then
+  mkdir -p .tools/jdtls/jre
+  tgz=.tools/jdtls/jre.tgz
+  curl -fsSL -o "$tgz" "https://github.com/adoptium/temurin25-binaries/releases/download/jdk-${JDTLS_JRE/_/%2B}/OpenJDK25U-jre_x64_linux_hotspot_$JDTLS_JRE.tar.gz"
+  echo "$JDTLS_JRE_SHA256  $tgz" | sha256sum -c -
+  tar -xzf "$tgz" -C .tools/jdtls/jre
+  rm "$tgz"
+fi
 # Gradle, as the Kotlin server and Kotlin maps run it, keeps its home here;
 # its daemons quit after 10 idle minutes and keep to 2 GB.
 mkdir -p .tools/gradle-home

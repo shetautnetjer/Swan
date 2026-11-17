@@ -103,7 +103,7 @@ fn live_suite() {
     write_file(lib, original);
 
     var java: u8[>..] = [];
-    let jok = mcp_call("get_diagnostics", """{"relative_path":"src/Missing.java","live":true}""", java);
+    let jok = mcp_call("get_diagnostics", """{"relative_path":"src/missing.go","live":true}""", java);
     check("a language without a live server says so instead of failing hard", jok == 0 && find(java, "no live server") >= 0, java);
 
     // Switching language: pyright replaces rust-analyzer in the same serve.
@@ -159,4 +159,58 @@ fn live_suite() {
 
     let code = mcp_close_code();
     check("serve exits cleanly and stops rust-analyzer", code == 0, str("exit ", code));
+    live_java("0");
+    live_java("1");
+}
+
+// Eclipse JDT LS (tools/modules.json "java"): with trust "0" the repo is
+// opened as plain folders, sealed, with its source folders found from the
+// package lines; with "1" Gradle and Maven import is on. Either way a type
+// error shows up live, a second source folder has no wrong-package errors,
+// and nothing is written into the repo.
+fn live_java(trust: const u8[:]) {
+    let base = str("data/live-java-", trust);
+    let repo = str(base, "/repo");
+    let out = str(base, "/out");
+    rm_rf(base);
+    mkdir_p(base);
+    var o: u8[>..] = [];
+    guard sh(argv(["cp", "-r", "fixtures/tiny-java", repo]), "", o) else { return; }
+    mkdir_p(str(repo, "/src/test/java/shapes"));
+    write_file(str(repo, "/src/test/java/shapes/ShapesCheck.java"),
+               "package shapes;\n\nimport java.util.List;\n\nfinal class ShapesCheck {\n    static double area() {\n        return Shapes.totalArea(List.of(new Square(3)));\n    }\n}\n");
+    guard sh(argv(["bin/swan", "map", repo, out]), "", o) else { return; }
+    var snap: u8[>..] = [];
+    var e0: u8[>..] = [];
+    run(argv(["cp", "-r", repo, str(base, "/before")]), "", snap, e0);
+    let mode = if trust == "1" { "trusted, with build import" } else { "untrusted, plain folders, sealed" };
+    guard mcp_open(argv(["bin/swan", "serve", str(out, "/swan.db")]), envv("SWAN_TRUST_BUILD", trust)) else { return; }
+    var hit = false;
+    let f = str(repo, "/src/main/java/shapes/Shapes.java");
+    var orig: u8[>..] = [];
+    read_file(f, orig);
+    let args = """{"relative_path":"src/main/java/shapes/Shapes.java","live":true}""";
+    var clean: u8[>..] = [];
+    let ok1 = mcp_call("get_diagnostics", args, clean) == 1;
+    check(str("java (", mode, "): the clean file has no errors"), ok1 && lv_errors(clean, "", 0, hit) == 0, clean);
+    var tc: u8[>..] = [];
+    let ok2 = mcp_call("get_diagnostics", """{"relative_path":"src/test/java/shapes/ShapesCheck.java","live":true}""", tc) == 1;
+    check(str("java (", mode, "): a file in a second source folder uses the main one with no errors"),
+          ok2 && lv_errors(tc, "", 0, hit) == 0 && find(tc, "expected package") < 0, tc);
+    replace_in_file(f, "return total;", "return \"oops\";");
+    var bad: u8[>..] = [];
+    let t0 = clock();
+    let ok3 = mcp_call("get_diagnostics", args, bad) == 1;
+    let ms = ((clock() - t0) * 1000.0) as i64;
+    lv_errors(bad, "", 13, hit);
+    check(str("java (", mode, "): a String returned as double is an error on line 13"), ok3 && hit && find(bad, "Type mismatch") >= 0, bad);
+    print(str("     error seen ", ms, " ms after asking"));
+    write_file(f, orig);
+    var fixed: u8[>..] = [];
+    let ok4 = mcp_call("get_diagnostics", args, fixed) == 1;
+    check(str("java (", mode, "): gone again after the undo"), ok4 && lv_errors(fixed, "", 0, hit) == 0, fixed);
+    let code = mcp_close_code();
+    var d: u8[>..] = [];
+    let same = run(argv(["diff", "-r", str(base, "/before"), repo]), "", d, e0) == 0;
+    check(str("java (", mode, "): nothing was written into the repo, and serve stops JDT LS"), same && code == 0, str("exit ", code, "\n", d));
 }
