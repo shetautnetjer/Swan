@@ -16,8 +16,7 @@ tests/refresh_check.sh
 tests/cosmetic_check.sh
 tests/layer_check.sh
 tests/pieces_check.sh
-bin/swan-check rust split agnostic diag kotlin game live trust || check_failed=1
-bun tests/edit_check.ts
+bin/swan-check rust split agnostic diag kotlin game live trust edit || check_failed=1
 bun tests/lang_check.ts
 bun tests/structural_check.ts
 # The Goose suites ran to the end; fail now if any of their checks did.
