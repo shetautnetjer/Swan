@@ -69,11 +69,7 @@ T=1200 x "cd /home/cua/Work/Swan && scripts/build.sh >/tmp/build.log 2>&1 || { t
 if [ -d "$sw" ]; then
   T=600 x "cd /home/cua/Work/spread-wings && GOOSE=/home/cua/Work/Swan/.tools/goose/goose-v2026.3-linux-x64/goose GOOSE_HOME=/home/cua/Work/Swan/.tools/goose-home scripts/build.sh >/tmp/sw-build.log 2>&1 && tests/test.sh | tail -1"
 fi
-suite="cd /home/cua/Work/Swan && SWAN_TRUST_BUILD=1 scripts/test.sh >/tmp/swan-test.log 2>&1; s=\$?; grep 'checks passed' /tmp/swan-test.log; grep '^FAIL' /tmp/swan-test.log | head -20; exit \$s"
-# The suite must pass before the VM is saved. One second try is allowed, and
-# said: a live language-server check can lose a race (the Kotlin server has
-# published an empty set for text it had not analysed yet).
-T=2400 x "$suite" || { echo "space-base: the suite failed (above); one more try" >&2; T=2400 x "$suite"; }
+T=2400 x "cd /home/cua/Work/Swan && SWAN_TRUST_BUILD=1 scripts/test.sh >/tmp/swan-test.log 2>&1; s=\$?; grep 'checks passed' /tmp/swan-test.log; grep '^FAIL' /tmp/swan-test.log | head -20; exit \$s"
 
 echo "== checkpoint $checkpoint" >&2
 # Nothing the tests left running (Gradle daemons, language servers) goes
