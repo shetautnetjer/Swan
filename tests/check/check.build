@@ -1,0 +1,4 @@
+// swan-check: Swan's test runner. Swan's process helpers (swan_run) and
+// goose-lsp's pipes (proc_open and friends, for driving `swan serve`).
+c_sources = ["../../native/swan_sys.c", "../../lsp/native/proc.c"];
+output = "swan-check";

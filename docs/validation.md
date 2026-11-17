@@ -19,7 +19,7 @@ matched those hashes at closeout; original checkouts stayed clean.
 | `bun tests/mcp_smoke.ts bin/swan data/tiny-ts/swan.db` | all existing MCP smoke assertions |
 | `bash tests/refresh_check.sh` | refreshed and fresh maps equal across 202 dumped rows |
 | `bun tests/edit_check.ts` | edits/rename/conflict/staleness; tsc passes; 27 symbols' shifted positions compared with fresh SCIP |
-| `bun tests/split_check.ts` | split/single maps equal across 503 rows |
+| `bin/swan-check split` | split/single maps equal across 503 rows |
 | Package build harness | 28 builds and 28 executable checks; cold/warm evidence in packages.md |
 | Swan build | cold and three warm builds; default AOT optimization, private package cache |
 | Source review | independent review; shell/Python syntax and `git diff --check` |

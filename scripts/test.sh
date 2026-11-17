@@ -14,14 +14,17 @@ tests/refresh_check.sh
 tests/cosmetic_check.sh
 tests/layer_check.sh
 tests/pieces_check.sh
+# Suites ported to Goose (tests/check/); every named suite runs, totals at the end.
+check_failed=0
+bin/swan-check rust split || check_failed=1
 bun tests/edit_check.ts
-bun tests/rust_check.ts
 bun tests/diag_check.ts
 bun tests/lang_check.ts
 bun tests/agnostic_check.ts
-bun tests/split_check.ts
 bun tests/live_check.ts
 bun tests/structural_check.ts
 bun tests/kotlin_live_check.ts
 bun tests/game_live_check.ts
 bun tests/trust_check.ts
+# The Goose suites ran to the end; fail now if any of their checks did.
+[ "$check_failed" -eq 0 ]
