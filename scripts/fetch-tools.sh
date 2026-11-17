@@ -151,8 +151,8 @@ fi
 # JetBrains' Kotlin language server (standalone, with its own JBR), for live
 # Kotlin answers. About 1.5 GB unpacked; it keeps its caches in the map's
 # folder (--system-path).
-KLS=263.7084.0
-KLS_SHA256=ae0c4b01e17ab73a4a5227a78ea99e6dcbe3e499600315b22759a4e4cddd11df
+KLS=271.2085.0
+KLS_SHA256=e398e799027f41749ea33faa57470307d13d40f910961858c7e30adbd778ae08
 if [ -z "$runtime_only" ] && want java && [ ! -x ".tools/kotlin-lsp/kotlin-server-$KLS/bin/intellij-server" ]; then
   mkdir -p .tools/kotlin-lsp
   tgz=.tools/kotlin-lsp/kotlin-server-$KLS.tar.gz
