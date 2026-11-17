@@ -100,4 +100,41 @@ fn split_suite() {
     let only_b = split_only(b, a, shown_b, 3);
     check(str("split and single maps hold the same ", na, " rows"), only_a == 0 && only_b == 0,
           str(shown_a, "vs\n     ", shown_b));
+    split_python();
+}
+
+// The same for Python's prefix pieces: 200 standalone scripts at a repo's
+// root, mapped in one scip-python run (SWAN_JOBS=1) and split by filename
+// prefix (SWAN_JOBS=4), must give the same rows.
+fn split_python() {
+    let w = "data/split-check-py";
+    rm_rf(w);
+    mkdir_p(str(w, "/repo"));
+    var n = 0;
+    for pre in ["args", "class", "dict", "float", "int", "list", "math", "set", "str", "tuple"] {
+        for i in 20 {
+            var t: u8[>..] = [];
+            format(t, "import json\nimport math\n\n\nclass Case", n, ":\n    def value(self) -> int:\n        return math.floor(", i, ".5)\n\n\n");
+            format(t, "def run_", pre, "_", i, "() -> str:\n    case = Case", n, "()\n    return json.dumps({'v': case.value()})\n\n\nassert run_", pre, "_", i, "()\n");
+            write_file(str(w, "/repo/", pre, "__case_", i, ".py"), t);
+            n++;
+        }
+    }
+    var single: u8[>..] = [];
+    guard sh(argv(["bin/swan", "map", str(w, "/repo"), str(w, "/single")]), envv("SWAN_JOBS", "1"), single) else { return; }
+    var split: u8[>..] = [];
+    guard sh(argv(["bin/swan", "map", str(w, "/repo"), str(w, "/split")]), envv("SWAN_JOBS", "4"), split) else { return; }
+    var pieces = 0;
+    each_split(split, '\n') { l => if starts_with(l, "scip-python ") && find(l, "*:") > 0 { pieces++; } };
+    check(str("python: the split map ran scip-python on prefix pieces (", pieces, ")"), pieces >= 4 && find(single, "*:") < 0, split);
+    var a: u8[>..] = [];
+    var b: u8[>..] = [];
+    let na = split_rows(str(w, "/single/swan.db"), a);
+    split_rows(str(w, "/split/swan.db"), b);
+    var shown_a: u8[>..] = [];
+    var shown_b: u8[>..] = [];
+    let only_a = split_only(a, b, shown_a, 3);
+    let only_b = split_only(b, a, shown_b, 3);
+    check(str("python: split and single maps hold the same ", na, " rows"), na > 0 && only_a == 0 && only_b == 0,
+          str(shown_a, "vs\n     ", shown_b));
 }
