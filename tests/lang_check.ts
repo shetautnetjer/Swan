@@ -88,6 +88,7 @@ if (run("java")) {
   sh(["mkdir", "-p", `${home2}/bin`]);
   sh(["cp", "bin/swan", `${home2}/bin/swan`]);
   sh(["cp", "bin/eggshell", `${home2}/bin/eggshell`]);   // every run is sealed, trusted or not
+  sh(["cp", "bin/swan-flatten", `${home2}/bin/swan-flatten`]);   // the only flattener
   for (const d of ["tools", ".tools"]) sh(["ln", "-s", `${process.cwd()}/${d}`, `${home2}/${d}`]);
   const moved = sh([`${home2}/bin/swan`, "map", `${w}/repo`, `${w}/map`]);
   check("java: the same files with another scip-java argv are indexed again, not reused",

@@ -169,9 +169,8 @@ rows, which is scip-clang's own duplicate-definition noise between runs.
   `SWAN_STAMP_MODE=threads` uses Goose threads instead; it ties with
   processes at every core count. `swan stamp-bench <repo> <out-dir>` times
   the stamping alone.
-- **Flatten.** `bin/swan-flatten` (Rust, rayon) replaces the Bun flattener,
-  a core per index file. `SWAN_NATIVE_FLATTEN=0` goes back to
-  `tools/scip-flatten.ts`. A refresh where only failed indexers reran skips
+- **Flatten.** `bin/swan-flatten` (Rust, rayon), a core per index file,
+  is the only flattener (the Bun one was removed). A refresh where only failed indexers reran skips
   the flatten (`flattened-inputs.txt` records what was last flattened).
 - **Rebuilding the flattener.** The release profile (full LTO, one codegen
   unit) is what ships and takes about 8 s to rebuild after an edit.

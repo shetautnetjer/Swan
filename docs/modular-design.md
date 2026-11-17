@@ -70,8 +70,9 @@ answer.
 1. The syntax layer, once goose-treesitter vendors the Go, Bash and Ruby
    grammars (it has 17 today; Go and Bash are not among them). This replaces
    line patterns with real parse trees.
-2. The flattener (`tools/scip-flatten.ts`, about 500 lines): moving it to Goose
-   removes Bun from mapping. Bun would then be needed only where a Node tool is.
+2. The flattener: done. `bin/swan-flatten` (Rust) is the only one, and the
+   syntax index is Goose, so mapping runs no Bun. Node remains only for the
+   Node indexers and language servers.
 3. The prerequisite check and `doctor`, so a missing `uv` or `libicu` is
    reported before any download.
 

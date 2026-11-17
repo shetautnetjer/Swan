@@ -23,7 +23,7 @@ import tarfile
 ARCHIVE = "swan-linux-x86_64.tar.gz"
 MANIFEST = "PACKAGE-MANIFEST.json"
 RUNTIME_FILES = (
-    "LICENSE", "NOTICE", "docs/install.md", "tools/modules.json", "tools/scip-flatten.ts",
+    "LICENSE", "NOTICE", "docs/install.md", "tools/modules.json",
     "tools/package.json", "tools/package-lock.json", "scripts/doctor.py",
     "scripts/package_support.py", "scripts/demo-offline.py", "scripts/fetch-tools.sh",
 )
@@ -175,12 +175,12 @@ def build_package(root, binary, output, revision, receipt_path, licenses, requir
     # can seal indexers via <swan_home>/bin/eggshell. Source is tracked at
     # eggshell/eggshell; packaged with a deterministic executable mode.
     payload["bin/eggshell"] = (regular_file(root / "eggshell/eggshell")[0], 0o755)
-    # The native flattener (native/swan-flatten, Rust), installed beside bin/swan
-    # so pipeline.goose uses <swan_home>/bin/swan-flatten instead of
-    # tools/scip-flatten.ts. Optional: a build without cargo has none, and Swan
-    # then falls back to the TypeScript flattener. When the receipt says one was
-    # built, the exact binary it names must be supplied.
+    # The SCIP flattener (native/swan-flatten, Rust), installed beside bin/swan
+    # as <swan_home>/bin/swan-flatten. Required: Swan has no other flattener,
+    # and the receipt must name this exact binary.
     flatten_sha256 = None
+    if flatten is None:
+        raise PackageError("bin/swan-flatten is required: build it with scripts/build.sh (needs cargo)")
     if flatten is not None:
         flatten_data, flatten_mode = regular_file(flatten)
         validate_elf(flatten_data, flatten_mode)

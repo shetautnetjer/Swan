@@ -75,8 +75,7 @@ refresh after a code edit takes a few seconds even on a large repo (about
 answering from a stale map. The outside indexers still take most of a first
 map's time. Leave Swan's speed settings at their defaults. To check whether
 a wrong answer comes from the new steps, map once with
-`SWAN_STAMP_JOBS=1 SWAN_NATIVE_FLATTEN=0` (the old one-process stamping and
-the Bun flattener) and compare. `SWAN_FLATTEN_PROFILE=quick` only matters
+`SWAN_STAMP_JOBS=1` (the old one-process stamping) and compare. `SWAN_FLATTEN_PROFILE=quick` only matters
 to someone changing Swan's own Rust code: it makes `scripts/build.sh`
 rebuild the flattener faster and does not change how Swan answers. See
 `docs/speed.md` for the numbers and every setting.

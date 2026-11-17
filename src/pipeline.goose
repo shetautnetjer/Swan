@@ -1096,7 +1096,7 @@ fn dependents_of_changes(out: const u8[:], stamps: const u8[:], prev: const u8[:
 }
 
 // Clean publication must not treat a successful but malformed flattener as a
-// complete replacement. Match tools/scip-flatten.ts's row contract before the
+// complete replacement. Match bin/swan-flatten's row contract before the
 // existing permissive native reader runs. Empty files/lines are valid, and the
 // historical five-column symbol row remains valid (the sixth is optional docs).
 fn clean_row_number(field: const u8[:]) -> bool {
@@ -2470,18 +2470,15 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
     write_file(str(out, "/fresh-indexes.txt"), fresh_scips);
     write_file(str(out, "/kept-texts.tsv"), kept_texts());
     delete_file(str(out, "/documents.tsv"));
-    // bin/swan-flatten (native/swan-flatten, Rust) writes the same files as
-    // tools/scip-flatten.ts, a core per index file; SWAN_NATIVE_FLATTEN=0
-    // runs the TypeScript one.
+    // bin/swan-flatten (native/swan-flatten, Rust) flattens the SCIP
+    // indexes into rows, a core per index file. It is the only flattener.
     var fl: u8[>..] = [];
     let native_flat = str(home, "/bin/swan-flatten");
-    var nf: u8[>..] = [];
-    if file_exists(native_flat) && !(env("SWAN_NATIVE_FLATTEN", nf) && nf == "0") {
-        arg(fl, native_flat);
-    } else {
-        arg(fl, "bun");
-        arg(fl, str(home, "/tools/scip-flatten.ts"));
+    guard file_exists(native_flat) else {
+        format(report, "swan-flatten is missing at ", native_flat, ": rebuild with scripts/build.sh (needs cargo) or reinstall Swan\n");
+        return false;
     }
+    arg(fl, native_flat);
     arg(fl, "--fresh");
     arg(fl, str(out, "/fresh-indexes.txt"));
     arg(fl, "--texts");

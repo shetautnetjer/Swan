@@ -1,5 +1,5 @@
 // `swan index` and `swan refresh`: build or update the code map from the
-// flattened SCIP rows (tools/scip-flatten.ts) in SQLite. Goose does the map
+// flattened SCIP rows (bin/swan-flatten, Rust) in SQLite. Goose does the map
 // work: it interns symbols, parses their names and kinds, and finds the
 // symbol each reference sits inside. SQLite stores the result and answers
 // queries.

@@ -19,11 +19,14 @@ def main():
     args = parser.parse_args()
     binary = args.binary.resolve(strict=True)
     legacy = args.legacy_binary.resolve(strict=True) if args.legacy_binary else None
-    flatten = Path("tools/scip-flatten.ts").resolve(strict=True)
+    flatten = Path("bin/swan-flatten").resolve(strict=True)
 
     with tempfile.TemporaryDirectory(prefix="swan-java-reuse-") as tmp:
         root = Path(tmp)
-        repo, out, log = root / "repo", root / "map", root / "calls"
+        # The call log sits in the map dir: sealed indexer runs may write only there.
+        repo, out = root / "repo", root / "map"
+        log = out / "fake-scip-java-calls"
+        out.mkdir()
         repo.mkdir()
         (repo / "Main.java").write_text("class Main {}\n")
         build = repo / "build.gradle.kts"
@@ -36,7 +39,8 @@ def main():
             tool = home / ".tools/scip-java/v0.14.1/scip-java"
             tool.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(exe, home / "bin/swan")
-            shutil.copy2(flatten, home / "tools/scip-flatten.ts")
+            shutil.copy2(flatten, home / "bin/swan-flatten")
+            shutil.copy2(Path("bin/eggshell").resolve(strict=True), home / "bin/eggshell")
             tool.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$SWAN_REUSE_LOG"\n'
                             'for arg do case "$arg" in --output=*) : > "${arg#--output=}";; esac; done\n')
             tool.chmod(0o755)
