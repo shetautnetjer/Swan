@@ -324,7 +324,17 @@ bin/swan serve --maps data                      # or one server for every map un
 bin/swan query data/<name>/swan.db refs getBackend   # the same answers on the command line
 scripts/test.sh                                 # build, map the fixture, then every suite (bin/swan-check, Goose) and the shell checks
 bin/swan-check mcp edit                         # one or more suites; bin/swan-check alone runs them all, totals at the end
+scripts/space-test.sh                           # the same build and suite in a throwaway microVM (a clean Ubuntu), not on this machine
 ```
+
+`scripts/space-test.sh` forks a saved microVM (a `cua` Space on Firecracker;
+`scripts/space-base.sh` makes the checkpoint once, about five minutes),
+copies the working tree into the fork, builds and runs the suite there, and
+deletes the fork. A fork is ready in a few seconds. It is the normal place
+to run the suite: nothing a test does can touch this machine, and a clean
+Ubuntu catches what a developer's machine hides. Its first run found that
+Rust maps failed wherever rustup is installed for all users (no
+`~/.rustup`).
 
 For a small offline demonstration after building, run
 `python3 scripts/demo-offline.py`. It exercises map loading, queries and
