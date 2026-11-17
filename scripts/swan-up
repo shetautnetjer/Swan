@@ -11,6 +11,13 @@
 #       prefix ROOT/versions/<rev>, carry over trust decisions, switch
 #       ROOT/current to it, link ~/.local/bin/swan, register the Swan MCP for
 #       the chosen agents, copy the swan-code-check skill, then prove it works.
+#   swan-up update  [--repo DIR] [--ref REF] [--root DIR] [--maps DIR]
+#                   [--keep N] [--dry-run]
+#       From a checkout: fetch, and if REF (default origin/main) is newer than
+#       the active version, pack it, install it and switch to it. Then remove
+#       old versions: all but the active one, the N before it (default 1, to
+#       go back to) and any a running server still uses. --dry-run only says
+#       what it would do.
 #   swan-up status  [--root DIR]
 #       Show the active version and any running Swan servers on an older one.
 #
@@ -300,9 +307,64 @@ cmd_status() {
   done
 }
 
+# The version folders running Swan servers were started from, one per line.
+versions_in_use() {
+  local pid exe
+  for pid in $(pgrep -u "$(id -u)" -f 'swan serve' || true); do
+    exe="$(readlink -f "/proc/$pid/exe" 2>/dev/null || true)"
+    exe="${exe% (deleted)}"
+    case "$exe" in */versions/*/bin/swan) dirname "$(dirname "$exe")";; esac
+  done
+}
+
+cmd_update() {
+  local repo="" ref="origin/main" root="$ROOT_DEFAULT" maps="" keep=1 dry=""
+  while [ $# -gt 0 ]; do case "$1" in
+    --repo) repo="$2"; shift 2;; --ref) ref="$2"; shift 2;; --root) root="$2"; shift 2;;
+    --maps) maps="$2"; shift 2;; --keep) keep="$2"; shift 2;; --dry-run) dry=1; shift;;
+    *) die "update: unknown option $1";; esac; done
+  [ -n "$repo" ] || repo="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+  git -C "$repo" rev-parse --git-dir >/dev/null 2>&1 || die "update runs from a Swan checkout (or pass --repo DIR)"
+  case "$keep" in ''|*[!0-9]*) die "update: --keep takes a number";; esac
+  root="$(mkdir -p "$root" && cd "$root" && pwd)"
+  case "$ref" in origin/*) git -C "$repo" fetch --quiet origin || die "cannot fetch origin";; esac
+  local rev; rev="$(git -C "$repo" rev-parse --verify "$ref^{commit}")" || die "unknown ref $ref"
+  local short="${rev:0:12}" cur=""
+  cur="$(basename "$(readlink -f "$root/current" 2>/dev/null || true)")"
+  if [ "$cur" = "$short" ]; then
+    say "already on $short, the latest $ref"
+  elif [ -n "$dry" ]; then
+    say "would build and install $short ($ref); active now: ${cur:-none}"
+  else
+    say "updating ${cur:-nothing} -> $short ($ref)"
+    local dist; dist="$(cmd_pack --repo "$repo" --ref "$ref" | tail -1)"
+    [ -d "$dist" ] || die "pack did not produce a package folder"
+    if [ -n "$maps" ]; then cmd_install --dist "$dist" --root "$root" --maps "$maps"
+    else cmd_install --dist "$dist" --root "$root"; fi
+    cur="$short"
+  fi
+  # Old versions: keep the active one, the newest $keep others, and any in use.
+  local in_use; in_use="$(versions_in_use | sort -u)"
+  local kept=0 v name freed=0 size
+  for v in $(ls -1dt "$root"/versions/*/ 2>/dev/null); do
+    v="${v%/}"; name="$(basename "$v")"
+    [ "$name" = "$cur" ] && continue
+    if printf '%s\n' "$in_use" | grep -qxF "$v"; then say "kept $name: a running Swan server still uses it"; continue; fi
+    if [ "$kept" -lt "$keep" ]; then kept=$((kept + 1)); say "kept $name: the version before, to go back to"; continue; fi
+    case "$v" in "$root"/versions/?*) ;; *) die "refusing to remove $v";; esac
+    size="$(du -sm "$v" 2>/dev/null | cut -f1)"; size="${size:-0}"
+    if [ -n "$dry" ]; then say "would remove $name ($size MB)"
+    else rm -rf -- "${v:?}"; say "removed $name ($size MB)"; fi
+    freed=$((freed + size))
+  done
+  [ "$freed" -gt 0 ] && say "$([ -n "$dry" ] && echo "would free" || echo "freed") $freed MB"
+  cmd_status --root "$root"
+}
+
 case "${1:-}" in
   pack) shift; cmd_pack "$@";;
+  update) shift; cmd_update "$@";;
   install) shift; cmd_install "$@";;
   status) shift; cmd_status "$@";;
-  *) sed -n '2,23p' "$0"; exit 2;;
+  *) sed -n '2,30p' "$0"; exit 2;;
 esac

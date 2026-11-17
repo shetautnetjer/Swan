@@ -48,6 +48,7 @@ scripts/swan-up pack --ref origin/main          # prints the package folder
 # On any Linux x86-64 box, with that folder copied over:
 <package>/swan-up install --dist <package>      # add --maps DIR to keep existing maps
 <package>/swan-up status
+scripts/swan-up update                          # from a checkout: fetch, build and install the latest main if newer, remove old versions
 ```
 
 `install` puts each version in a new prefix `~/.local/share/swan/versions/<rev>`
