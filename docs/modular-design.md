@@ -52,7 +52,7 @@ answer.
    gives profiles ("python-typescript") for free.
 3. **Flattener**: SCIP to rows. TypeScript on Bun today.
 4. **Syntax layer**: the fallback for any language without a compiler indexer.
-   Built today as `tools/syntax-index.ts` (Go, shell, Make, Ruby, Lua; line
+   Built today as `swan syntax-index`, src/syntax.goose (Go, shell, Make, Ruby, Lua; line
    patterns). Next: tree-sitter through goose-treesitter.
 5. **Evidence on every fact** (from REA): compiler (exact), syntax (`by_name`),
    or inferred (an LLM). Swan already marks `by_name`; make it a column every

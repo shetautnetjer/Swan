@@ -27,7 +27,7 @@ from package_support import (BUN_SHA256, BUN_URL, BUN_VERSION, BUN_LICENSE_URL, 
                              platform_error, probe, run_checked, system_tool, within)
 
 
-REQUIRED = {"bin/swan", "tools/modules.json", "tools/scip-flatten.ts", "tools/syntax-index.ts", "tools/package.json",
+REQUIRED = {"bin/swan", "tools/modules.json", "tools/scip-flatten.ts", "tools/package.json",
             "tools/package-lock.json", "scripts/doctor.py", "scripts/package_support.py",
             "scripts/demo-offline.py", "skills/swan-code-check/SKILL.md", "LICENSE", "NOTICE"}
 MAX_UNPACKED = 1024 * 1024 * 1024

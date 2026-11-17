@@ -33,7 +33,7 @@ for TypeScript/JavaScript, Python, Rust, Java, Kotlin, C, C++, CUDA and C#
 (PHP is planned). How deep each one goes depends on the tools installed
 for it; see [parity and languages](docs/parity-and-languages.md).
 Go, shell scripts (also ones known only by their `#!` line), Makefiles, Ruby
-and Lua get a syntax-level map (`tools/syntax-index.ts`): definitions, bodies
+and Lua get a syntax-level map (`swan syntax-index`, built into Swan): definitions, bodies
 and references found by name (marked `by_name`), so no repo maps to nothing.
 A Python `src/` layout is put on `PYTHONPATH` so tests that import the package
 link to it, and a `tsconfig.json` that cannot be read (it extends an npm

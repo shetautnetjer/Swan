@@ -508,7 +508,7 @@ root.fields((f, _wt, r) => {
     if ((roles & ROLE_DEFINITION) && enclosing.length < 3 && (symbol.startsWith("cxx ") || symbol.startsWith("scip-dotnet ")) &&
         /(\)\.|#)$/.test(symbol))
       cDefs.push({ path, symbol, line: range[0], col: range[1], cs: symbol.startsWith("scip-dotnet ") });
-    // tools/syntax-index.ts finds its references by name, not by a compiler.
+    // `swan syntax-index` finds its references by name, not by a compiler.
     const role = roles & ROLE_DEFINITION ? "def" : roles & ROLE_IMPORT ? "imp" :
       symbol.startsWith("swan-syntax ") ? "name" : "ref";
     rows.push([symbol, path, ...span(range), role].join("\t"));
