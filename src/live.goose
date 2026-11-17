@@ -49,6 +49,14 @@ fn live_start(db: i64, lang: const u8[:], why: u8[>..]&) -> bool {
             var argv: u8[>..] = [];
             var extra: u8[>..] = [];
             if build_cmd(cand, c, "", argv, extra) {
+                // "sealed": the server runs inside eggshell, like the map's
+                // indexers: it reads the repo and writes only the map folder.
+                let sl, sl_ok = json::as_bool(json::member(cand, "sealed"));
+                if sl_ok && sl && sandbox_on() {
+                    let wrapped = seal_argv(argv, root, dir, false);
+                    argv.clear();
+                    argv.append(wrapped);
+                }
                 var init: u8[>..] = [];
                 let raw, i_ok = json::as_string(json::member(cand, "init"));
                 if i_ok { expand(raw, c, init); } else { init.append("{}"); }

@@ -750,3 +750,25 @@ see each environment variable once. See DECISIONS.md.
   `structural_check` and `kotlin_live_check` fail as on main.
 - Still waiting for trust: Gradle/Maven/MSBuild indexers, `swan check`,
   live language servers.
+
+## 2026-11-17: live Java answers from Eclipse JDT LS, no trust needed
+
+The first language module taken from Serena's SolidLSP. `tools/modules.json`
+gains "java" with JDT LS 1.63.0 on its own Temurin 25 JRE (JDT LS needs
+Java 25 since 1.62; Swan's JDK 21 stays for scip-java and Gradle), both
+pinned by sha256 in `scripts/fetch-tools.sh`.
+
+- Trusted repo: Gradle and Maven import on (runs the build files).
+- Untrusted repo: import off, the repo opened as plain folders, the server
+  sealed in eggshell (`"sealed": true`, new for live servers). Source folders
+  come from `{java_source_paths}`, read from each file's `package` line;
+  without them JDT LS guessed the root and reported every class as in the
+  wrong package.
+- On tiny-java, untrusted: a String returned as double is reported at
+  13:16 in 3.2 s from a cold start; the repo is untouched; the process tree
+  shows java inside eggshell's user, mount, net and pid namespaces.
+- JDT LS publishes diagnostics (no pull), and says `language/status
+  ServiceReady` about 1 s after start; the existing `publish` settle works.
+- Live find_implementations works through it too: Shape gives Circle and
+  Square, Shape/area their two area() overrides (checked by hand).
+- Not done: the other live servers are still unsealed; Lombok.

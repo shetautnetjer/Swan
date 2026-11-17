@@ -38,7 +38,57 @@ fn expand(s: const u8[:], c: const ModCtx&, into: u8[>..]&) {
     format_replaced(b, a, "{bin}", str(c.home, "/tools/node_modules/.bin"));
     a.clear();
     format_replaced(a, b, "{compdb}", c.compdb);
-    format_replaced(into, a, "{python}", c.python);
+    if find(a, "{java_source_paths}") >= 0 {
+        b.clear();
+        format_replaced(b, a, "{python}", c.python);
+        format_replaced(into, b, "{java_source_paths}", java_source_paths(c.repo));
+    } else {
+        format_replaced(into, a, "{python}", c.python);
+    }
+}
+
+// The repo's Java source folders as a JSON array of repo-relative paths, for
+// a language server that opens the repo as plain folders (no build import):
+// each .java file's folder with its package's own folders taken off the end
+// (src/main/java/shapes/Shape.java in package shapes gives src/main/java).
+// A file whose path does not end in its package is left out; one with no
+// package line gives its own folder. At most 64 folders.
+fn java_source_paths(repo: const u8[:]) -> u8[>..] {
+    var roots: u8[>..] = [];         // one per line
+    var count = 0;
+    each_file(repo) { full, name =>
+        if count < 64 && ends_with(name, ".java") && full.len > repo.len + 1 {
+            var text: u8[>..] = [];
+            if read_file(full, text) {
+                let rel = full[repo.len + 1..];
+                let slash = rfind(rel, "/");
+                let dir = if slash >= 0 { rel[..slash] } else { "." };
+                var pkg: u8[>..] = [];
+                let head = text[..min(text.len, 8192)];
+                each_split(head, '\n') { l =>
+                    let t = trim(l);
+                    if pkg.len == 0 && starts_with(t, "package ") && find(t, ";") > 8 {
+                        for ch in trim(t[8..find(t, ";")]) { pkg.push(if ch == '.' { '/' } else { ch }); }
+                    }
+                };
+                var root: u8[>..] = [];
+                if pkg.len == 0 { root.append(dir); }
+                else if dir == pkg { root.append("."); }
+                else if ends_with(dir, str("/", pkg)) { root.append(dir[..dir.len - pkg.len - 1]); }
+                if root.len > 0 {
+                    var have = false;
+                    each_split(roots, '\n') { r => if r == root { have = true; } };
+                    if !have { format(roots, root, "\n"); count++; }
+                }
+            }
+        }
+    };
+    var out: u8[>..] = [];
+    out.push('[');
+    var first = true;
+    each_split(roots, '\n') { r => if r.len > 0 { if !first { out.push(','); } first = false; json::format_string(out, r); } };
+    out.push(']');
+    return out;
 }
 
 // Builds a candidate's argv (NUL-separated) and environment entries, with
@@ -194,6 +244,7 @@ fn lang_of_path(p: const u8[:]) -> const u8[:] {
     if ends_with(p, ".py") || ends_with(p, ".pyi") { return "python"; }
     if ends_with(p, ".rs") { return "rust"; }
     if ends_with(p, ".kt") || ends_with(p, ".kts") { return "kotlin"; }
+    if ends_with(p, ".java") { return "java"; }
     if ends_with(p, ".c") || ends_with(p, ".cc") || ends_with(p, ".cpp") || ends_with(p, ".cxx") || ends_with(p, ".h") ||
        ends_with(p, ".hpp") || ends_with(p, ".hh") || ends_with(p, ".hxx") || ends_with(p, ".cu") || ends_with(p, ".cuh") { return "cpp"; }
     if ends_with(p, ".cs") { return "csharp"; }
