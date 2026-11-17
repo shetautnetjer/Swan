@@ -31,7 +31,7 @@ let TOOLS = """
      {"name":"format_file","description":"Run a file through its language's formatter from tools/modules.json (ruff format, biome format, rustfmt). The file's positions in the map are stale afterwards until update_map.","inputSchema":{"type":"object","properties":{"repo":{"type":"string","description":"A repo path: answer about that repo's map instead (as use_repo; the choice persists)."},"build":{"type":"boolean","description":"Allow an implicit build when no usable map covers the repo (default true). Applies only to repository selection, not explicit tool actions or live warm-up."},"relative_path":{"type":"string"}},"required":["relative_path"]}},
      {"name":"search_pattern","description":"Structural search, ast-grep style: a pattern is code in the target language with metavariables, $X for any one node and $$$X for any run of nodes (none included); $_ matches without capturing, and a name used twice must match the same text. Matches by syntax tree, not text (so spacing and comments do not matter), in TS/TSX/JS, Python, Rust, Java, Kotlin, C, C++, CUDA, C#, PHP, Lua, GDScript and the GLSL, HLSL and WGSL shading languages via tree-sitter. Each match has its position, what each metavariable captured, and the symbol it sits in.","inputSchema":{"type":"object","properties":{"repo":{"type":"string","description":"A repo path: answer about that repo's map instead (as use_repo; the choice persists)."},"build":{"type":"boolean","description":"Allow an implicit build when no usable map covers the repo (default true). Applies only to repository selection, not explicit tool actions or live warm-up."},"pattern":{"type":"string"},"language":{"type":"string","description":"typescript, tsx, javascript, python, rust, java, kotlin, c, cpp, cuda, csharp, php, lua, gdscript, glsl, hlsl or wgsl; default every language the pattern parses in."},"relative_path":{"type":"string","description":"A file or directory to search; default the whole repo."},"max_results":{"type":"integer"}},"required":["pattern"]}},
      {"name":"rewrite_pattern","description":"Structural rewrite: every match of pattern (as in search_pattern) replaced by rewrite, where $X and $$$X stand for what they captured. Without apply it only plans the edits (before and after for each); apply writes them, refused when a file changed since the map was built. Nested matches are left to the outer one. Rewritten files are stale in the map until update_map.","inputSchema":{"type":"object","properties":{"repo":{"type":"string","description":"A repo path: answer about that repo's map instead (as use_repo; the choice persists)."},"build":{"type":"boolean","description":"Allow an implicit build when no usable map covers the repo (default true). Applies only to repository selection, not explicit tool actions or live warm-up."},"pattern":{"type":"string"},"rewrite":{"type":"string"},"language":{"type":"string"},"relative_path":{"type":"string"},"apply":{"type":"boolean"}},"required":["pattern","rewrite"]}},
-     {"name":"edit_batch","description":"Several edits as one change, all or nothing: the way to make a change that reaches more than one place. edits is a list; each item has op (rename_symbol, replace_symbol_body, insert_after_symbol, insert_before_symbol or rewrite_pattern) and that tool's own arguments. Without apply every edit is planned against the code as it is now and nothing is written. With apply they run in the order given, each seeing what the earlier ones changed; if one fails or is refused, the map and every file already written go back to what they were. Afterwards: update_map, then get_diagnostics or run_tests for the files written.","inputSchema":{"type":"object","properties":{"repo":{"type":"string","description":"A repo path: answer about that repo's map instead (as use_repo; the choice persists)."},"build":{"type":"boolean","description":"Allow an implicit build when no usable map covers the repo (default true). Applies only to repository selection, not explicit tool actions or live warm-up."},"edits":{"type":"array","items":{"type":"object","properties":{"op":{"type":"string"},"name_path":{"type":"string"},"relative_path":{"type":"string"},"new_name":{"type":"string"},"body":{"type":"string"},"pattern":{"type":"string"},"rewrite":{"type":"string"},"language":{"type":"string"}},"required":["op"]}},"apply":{"type":"boolean"}},"required":["edits"]}},
+     {"name":"edit_batch","description":"Several edits as one change, all or nothing: the way to make a change that reaches more than one place. edits is a list; each item has op (rename_symbol, replace_symbol_body, insert_after_symbol, insert_before_symbol or rewrite_pattern) and that tool's own arguments. Without apply every edit is planned against the code as it is now and nothing is written; the plan's touches part (from Spread-Wings, when installed) lists the files that call or import the renamed or rewritten symbols but are not edited, and the tests to run. With apply they run in the order given, each seeing what the earlier ones changed; if one fails or is refused, the map and every file already written go back to what they were. Afterwards: update_map, then get_diagnostics or run_tests for the files written.","inputSchema":{"type":"object","properties":{"repo":{"type":"string","description":"A repo path: answer about that repo's map instead (as use_repo; the choice persists)."},"build":{"type":"boolean","description":"Allow an implicit build when no usable map covers the repo (default true). Applies only to repository selection, not explicit tool actions or live warm-up."},"edits":{"type":"array","items":{"type":"object","properties":{"op":{"type":"string"},"name_path":{"type":"string"},"relative_path":{"type":"string"},"new_name":{"type":"string"},"body":{"type":"string"},"pattern":{"type":"string"},"rewrite":{"type":"string"},"language":{"type":"string"}},"required":["op"]}},"apply":{"type":"boolean"}},"required":["edits"]}},
      {"name":"index_info","description":"When and from what the code map was built: repo root, build time, counts, and the files changed since the SCIP run or added since then (stale_files; new_file_count of them are new, so no answer covers them yet). Answers about a stale file carry \"stale\": true; refresh the map or reread the file.","inputSchema":{"type":"object","properties":{"repo":{"type":"string","description":"A repo path: answer about that repo's map instead (as use_repo; the choice persists)."},"build":{"type":"boolean","description":"Allow an implicit build when no usable map covers the repo (default true). Applies only to repository selection, not explicit tool actions or live warm-up."}}}}]
     """;
 
@@ -413,6 +413,21 @@ fn edit_batch(db: i64, args: json::Node?, out: u8[>..]&) -> bool {
     var results: u8[>..] = [];
     var n = 0;
     var failed_at = 0;                 // 1-based, 0 = none
+    // For a plan: the symbols whose callers the batch changes (renames and
+    // replaced bodies), and every file the batch edits; Spread-Wings is asked
+    // what the first reach beyond the second.
+    var asks: u8[>..] = [];
+    var planned: u8[>..] = [];
+    fn plan_files(plan: const u8[:]) {
+        var doc: json::Node[>..] = [];
+        var dec: u8[>..] = [];
+        let r, perr = json::parse(plan, doc, dec);
+        guard r;
+        for key in ["sites", "edits"] {
+            let list = json::member(r, key);
+            if list { json::each(list) { it => let f, f_ok = json::as_string(json::member(it, "relative_path")); if f_ok { format(planned, f, "\n"); } }; }
+        }
+    }
     if apply { exec_or_die(db, "SAVEPOINT swan_batch;"); }
     // The edits, copied out of the request first (fields 0x1f apart, edits
     // 0x1e apart): the edit functions reuse buffers the request's JSON may
@@ -471,6 +486,12 @@ fn edit_batch(db: i64, args: json::Node?, out: u8[>..]&) -> bool {
             } else {
                 format(sub, "unknown op '", op, "': use rename_symbol, replace_symbol_body, insert_after_symbol, insert_before_symbol or rewrite_pattern");
             }
+            if !apply && ok {
+                if op == "rename_symbol" || op == "replace_symbol_body" {
+                    format(asks, n, "\x1f", name_path, "\x1f", rel, "\x1e");
+                }
+                if op == "rename_symbol" || op == "rewrite_pattern" { plan_files(sub); } else { format(planned, rel, "\n"); }
+            }
             // An applied rename or rewrite that was refused says so in its answer.
             if apply && ok && find(sub, "\"applied\":false") >= 0 { ok = false; }
             if !ok && apply { failed_at = n; }
@@ -488,7 +509,9 @@ fn edit_batch(db: i64, args: json::Node?, out: u8[>..]&) -> bool {
     var files: u8[>..] = [];
     each_split(snap_names, '\n') { f => if f.len > 0 { if files.len > 0 { files.push(','); } json::format_string(files, f); } };
     if !apply {
-        format(out, "{\"applied\":false,\"edits\":[", results, "],\"note\":\"each edit is planned against the code as it is now; with apply they run in this order, all or nothing\"}");
+        var touches: u8[>..] = [];
+        wings_report(db, serve_map, root, asks, planned, touches);
+        format(out, "{\"applied\":false,\"edits\":[", results, "],\"touches\":", touches, ",\"note\":\"each edit is planned against the code as it is now; with apply they run in this order, all or nothing\"}");
         return true;
     }
     if failed_at == 0 {
@@ -657,8 +680,79 @@ fn serve_any(root: const u8[:]) {
     serve_loop();
 }
 
+// Moving to a new build without the agent: agents start Swan through a
+// link (swan-up's <root>/current/bin/swan, or ~/.local/bin/swan to it).
+// When `swan-up update` points that link at another version, the server
+// replaces itself with the new build between two requests: same process,
+// same pipes, the same repo selected, live servers started again. The agent
+// is told the tool list may have changed. $SWAN_NO_RESTART=1 turns it off.
+extern fn swan_reexec(path: const u8[:], argv: const u8[:], env: const u8[:]) -> bool;
+
+var serve_launch: u8[..4096];      // the path this server was started by, absolute, links not followed
+
+fn launch_path_init() {
+    let a = args();
+    guard a.len > 0 && find(a[0], "/") >= 0;
+    if a[0][0] == '/' { format(serve_launch, a[0]); return; }
+    var cwd: u8[>..] = [];
+    guard swan_realpath(".", cwd);
+    format(serve_launch, cwd, "/", a[0]);
+}
+
+// The build the launch path leads to now, when it is another file than the
+// one running; "" otherwise. A binary rewritten in place (a dev rebuild) is
+// the same file: no restart, so a half-written one is never started.
+fn restart_target() -> u8[>..] {
+    var none: u8[>..] = [];
+    guard serve_launch.len > 0 else { return none; }
+    var v: u8[>..] = [];
+    guard !(env("SWAN_NO_RESTART", v) && v == "1") else { return none; }
+    var now: u8[>..] = [];
+    guard swan_realpath(serve_launch, now) && file_exists(now) else { return none; }
+    var exe: u8[>..] = [];
+    guard swan_exe_path(exe) else { return none; }
+    var cur: u8[>..] = [];
+    cur.append(if ends_with(exe, " (deleted)") { exe[..exe.len - 10] } else { exe[..] });
+    guard now != cur else { return none; }
+    return now;
+}
+
+// Replace this server with `target`, keeping the selected repo. Returns
+// only if that could not happen now (it is tried again after the next answer).
+fn restart_into(target: const u8[:]) {
+    var a: u8[>..] = [];
+    arg(a, serve_launch);
+    arg(a, "serve");
+    arg(a, "--maps");
+    arg(a, serve_maps);
+    var e: u8[>..] = [];
+    arg(e, "SWAN_RESTARTED=1");
+    arg(e, str("SWAN_RESTART_MAP=", serve_map));
+    live_stop();
+    if serve_db != 0 { close_db(serve_db); serve_db = 0; }
+    write_stderr(str("swan serve: moving to ", target, "\n"));
+    if !swan_reexec(target, a, e) {
+        write_stderr("swan serve: not now (input pending or exec failed); after the next answer\n");
+        if serve_map.len > 0 { var err: u8[>..] = []; serve_reopen(serve_map, false, "", err); serve_warm = true; }
+    }
+}
+
 fn serve_loop() {
     var warmed = false;
+    launch_path_init();
+    var rs: u8[>..] = [];
+    if env("SWAN_RESTARTED", rs) && rs == "1" {
+        // Started by an older build of this same server: the agent already
+        // initialized it. Reselect its repo and say the tools may differ now.
+        warmed = true;
+        var m: u8[>..] = [];
+        if env("SWAN_RESTART_MAP", m) && m.len > 0 && file_exists(m) {
+            var err: u8[>..] = [];
+            if serve_reopen(m, false, "", err) { serve_map.clear(); format(serve_map, m); serve_warm = true; }
+        }
+        write_stdout("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/tools/list_changed\"}\n");
+        flush_stdout();
+    }
     loop {
         var line: u8[>..] = [];
         guard read_line(line) else { break; }
@@ -686,7 +780,7 @@ fn serve_loop() {
             if version.len == 0 { version = "2025-06-18"; }
             out.append(",\"result\":{\"protocolVersion\":");
             json::format_string(out, version);
-            out.append(",\"capabilities\":{\"tools\":{}},\"serverInfo\":{\"name\":\"swan\",\"version\":");
+            out.append(",\"capabilities\":{\"tools\":{\"listChanged\":true}},\"serverInfo\":{\"name\":\"swan\",\"version\":");
             json::format_string(out, SWAN_VERSION);
             out.append("}}}");
         } else if method == "ping" {
@@ -753,6 +847,8 @@ fn serve_loop() {
         write_stdout(out);
         flush_stdout();
         if is_init && !warmed { warmed = true; if serve_db != 0 { serve_warm = false; live_warm(serve_db); } }
+        let target = restart_target();
+        if target.len > 0 { restart_into(target); }
     }
     live_stop();
     if serve_db != 0 { close_db(serve_db); }
