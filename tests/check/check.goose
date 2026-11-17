@@ -22,8 +22,9 @@ import .game_suite;
 import .live_suite;
 import .trust_suite;
 import .edit_suite;
+import .maps_suite;
 
-let SUITES = ["mcp", "rust", "split", "agnostic", "diag", "kotlin", "game", "live", "trust", "edit"];
+let SUITES = ["mcp", "rust", "split", "agnostic", "diag", "kotlin", "game", "live", "trust", "edit", "maps"];
 
 fn run_suite(name: const u8[:]) -> bool {
     if name == "rust" { rust_suite(); return true; }
@@ -36,6 +37,7 @@ fn run_suite(name: const u8[:]) -> bool {
     if name == "live" { live_suite(); return true; }
     if name == "trust" { trust_suite(); return true; }
     if name == "edit" { edit_suite(); return true; }
+    if name == "maps" { maps_suite(); return true; }
     return false;
 }
 

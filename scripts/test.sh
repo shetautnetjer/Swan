@@ -10,8 +10,7 @@ scripts/build.sh >/dev/null
 scripts/index-repo.sh fixtures/tiny-ts data/tiny-ts >/dev/null
 # Suites ported to Goose (tests/check/) run to the end; the result counts at the end.
 check_failed=0
-bin/swan-check mcp || check_failed=1
-bun tests/maps_check.ts
+bin/swan-check mcp maps || check_failed=1
 tests/refresh_check.sh
 tests/cosmetic_check.sh
 tests/layer_check.sh
