@@ -27,8 +27,9 @@ import .maps_suite;
 import .lang_suite;
 import .structural_suite;
 import .bench;
+import .pypatch_suite;
 
-let SUITES = ["mcp", "rust", "split", "agnostic", "diag", "kotlin", "game", "live", "trust", "edit", "maps", "lang", "structural"];
+let SUITES = ["mcp", "rust", "split", "agnostic", "diag", "kotlin", "game", "live", "trust", "edit", "maps", "lang", "structural", "pypatch"];
 
 fn run_suite(name: const u8[:]) -> bool {
     if name == "rust" { rust_suite(); return true; }
@@ -44,6 +45,7 @@ fn run_suite(name: const u8[:]) -> bool {
     if name == "maps" { maps_suite(); return true; }
     if name == "lang" { lang_suite(); return true; }
     if name == "structural" { structural_suite(); return true; }
+    if name == "pypatch" { pypatch_suite(); return true; }
     return false;
 }
 

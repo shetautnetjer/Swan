@@ -21,6 +21,7 @@ import .live;
 import .structural;
 import .change;
 import .syntax;
+import .pypatch;
 import treesitter from "shetautnetjer/goose-treesitter@59313e9da0b9f1cce8df83cabe53ed73fa92345c";   // tree-sitter and its grammars, built once and cached
 import sqlite from "shetautnetjer/goose-sqlite@c759de735ae936dcbc197bb9aae40e13565ef21c";   // open_existing never creates a missing map
 
@@ -145,6 +146,11 @@ fn main() {
         var k: i64 = 6;
         if a.len == 4 { let v, ok = parse_int(a[3]); guard ok && v > 0 else { usage(); } k = v; }
         write_stdout(plan_python(abs_path(a[2]), k));
+    } else if a[1] == "scip-python-patch" && (a.len == 3 || (a.len == 4 && a[3] == "--revert")) {
+        // Applies (or undoes) the reachability memo on one pyright-internal.js.
+        let r = pypatch_file(a[2], a.len == 4);
+        print(r);
+        if r == "no match" { exit(1); }
     } else if a[1] == "stamp-bench" && a.len == 4 {
         if !stamp_bench_main(a[2], a[3]) { exit(1); }
     } else if a[1] == "stamp-worker" && a.len == 6 {

@@ -14,6 +14,7 @@ import dictionary;
 import sqlite;
 import treesitter;
 import .writer;
+import .pypatch;
 
 extern fn swan_realpath(path: const u8[:], out: u8[>..]&) -> bool;
 
@@ -2093,6 +2094,10 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
     }
 
     if l.py {
+        // Swan's copy of scip-python gets its reachability memo first
+        // (src/pypatch.goose): without it one long script of try/except
+        // blocks can hold a map for minutes.
+        ensure_scip_python_patch(home, swan_file_size(str(home, "/tools/node_modules/@sourcegraph/scip-python/dist/pyright-internal.js")), report);
         let python = python_of(l);
         var env_args: u8[>..] = [];
         var probe: u8[>..] = [];
