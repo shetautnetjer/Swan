@@ -155,6 +155,39 @@ fn lang_java() {
     let sq = json::member(nth(r3, 0), "references");
     if sq { json::each(sq) { r => if jstr(r, "in_symbol") == "Shapes/main" && jstr(r, "via") == "Square/<init>" { via = true; } }; }
     check("java: `new Square(2)` counts as a use of Square (through its constructor)", via, t);
+
+    // Answers checked against JetBrains' own (IntelliJ IDEA asked through its
+    // MCP server on this fixture, 2026-11-17): its call hierarchy for
+    // Circle.area shows totalArea and main, its rename of Shape.area touches
+    // four files, and it does not call Circle or Square unused.
+    lg_db_query(db, "callers", "/Circle/area", "", t);
+    check("java: Circle.area is called through the interface method it implements (totalArea, then main)",
+          find(t, "\"through\":[\"Shape/area\"]") >= 0 && find(t, "\"name_path\":\"Shapes/totalArea\"") >= 0 &&
+          find(t, "\"name_path\":\"Shapes/main\"") >= 0, t);
+    lg_db_query(db, "unused", "src", "", t);
+    check("java: a class that is only constructed is not unused",
+          find(t, "\"name_path\":\"Circle\"") < 0 && find(t, "\"name_path\":\"Square\"") < 0 && find(t, "Shapes/main") >= 0, t);
+    var pt: u8[>..] = [];
+    let pr = serve_once(db, "rename_symbol", """{"name_path":"/Circle/area","relative_path":"src/main/java/shapes/Circle.java","new_name":"surface"}""", pt);
+    check("java: renaming an override plans the interface method and the other override too (4 files)",
+          pr == 1 && find(pt, "\"also_renamed\":[\"Shape/area\",\"Square/area\"]") >= 0 && find(pt, "\"files\":4") >= 0, pt);
+    var at: u8[>..] = [];
+    let ar = serve_once(db, "rename_symbol", """{"name_path":"/Shape/area","relative_path":"src/main/java/shapes/Shape.java","new_name":"surface","apply":true}""", at);
+    check("java: the family rename applies to all four files", ar == 1 && find(at, "\"files_written\":4") >= 0, at);
+    guard sh(argv(["bin/swan", "map", str(w, "/repo"), str(w, "/map")]), "", o) else { return; }
+    guard sh(argv(["bin/swan", "check", str(w, "/repo"), str(w, "/map")]), "", o) else { return; }
+    lg_db_query(db, "diagfile", ".", "", t);
+    check("java: after it, javac still finds no errors (the overrides still implement the interface)",
+          find(t, "\"errors\":0") >= 0, t);
+    // A file touched but not changed is not stale once a refresh has looked at it.
+    guard sh(argv(["touch", str(w, "/repo/src/main/java/shapes/Circle.java")]), "", o) else { return; }
+    var it0: u8[>..] = [];
+    serve_once(db, "index_info", "{}", it0);
+    guard sh(argv(["bin/swan", "map", str(w, "/repo"), str(w, "/map")]), "", o) else { return; }
+    var it1: u8[>..] = [];
+    serve_once(db, "index_info", "{}", it1);
+    check("java: a touched, unchanged file is stale until a refresh, and not after",
+          find(it0, "\"stale_file_count\":1") >= 0 && find(it1, "\"stale_file_count\":0") >= 0, str(it0, "\n     ", it1));
     lg_db_query(db, "diagfile", ".", "", t);
     var d4: json::Node[>..] = []; var x4: u8[>..] = [];
     let r4, e4 = json::parse(t, d4, x4);

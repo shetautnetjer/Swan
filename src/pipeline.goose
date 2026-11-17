@@ -2689,6 +2689,24 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
         // need their rows moved.
         idx_new.append(idx_prev);
         finish_cosmetic(false);
+        // Every file's text is the text its rows were built from: the map is
+        // current as of this run, so its reference time moves up to it.
+        // Without this a file that was edited and put back (or just
+        // touched) stayed "stale" through every later refresh, and edits to
+        // it were refused with "refresh first" (found 2026-11-17).
+        if n_cosmetic == 0 {
+            var derr: u8[>..] = [];
+            let h = sqlite::open_existing(db, derr);
+            if h != 0 {
+                let up = sqlite::prepare(h, "UPDATE meta SET value = ?1 WHERE key = 'scip_time'", derr);
+                if up != 0 {
+                    sqlite::bind_text(up, 1, str(scip_time_of(out)));
+                    sqlite::step(up, derr);
+                    sqlite::finalize(up);
+                }
+                sqlite::close(h);
+            }
+        }
         format(report, if n_cosmetic > 0 { "\nno code changed since the last map" } else { "nothing changed since the last map" },
                "\nswan map: ", ((clock() - t_start) * 1000.0) as i64, " ms in all");
         return ok;

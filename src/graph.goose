@@ -76,9 +76,39 @@ fn targets(db: i64, pattern: const u8[:], rel: const u8[:], out: u8[>..]&) -> u8
 // it is test code, and a summary counts the files and lists the test files.
 fn get_callers(db: i64, pattern: const u8[:], rel: const u8[:], depth: i64, limit: i64, out: u8[>..]&) {
     out.push('{');
-    let ids = targets(db, pattern, rel, out);
+    var ids = targets(db, pattern, rel, out);
     guard ids.len > 0 else { out.append(",\"callers\":[]}"); return; }
     if refuse_ambiguous(out) { return; }
+    // A method that implements or overrides another is also called through
+    // it: `s.area()` on a Shape may run Circle.area. So the callers of the
+    // repo methods it implements count as its callers, and the answer names
+    // those methods ("through"). JetBrains' call hierarchy does the same;
+    // before, Circle.area had no callers at all. Library bases
+    // (Object.toString) are left out: every toString() call would follow.
+    var through: u8[>..] = [];
+    var bases_sql: u8[>..] = [];
+    format_replaced(bases_sql, """
+        WITH RECURSIVE b(id) AS (
+            SELECT related_id FROM relationships WHERE symbol_id IN (#IDS#) AND is_impl = 1
+            UNION
+            SELECT r.related_id FROM b JOIN relationships r ON r.symbol_id = b.id AND r.is_impl = 1)
+        SELECT s.id, s.name_path FROM b JOIN symbols s ON s.id = b.id
+        WHERE s.in_repo = 1 AND s.kind IN ('method', 'function', 'getter', 'setter') AND s.id NOT IN (#IDS#)
+        ORDER BY s.name_path
+        """, "#IDS#", ids);
+    let bq = prepare_or_die(db, bases_sql);
+    var berr: u8[>..] = [];
+    var base_ids: u8[>..] = [];
+    while step_checked(bq, berr) == 1 {
+        format(base_ids, ",", sqlite::col_int(bq, 0));
+        var np: u8[>..] = [];
+        sqlite::col_text(bq, 1, np);
+        if through.len > 0 { through.push(','); }
+        json::format_string(through, np);
+    }
+    sqlite::finalize(bq);
+    ids.append(base_ids);
+    if through.len > 0 { format(out, ",\"through\":[", through, "]"); }
     var walk: u8[>..] = [];
     format_replaced(walk, """
         WITH RECURSIVE up(id, depth) AS (
@@ -400,6 +430,10 @@ fn find_unused_symbols(db: i64, rel: const u8[:], include_tests: bool, limit: i6
           AND s.kind NOT IN ('parameter', 'type_parameter', 'module', 'property', 'namespace')
           AND (?1 = '' OR s.def_file = ?1 OR s.def_file LIKE ?1 || '/%')
           AND NOT EXISTS (SELECT 1 FROM occurrences o WHERE o.symbol_id = s.id AND o.is_def = 0)
+          -- `new Square(2)` references Square's constructor, not Square: a
+          -- class whose constructor is used is used (as references count it).
+          AND NOT EXISTS (SELECT 1 FROM symbols c JOIN occurrences o ON o.symbol_id = c.id AND o.is_def = 0
+                          WHERE c.name = '<init>' AND substr(c.scip, 1, length(s.scip)) = s.scip AND c.id != s.id)
           AND NOT EXISTS (SELECT 1 FROM relationships r WHERE r.related_id = s.id)
           AND NOT (s.kind IN ('method', 'getter', 'setter')
                    AND EXISTS (SELECT 1 FROM relationships r WHERE r.symbol_id = s.id))
