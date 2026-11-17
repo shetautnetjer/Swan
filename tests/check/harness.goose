@@ -385,3 +385,10 @@ fn ref_sites(arr: json::Node?) -> u8[>..] {
     }
     return l;
 }
+
+// Runs a command in another working directory.
+fn run_at(args: const u8[:], cwd: const u8[:], env: const u8[:], out: u8[>..]&, err: u8[>..]&) -> i32 {
+    out.clear();
+    err.clear();
+    return swan_run(args, cwd, env, 1800000, out, err);
+}

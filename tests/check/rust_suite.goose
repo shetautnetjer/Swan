@@ -45,11 +45,14 @@ fn rust_suite() {
     var sq = false; var circ = false;
     if shape {
         json::each(shape) { r =>
-            if jint(r, "line") == 42 && jstr(r, "via") == "Shape/Square" && jtrue(r, "by_name") { sq = true; }
+            if jint(r, "line") == 42 && jstr(r, "via") == "Shape/Square" { sq = true; }
             if jint(r, "line") == 55 { circ = true; }
         };
     }
-    check("Shape::Square inside vec![...] counts as a use of Shape, by name", sq, t4);
+    // rust-analyzer resolves uses inside vec![...] since its 2026-10 builds;
+    // older ones left them to Swan's by-name fallback. Either way it must be
+    // found. (From #37.)
+    check("Shape::Square inside vec![...] counts as a use of Shape (compiler-resolved or by name)", sq, t4);
     check("Shape::Circle inside assert!(matches!(...)) is found too", circ, t4);
 
     var t5: u8[>..] = [];

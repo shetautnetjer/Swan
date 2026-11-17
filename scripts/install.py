@@ -246,7 +246,7 @@ def plan(options):
         if detected["bun"]["status"] != "ready":
             downloads.append({"name": "Bun baseline", "version": BUN_VERSION, "url": BUN_URL, "sha256": BUN_SHA256})
             downloads.append({"name": "Bun pinned license/linked-library notices", "url": BUN_LICENSE_URL, "sha256": BUN_LICENSE_SHA256})
-        downloads.append({"name": "Frozen npm tool set", "source": "tools/package-lock.json", "command": "npm ci --ignore-scripts --no-audit --no-fund"})
+        downloads.append({"name": "Frozen npm tool set", "source": "tools/package-lock.json", "command": "npm ci --omit=dev --ignore-scripts --no-audit --no-fund"})
     return prefix, manifest, detected, {"prefix": str(prefix), "profile": options.profile,
         "archive": str(options.archive.resolve()), "archive_sha256": options.sha256.lower(),
         "source_revision": manifest.get("source_revision"), "detected": detected, "downloads": downloads,
@@ -281,7 +281,7 @@ def install(options):
             node = stage / ".tools/runtime/bin/node"
             npm = (stage / ".tools/runtime/bin/npm").resolve(strict=True)
             env = clean_env(stage, state, network=True)
-            result = subprocess.run([str(node), str(npm), "ci", "--ignore-scripts", "--no-audit", "--no-fund"],
+            result = subprocess.run([str(node), str(npm), "ci", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund"],
                                     cwd=stage / "tools", env=env, stdin=subprocess.DEVNULL,
                                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=600)
             if result.returncode:
