@@ -767,3 +767,21 @@ and takes Swan's compiler answers. Found by `$SWAN_SPREAD_WINGS` or
   about 60 ms.
 - Limit: Spread-Wings knows a definition by name and file, so for a method
   it counts every method of that name in the file (marked in the answer).
+
+## 2026-11-17: running servers move to a new build by themselves
+
+`swan serve` remembers the path it was started by (swan-up's
+`<root>/current/bin/swan`). After each answer it checks where that path
+leads; when `swan-up update` has pointed it at another version, the server
+stops its language servers and execs the new build in the same process,
+on the same pipes, with the selected repo handed over in the environment.
+The new build sends `notifications/tools/list_changed` (initialize now
+advertises `listChanged`). It does not move while stdin's buffer holds a
+request it has read ahead, so requests sent together are all answered.
+A binary rewritten in place is the same path and never moves anything;
+`SWAN_NO_RESTART=1` turns it off.
+
+- `tests/test_serve_restart.py` (3 tests, a swan-up layout with two
+  versions): moves after an answer and answers from the same repo; three
+  requests in one write all answered, then one notice; an in-place rewrite
+  does not move it. Pass in a microVM fork.

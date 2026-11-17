@@ -366,3 +366,29 @@ bool swan_is_symlink(swan_slice path) {
 }
 
 int32_t swan_cpu_count(void) { long n = sysconf(_SC_NPROCESSORS_ONLN); return n > 0 ? (int32_t)n : 1; }
+
+/* Replace this process with the program at `path`, same pid and same stdin,
+   stdout and stderr, with argv (NUL-separated) and env entries ("K=V",
+   NUL-separated) set on top of this environment. Refused (false) while stdin's
+   stdio buffer still holds bytes this process read ahead but has not used:
+   the new program could not see them. Bytes still in the pipe are kept.
+   Returns only if it did not happen. glibc only (Swan ships for Linux). */
+bool swan_reexec(swan_slice path, swan_slice argv_nul, swan_slice env_nul) {
+    if (stdin->_IO_read_ptr < stdin->_IO_read_end) return false;
+    char pbuf[4096];
+    if (path.len <= 0 || path.len >= (int64_t)sizeof pbuf) return false;
+    memcpy(pbuf, path.data, (size_t)path.len);
+    pbuf[path.len] = 0;
+    char *abuf = malloc((size_t)argv_nul.len + 1), *ebuf = malloc((size_t)env_nul.len + 1);
+    if (!abuf || !ebuf) { free(abuf); free(ebuf); return false; }
+    memcpy(abuf, argv_nul.data, (size_t)argv_nul.len);
+    memcpy(ebuf, env_nul.data, (size_t)env_nul.len);
+    char **argv = split_nul(abuf, argv_nul.len, NULL);
+    char **ours = split_nul(ebuf, env_nul.len, NULL);
+    for (int64_t i = 0; ours && ours[i]; i++) putenv(ours[i]);
+    fflush(stdout);
+    fflush(stderr);
+    if (argv && argv[0]) execv(pbuf, argv);
+    free(argv); free(ours); free(abuf); free(ebuf);
+    return false;
+}

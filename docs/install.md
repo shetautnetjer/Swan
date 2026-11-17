@@ -63,9 +63,15 @@ skills are kept under `~/.local/share/swan/backups/`. It then runs `doctor`,
 an MCP start-up check and the skill self-test. Maps default to
 `~/.local/share/swan/maps`, outside every repository.
 
-Updating is the same `pack` and `install`. Agents pick up the new version the
-next time they start Swan; `status` lists Swan servers still running an older
-binary. To roll back, point `current` at the previous `versions/<rev>`; to
+Updating is the same `pack` and `install` (or `update`). Running Swan servers
+follow the `current` link: after their next answer, one that finds `current`
+pointing at another version replaces itself with it, in the same process and on
+the same pipes, keeps the repo it had selected, starts its language servers again
+and tells the agent its tool list may have changed (`notifications/tools/list_changed`).
+It waits while a request it has already read is pending, so none is lost.
+`SWAN_NO_RESTART=1` in a server's environment keeps it on its version; a binary
+rebuilt in place (a dev checkout) never triggers a move. `status` lists Swan
+servers still running an older binary until they next answer. To roll back, point `current` at the previous `versions/<rev>`; to
 disconnect an agent, remove its `swan` MCP entry.
 
 ## Files and profiles

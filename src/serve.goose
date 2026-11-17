@@ -680,8 +680,79 @@ fn serve_any(root: const u8[:]) {
     serve_loop();
 }
 
+// Moving to a new build without the agent: agents start Swan through a
+// link (swan-up's <root>/current/bin/swan, or ~/.local/bin/swan to it).
+// When `swan-up update` points that link at another version, the server
+// replaces itself with the new build between two requests: same process,
+// same pipes, the same repo selected, live servers started again. The agent
+// is told the tool list may have changed. $SWAN_NO_RESTART=1 turns it off.
+extern fn swan_reexec(path: const u8[:], argv: const u8[:], env: const u8[:]) -> bool;
+
+var serve_launch: u8[..4096];      // the path this server was started by, absolute, links not followed
+
+fn launch_path_init() {
+    let a = args();
+    guard a.len > 0 && find(a[0], "/") >= 0;
+    if a[0][0] == '/' { format(serve_launch, a[0]); return; }
+    var cwd: u8[>..] = [];
+    guard swan_realpath(".", cwd);
+    format(serve_launch, cwd, "/", a[0]);
+}
+
+// The build the launch path leads to now, when it is another file than the
+// one running; "" otherwise. A binary rewritten in place (a dev rebuild) is
+// the same file: no restart, so a half-written one is never started.
+fn restart_target() -> u8[>..] {
+    var none: u8[>..] = [];
+    guard serve_launch.len > 0 else { return none; }
+    var v: u8[>..] = [];
+    guard !(env("SWAN_NO_RESTART", v) && v == "1") else { return none; }
+    var now: u8[>..] = [];
+    guard swan_realpath(serve_launch, now) && file_exists(now) else { return none; }
+    var exe: u8[>..] = [];
+    guard swan_exe_path(exe) else { return none; }
+    var cur: u8[>..] = [];
+    cur.append(if ends_with(exe, " (deleted)") { exe[..exe.len - 10] } else { exe[..] });
+    guard now != cur else { return none; }
+    return now;
+}
+
+// Replace this server with `target`, keeping the selected repo. Returns
+// only if that could not happen now (it is tried again after the next answer).
+fn restart_into(target: const u8[:]) {
+    var a: u8[>..] = [];
+    arg(a, serve_launch);
+    arg(a, "serve");
+    arg(a, "--maps");
+    arg(a, serve_maps);
+    var e: u8[>..] = [];
+    arg(e, "SWAN_RESTARTED=1");
+    arg(e, str("SWAN_RESTART_MAP=", serve_map));
+    live_stop();
+    if serve_db != 0 { close_db(serve_db); serve_db = 0; }
+    write_stderr(str("swan serve: moving to ", target, "\n"));
+    if !swan_reexec(target, a, e) {
+        write_stderr("swan serve: not now (input pending or exec failed); after the next answer\n");
+        if serve_map.len > 0 { var err: u8[>..] = []; serve_reopen(serve_map, false, "", err); serve_warm = true; }
+    }
+}
+
 fn serve_loop() {
     var warmed = false;
+    launch_path_init();
+    var rs: u8[>..] = [];
+    if env("SWAN_RESTARTED", rs) && rs == "1" {
+        // Started by an older build of this same server: the agent already
+        // initialized it. Reselect its repo and say the tools may differ now.
+        warmed = true;
+        var m: u8[>..] = [];
+        if env("SWAN_RESTART_MAP", m) && m.len > 0 && file_exists(m) {
+            var err: u8[>..] = [];
+            if serve_reopen(m, false, "", err) { serve_map.clear(); format(serve_map, m); serve_warm = true; }
+        }
+        write_stdout("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/tools/list_changed\"}\n");
+        flush_stdout();
+    }
     loop {
         var line: u8[>..] = [];
         guard read_line(line) else { break; }
@@ -709,7 +780,7 @@ fn serve_loop() {
             if version.len == 0 { version = "2025-06-18"; }
             out.append(",\"result\":{\"protocolVersion\":");
             json::format_string(out, version);
-            out.append(",\"capabilities\":{\"tools\":{}},\"serverInfo\":{\"name\":\"swan\",\"version\":");
+            out.append(",\"capabilities\":{\"tools\":{\"listChanged\":true}},\"serverInfo\":{\"name\":\"swan\",\"version\":");
             json::format_string(out, SWAN_VERSION);
             out.append("}}}");
         } else if method == "ping" {
@@ -776,6 +847,8 @@ fn serve_loop() {
         write_stdout(out);
         flush_stdout();
         if is_init && !warmed { warmed = true; if serve_db != 0 { serve_warm = false; live_warm(serve_db); } }
+        let target = restart_target();
+        if target.len > 0 { restart_into(target); }
     }
     live_stop();
     if serve_db != 0 { close_db(serve_db); }
