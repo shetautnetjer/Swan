@@ -130,6 +130,7 @@ extern fn proc_open(argv: const u8[:], cwd: const u8[:], env: const u8[:], log: 
 extern fn proc_write(h: i64, data: const u8[:]) -> bool;
 extern fn proc_read(h: i64, timeout_ms: i64, buf: u8[:]) -> i64;
 extern fn proc_close(h: i64, grace_ms: i64);
+extern fn check_proc_close(h: i64, grace_ms: i64) -> i32;
 
 var m_h: i64 = 0;
 var m_inbox: u8[>..];
@@ -194,6 +195,30 @@ fn mcp_rpc(method: const u8[:], params: const u8[:], out: u8[>..]&) -> bool {
     return true;
 }
 
+// Calls a tool and puts its answer's text in out; false if the tool said it
+// failed (no FAIL is counted: the caller's check decides). -1 if no answer.
+fn mcp_call(name: const u8[:], arguments: const u8[:], out: u8[>..]&) -> i64 {
+    var params: u8[>..] = [];
+    params.append("{\"name\":");
+    json::format_string(params, name);
+    format(params, ",\"arguments\":", arguments, "}");
+    let t0 = clock();
+    var line: u8[>..] = [];
+    guard mcp_rpc("tools/call", params, line) else { return -1; }
+    let ms = ((clock() - t0) * 1000.0) as i64;
+    var doc: json::Node[>..] = [];
+    var dec: u8[>..] = [];
+    let root, err = json::parse(line, doc, dec);
+    let result = json::member(root, "result");
+    var text: u8[>..] = [];
+    text.append(jstr(nth(json::member(result, "content"), 0), "text"));
+    let failed = jtrue(result, "isError");
+    out.clear();
+    out.append(text);
+    print(str("  ", name, " ", arguments, ": ", ms, " ms"));
+    return if failed { 0 } else { 1 };
+}
+
 // Calls a tool (arguments as JSON text) and puts the text of its answer in
 // out. A tool error is a FAIL naming it, and false.
 fn mcp_tool(name: const u8[:], arguments: const u8[:], out: u8[>..]&) -> bool {
@@ -224,6 +249,14 @@ fn mcp_tool(name: const u8[:], arguments: const u8[:], out: u8[>..]&) -> bool {
 
 fn mcp_close() {
     if m_h != 0 { proc_close(m_h, 10000); m_h = 0; }
+}
+
+// Closes the server's stdin and returns its exit code (-1 if it had to be
+// killed after 30 s).
+fn mcp_close_code() -> i32 {
+    var code: i32 = -1;
+    if m_h != 0 { code = check_proc_close(m_h, 30000); m_h = 0; }
+    return code;
 }
 
 // The values of `key` in each element of a JSON array, one per line.
@@ -316,3 +349,18 @@ fn replace_in_file(path: const u8[:], old: const u8[:], new: const u8[:]) -> boo
     out.append(text[at + old.len..]);
     return write_file(path, out);
 }
+
+// The integers of a JSON array, comma-joined ("61,65").
+fn jints(arr: json::Node?) -> u8[>..] {
+    var out: u8[>..] = [];
+    if arr {
+        json::each(arr) { e =>
+            let v, ok = json::as_i64(e);
+            if out.len > 0 { out.push(','); }
+            if ok { format(out, v); }
+        };
+    }
+    return out;
+}
+// Whether a path exists (file or folder).
+fn exists(path: const u8[:]) -> bool { file_exists(path) || is_dir(path) }
