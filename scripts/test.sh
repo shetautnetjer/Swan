@@ -15,6 +15,9 @@ tests/refresh_check.sh
 tests/cosmetic_check.sh
 tests/layer_check.sh
 tests/pieces_check.sh
+# The installer's, the packager's and the map-locking tests (Python, 2 s).
+py_out=$(python3 -m unittest discover -s tests -p 'test_*.py' 2>&1) || check_failed=1
+echo "$py_out" | tail -3
 bin/swan-check rust split agnostic diag kotlin game live trust edit lang structural pypatch || check_failed=1
 # The Goose suites ran to the end; fail now if any of their checks did.
 [ "$check_failed" -eq 0 ]

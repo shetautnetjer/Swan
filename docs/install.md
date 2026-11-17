@@ -198,7 +198,7 @@ the original license notices for the Goose runtime, goose-sqlite,
 goose-treesitter and each compiled grammar/runtime, and goose-lsp.
 
 ```bash
-python3 scripts/package.py --binary bin/swan --output /new/export-directory \
+python3 scripts/package.py --binary bin/swan --flatten bin/swan-flatten --output /new/export-directory \
   --source-revision FULL_COMMIT_SHA --build-receipt /path/to/build-receipt.json \
   --licenses /path/to/collected-licenses --require-license Goose-LICENSE
 ```

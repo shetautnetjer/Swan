@@ -46,6 +46,11 @@ fn agnostic_suite() {
     let r1, e1 = json::parse(t, d1, x1);
     check("Go: helper() is defined in helper.go", jlines(r1) == "helper.go:4", t);
 
+    // A signature over several lines: the body runs to the closing brace,
+    // not just the `func` line.
+    t = swan_query(db, "symbol", "scaled", "");
+    check("Go: a function with a multi-line parameter list keeps its whole body", find(t, "\"body_lines\":[9,14]") >= 0, t);
+
     t = swan_query(db, "callers", "helper", "");
     var d2: json::Node[>..] = []; var x2: u8[>..] = [];
     let r2, e2b = json::parse(t, d2, x2);

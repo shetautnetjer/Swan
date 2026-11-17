@@ -327,18 +327,26 @@ fn syntax_index_main(repo_arg: const u8[:], out_path: const u8[:]) -> bool {
 
     var code: u8[>..] = [];
     var code2: u8[>..] = [];
-    // Where a body that opens with a brace on (or just after) line `from` closes.
+    // Where a body that opens with a brace on (or just after) line `from`
+    // closes. A parameter list may run over several lines before the brace
+    // (gofmt puts one parameter per line): while its parenthesis is open the
+    // search goes on, and braces inside it (`x struct{ a int }`) are not the
+    // body. (Before, a function with two or more parameter lines got a
+    // one-line body.)
     fn brace_end(from: i64, lang: i64) -> i64, i64 {
         var depth = 0;
+        var paren = 0;
         var opened = false;
         var l = from;
         while l < lines_of && l < from + 20000 {
             sx_code(line_at(l), lang, code2);
             for ch, c in code2 {
-                if ch == '{' { depth++; opened = true; }
+                if !opened && ch == '(' { paren++; }
+                else if !opened && ch == ')' { if paren > 0 { paren--; } }
+                else if ch == '{' && (opened || paren == 0) { depth++; opened = true; }
                 else if ch == '}' && opened { depth--; if depth == 0 { return l, c + 1; } }
             }
-            if !opened && l > from + 1 { break; }
+            if !opened && paren == 0 && l > from + 1 { break; }
             l++;
         }
         return from, line_at(from).len;
