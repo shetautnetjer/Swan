@@ -73,7 +73,7 @@ test/demo scope is in docs/demo.md and package boundaries in docs/packages.md.
 - Trait impls recovered from rust-analyzer symbol names in the flattener;
   impl members named by type; `include_members` on find_referencing_symbols
   (CLI `uses`); macro-argument uses matched by name (`by_name`, schema 7).
-- `fixtures/tiny-rs` + `tests/rust_check.ts`. On the private Rust workspace
+- `fixtures/tiny-rs` + the `rust` suite (`tests/check/rust_suite.goose`; was `tests/rust_check.ts`). On the private Rust workspace
   types are now found on every line ripgrep finds them (excluding lines that
   are really other crates' same-named types).
 

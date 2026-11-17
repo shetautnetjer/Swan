@@ -76,7 +76,7 @@ results.
 Two fixes found on the way. scip-typescript numbers anonymous type
 literals by walk order, so those numbers are dropped. And when a repo has
 no package.json, a chunk's module names carry the absolute path, which is
-cut. `tests/split_check.ts` maps a generated 24-file project both ways
+cut. The `split` suite (`bin/swan-check split`) maps a generated 24-file project both ways
 and requires identical rows.
 
 | | Main before this pass | After |

@@ -14,6 +14,8 @@ if [ ! -f build/golsp.c ] || [ -n "$(find -L lsp -newer build/golsp.c -print -qu
     GOOSE="$GOOSE" lsp/scripts/build.sh build
 fi
 "$GOOSE" build src/swan.goose -o bin/swan "$@"
+# Swan's test runner (tests/check/), Goose like Swan: bin/swan-check [suite...]
+"$GOOSE" build tests/check/check.goose -o bin/swan-check
 # the egg-shell sealing runner sits beside the swan binary (swan_home/bin)
 install -m 755 eggshell/eggshell bin/eggshell
 # the SCIP flattener (native/swan-flatten, Rust) is required: Swan has no other.

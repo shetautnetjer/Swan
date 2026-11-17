@@ -16,10 +16,10 @@ matched those hashes at closeout; original checkouts stayed clean.
 | LSP negative control | deliberately incorrect diagnostic output rejected |
 | `python3 scripts/demo-offline.py` | 11 assertions, synthetic rows into real SQLite/MCP/structural paths |
 | `scripts/index-repo.sh fixtures/tiny-ts data/tiny-ts` | real TypeScript SCIP map, 56 symbols / 139 occurrences |
-| `bun tests/mcp_smoke.ts bin/swan data/tiny-ts/swan.db` | all existing MCP smoke assertions |
+| `bin/swan-check mcp` | all existing MCP smoke assertions |
 | `bash tests/refresh_check.sh` | refreshed and fresh maps equal across 202 dumped rows |
-| `bun tests/edit_check.ts` | edits/rename/conflict/staleness; tsc passes; 27 symbols' shifted positions compared with fresh SCIP |
-| `bun tests/split_check.ts` | split/single maps equal across 503 rows |
+| `bin/swan-check edit` | edits/rename/conflict/staleness; tsc passes; 27 symbols' shifted positions compared with fresh SCIP |
+| `bin/swan-check split` | split/single maps equal across 503 rows |
 | Package build harness | 28 builds and 28 executable checks; cold/warm evidence in packages.md |
 | Swan build | cold and three warm builds; default AOT optimization, private package cache |
 | Source review | independent review; shell/Python syntax and `git diff --check` |

@@ -225,7 +225,7 @@ git merge-base --is-ancestor 821474fe12e06aaefd96580a4903ab8aba08568e HEAD
 
 <!-- coderabbit-ai-generated-section:v1:4a5b46aca3b744b82d0a1b7cd5e11e1e8c6c563b220004ff37c8fb0f836806ac -->
 
-[The regression test](tests/trust_check.ts) checks that the untrusted live
+[The regression test](tests/check/trust_suite.goose) checks that the untrusted live
 reply contains a `result` field without executing a planted interpreter,
 and that a trusted control does execute it. The `result` assertion does not
 establish successful diagnostics: MCP tool errors also contain that field.
@@ -322,7 +322,8 @@ scripts/diagnose-repo.sh <ts-repo> data/<name>  # tsc / cargo check, loaded into
 bin/swan serve data/<name>/swan.db              # MCP over stdio, one map
 bin/swan serve --maps data                      # or one server for every map under a data root
 bin/swan query data/<name>/swan.db refs getBackend   # the same answers on the command line
-scripts/test.sh                                 # build, map the fixture, drive the MCP end to end, check refresh
+scripts/test.sh                                 # build, map the fixture, then every suite (bin/swan-check, Goose) and the shell checks
+bin/swan-check mcp edit                         # one or more suites; bin/swan-check alone runs them all, totals at the end
 ```
 
 For a small offline demonstration after building, run
@@ -499,7 +500,7 @@ for a user who needs only one language. See DECISIONS.md.
   program. Edits to comments and layout run no indexer. Swan's own part
   is 0.23 s.
 - Edits shift the map's positions for the edited file at once (checked against a
-  fresh SCIP run in `tests/edit_check.ts`), but uses inside new code only
+  fresh SCIP run in the `edit` suite, `bin/swan-check edit`), but uses inside new code only
   appear after a refresh. Renames cover what the compiler resolved, not
   strings or comments.
 - A files table already tracks freshness; occurrence paths are still stored

@@ -1,0 +1,5 @@
+// swan-check: Swan's test runner. Swan's process helpers (swan_run) and
+// goose-lsp's pipes (proc_open and friends, for driving `swan serve`),
+// through native/check_proc.c, which adds check_proc_close (an exit code).
+c_sources = ["../../native/swan_sys.c", "native/check_proc.c"];
+output = "swan-check";
