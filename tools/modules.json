@@ -36,7 +36,7 @@
   "kotlin": {
     "match": [".kt", ".kts"],
     "lsp": [
-      {"cmd": ["{tools}/kotlin-lsp/kotlin-server-263.7084.0/bin/intellij-server", "--stdio", "--system-path", "{out}/kotlin-lsp"],
+      {"cmd": ["{tools}/kotlin-lsp/kotlin-server-271.2085.0/bin/intellij-server", "--stdio", "--system-path", "{out}/kotlin-lsp"],
        "language_id": "kotlin", "settle": "publish", "init": "{}", "runs_repo_code": true,
        "env": ["GRADLE_USER_HOME={tools}/gradle-home"]}
     ]
