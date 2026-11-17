@@ -162,7 +162,8 @@ fn shift_span(db: i64, file: const u8[:], sl: i64, sc: i64, el: i64, ec: i64, ne
         step_done(st);
         sqlite::finalize(st);
     }
-    exec_or_die(db, "BEGIN;");
+    // (Savepoints, not BEGIN: they also work inside edit_batch's own.)
+    exec_or_die(db, "SAVEPOINT swan_shift;");
     if el > sl || ec > sc {
         run(str("DELETE FROM occurrences WHERE file = ?1 AND ", inside("start_line", "start_col")), sl, sc, el, ec);
         run(str("""
@@ -175,7 +176,7 @@ fn shift_span(db: i64, file: const u8[:], sl: i64, sc: i64, el: i64, ec: i64, ne
         el, ec, nel, nec);
     run(str("UPDATE symbols SET ", moved("def_line", "def_col"), ", ", moved("body_start", "body_start_col"), ", ",
             moved("body_end", "body_end_col"), " WHERE def_file = ?1"), el, ec, nel, nec);
-    exec_or_die(db, "COMMIT;");
+    exec_or_die(db, "RELEASE swan_shift;");
 }
 
 // Where text inserted at (line, col) ends.
@@ -515,7 +516,7 @@ fn rename_symbol(db: i64, pattern: const u8[:], rel: const u8[:], new_name: cons
             sqlite::finalize(st);
         }
         if write_file_atomic(path, updated) {
-            exec_or_die(db, "BEGIN;");
+            exec_or_die(db, "SAVEPOINT swan_rename;");
             for s in done {
                 shift("UPDATE occurrences SET start_col = start_col + ?4, end_col = end_col + ?4 WHERE file = ?1 AND start_line = ?2 AND start_col > ?3", s.line, s.col);
                 shift("UPDATE occurrences SET end_col = end_col + ?4 WHERE file = ?1 AND start_line = ?2 AND start_col = ?3", s.line, s.col);
@@ -523,7 +524,7 @@ fn rename_symbol(db: i64, pattern: const u8[:], rel: const u8[:], new_name: cons
                 shift("UPDATE symbols SET body_start_col = body_start_col + ?4 WHERE def_file = ?1 AND body_start = ?2 AND body_start_col > ?3", s.line, s.col);
                 shift("UPDATE symbols SET body_end_col = body_end_col + ?4 WHERE def_file = ?1 AND body_end = ?2 AND body_end_col > ?3", s.line, s.col);
             }
-            exec_or_die(db, "COMMIT;");
+            exec_or_die(db, "RELEASE swan_rename;");
             mark_edited(db, cur, path);
             written++;
         }

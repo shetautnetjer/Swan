@@ -148,6 +148,13 @@ never "clean". If `truncated` is true, raise `max_results` or narrow
   `search_pattern` with `language` and `relative_path`, and cross-check with
   `rg -n 'shell:\s*true|rejectUnauthorized:\s*false|NODE_TLS_REJECT_UNAUTHORIZED|verify\s*=\s*False'`.
   A hit is a lead to read, not a finding.
+- A change that reaches more than one place goes through `edit_batch`: a
+  list of edits (`rename_symbol`, `replace_symbol_body`,
+  `insert_after_symbol`, `insert_before_symbol`, `rewrite_pattern`) planned
+  together without `apply`, then applied in order, all or nothing. If one
+  edit fails, the map and every file already written go back. Renaming a
+  method renames its family (what it implements or overrides, and their
+  other implementations); the plan lists them as `also_renamed`.
 - `rename_symbol` and `rewrite_pattern` plan first (omit `apply`). Read the
   plan, then apply edits that are part of your task. A review-only request
   does not ask for edits. A stale-file refusal means refresh and replan.
