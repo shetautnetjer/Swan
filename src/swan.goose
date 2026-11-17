@@ -20,6 +20,7 @@ import .modules;
 import .live;
 import .structural;
 import .change;
+import .syntax;
 import treesitter from "shetautnetjer/goose-treesitter@59313e9da0b9f1cce8df83cabe53ed73fa92345c";   // tree-sitter and its grammars, built once and cached
 import sqlite from "shetautnetjer/goose-sqlite@c759de735ae936dcbc197bb9aae40e13565ef21c";   // open_existing never creates a missing map
 
@@ -137,6 +138,8 @@ fn main() {
         let ok = map_main(a[2], a[3], report, a.len == 5);
         print(report);
         if !ok { exit(1); }
+    } else if a[1] == "syntax-index" && a.len == 4 {
+        if !syntax_index_main(a[2], a[3]) { exit(1); }
     } else if a[1] == "stamp-bench" && a.len == 4 {
         if !stamp_bench_main(a[2], a[3]) { exit(1); }
     } else if a[1] == "stamp-worker" && a.len == 6 {

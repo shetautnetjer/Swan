@@ -27,7 +27,7 @@ fn abs_path(p: const u8[:]) -> u8[>..] {
 struct Langs {
     ts: bool, js: bool, py: bool, rs: bool, java: bool, c: bool, cuda: bool,
     kt: bool,                   // Kotlin: tree-sitter only for now, no SCIP indexer runs
-    syn: bool,                  // Go, shell, Make, Ruby or Lua: tools/syntax-index.ts maps them
+    syn: bool,                  // Go, shell, Make, Ruby or Lua: `swan syntax-index` maps them
     other: u8[..256],           // languages with no indexer here, only search and live errors: "lua glsl ..."
     tsconfig: bool, cargo: bool, maven: bool, gradle: bool,
     venv: u8[..2048],           // a virtualenv inside the repo, if any
@@ -70,7 +70,7 @@ fn each_file<F>(repo: const u8[:]) {
     }
 }
 
-// Files tools/syntax-index.ts covers: Go, shell, Make, Ruby and Lua by name,
+// Files `swan syntax-index` (src/syntax.goose) covers: Go, shell, Make, Ruby and Lua by name,
 // and scripts with no extension in a bin/ or scripts/ folder (it reads their
 // #! line itself).
 fn syntax_file(full: const u8[:], name: const u8[:]) -> bool {
@@ -2288,11 +2288,13 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
         // bodies, references by name) for the languages above.
         let target = str(out, "/index-syntax.scip");
         var a: u8[>..] = [];
-        arg(a, "bun");
-        arg(a, str(home, "/tools/syntax-index.ts"));
+        // `swan syntax-index` (src/syntax.goose), this binary itself: no Bun.
+        let swan_bin = str(home, "/bin/swan");
+        arg(a, swan_bin);
+        arg(a, "syntax-index");
         arg(a, repo);
         arg(a, target);
-        var fp: u64 = hash(str(home, "/tools/syntax-index.ts\t", swan_file_size(str(home, "/tools/syntax-index.ts"))));
+        var fp: u64 = hash(str("syntax-goose-1\t", swan_bin, "\t", swan_file_size(swan_bin)));
         each_file(repo) { full, name =>
             if syntax_file(full, name) { fp = hash_combine(fp, hash_combine(hash(full), stamp(full))); }
         };
