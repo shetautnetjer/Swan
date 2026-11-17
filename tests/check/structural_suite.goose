@@ -258,7 +258,20 @@ fn st_rewrites() {
     var tweaked: u8[>..] = [];
     let at = find(before, "pub side: u32");
     tweaked.append(before[..at]); tweaked.append("pub side:  u32"); tweaked.append(before[at + 13..]);
+    // First the hard case: the outside write keeps the mtime Swan's own edit
+    // left, as a write in the same clock tick does (4 ms on Linux before
+    // 6.13; a 6.1 microVM failed the check below that way). The text differs,
+    // so it is still an outside change.
+    let ref = "data/struct/rw/lib.mtime";
+    sh(argv(["cp", "-p", lib, ref]), "", o);
     write_file(lib, tweaked);
+    sh(argv(["touch", "-r", ref, lib]), "", o);
+    var t0: u8[>..] = [];
+    let rok0 = mcp_call("rewrite_pattern", """{"pattern":"3 * self.$F * self.$F","rewrite":"3 * self.$F.pow(2)","apply":true}""", t0);
+    var d5: json::Node[>..] = []; var x5: u8[>..] = [];
+    let refused0, e5 = json::parse(t0, d5, x5);
+    check("an outside change that keeps the mtime Swan left is refused too", rok0 == 0 && find(jstr(refused0, "refused"), "refresh first") >= 0, t0);
+    sh(argv(["touch", lib]), "", o);
     let rok = mcp_call("rewrite_pattern", """{"pattern":"3 * self.$F * self.$F","rewrite":"3 * self.$F.pow(2)","apply":true}""", t);
     var d4: json::Node[>..] = []; var x4: u8[>..] = [];
     let refused, e4 = json::parse(t, d4, x4);
