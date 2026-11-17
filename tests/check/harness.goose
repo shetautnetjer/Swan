@@ -364,3 +364,24 @@ fn jints(arr: json::Node?) -> u8[>..] {
 }
 // Whether a path exists (file or folder).
 fn exists(path: const u8[:]) -> bool { file_exists(path) || is_dir(path) }
+
+// One tools/call through a fresh `swan serve <db>`: the answer's text in
+// out; 1 if the tool succeeded, 0 if it said it failed, -1 if no answer.
+fn serve_once(db: const u8[:], name: const u8[:], arguments: const u8[:], out: u8[>..]&) -> i64 {
+    out.clear();
+    guard mcp_open(argv(["bin/swan", "serve", db]), "") else { return -1; }
+    let r = mcp_call(name, arguments, out);
+    mcp_close();
+    return r;
+}
+// Every reference of every answer element, "path:line", in answer order.
+fn ref_sites(arr: json::Node?) -> u8[>..] {
+    var l: u8[>..] = [];
+    if arr {
+        json::each(arr) { s =>
+            let refs = json::member(s, "references");
+            if refs { json::each(refs) { r => format(l, jstr(r, "relative_path"), ":", jint(r, "line"), "\n"); }; }
+        };
+    }
+    return l;
+}
