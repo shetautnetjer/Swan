@@ -356,12 +356,44 @@ fn rename_symbol(db: i64, pattern: const u8[:], rel: const u8[:], new_name: cons
     }
     sqlite::finalize(cf);
 
+    // A method is renamed with its family: what it implements or overrides,
+    // and everything that implements or overrides those (same name, joined
+    // by the compiler's implementation links, in the repo). Renaming only
+    // Shape.area would leave Circle.area and Square.area behind, and they
+    // would no longer implement the interface: JetBrains renames all of
+    // them, and so does this. A class is not a family: its implementers
+    // have their own names.
+    exec_or_die(db, "DROP TABLE IF EXISTS temp.rename_family; CREATE TEMP TABLE rename_family (id INTEGER PRIMARY KEY);");
+    let fam = prepare_or_die(db, """
+        WITH RECURSIVE f(id) AS (
+            SELECT ?1
+            UNION
+            SELECT CASE WHEN r.symbol_id = f.id THEN r.related_id ELSE r.symbol_id END
+            FROM f JOIN relationships r ON (r.symbol_id = f.id OR r.related_id = f.id) AND r.is_impl = 1
+            JOIN symbols o ON o.id = CASE WHEN r.symbol_id = f.id THEN r.related_id ELSE r.symbol_id END
+            WHERE o.in_repo = 1 AND o.name = ?2 AND o.kind IN ('method', 'function', 'getter', 'setter'))
+        INSERT INTO temp.rename_family SELECT id FROM f
+        """);
+    sqlite::bind_int(fam, 1, t.id);
+    sqlite::bind_text(fam, 2, old_name);
+    step_done(fam);
+    sqlite::finalize(fam);
+    var also: u8[>..] = [];
+    let aq = prepare_or_die(db, "SELECT s.name_path FROM temp.rename_family f JOIN symbols s ON s.id = f.id WHERE f.id != ?1 ORDER BY s.name_path");
+    sqlite::bind_int(aq, 1, t.id);
+    while step_checked(aq, e) == 1 {
+        var np: u8[>..] = [];
+        sqlite::col_text(aq, 0, np);
+        if also.len > 0 { also.push(','); }
+        json::format_string(also, np);
+    }
+    sqlite::finalize(aq);
+
     // Every site, file by file. Each file is read once and checked fresh.
     let sites_q = prepare_or_die(db, """
         SELECT file, start_line, start_col, end_line, end_col, is_def FROM occurrences
-        WHERE symbol_id = ?1 ORDER BY file, start_line, start_col
+        WHERE symbol_id IN (SELECT id FROM temp.rename_family) ORDER BY file, start_line, start_col
         """);
-    sqlite::bind_int(sites_q, 1, t.id);
     var plan: u8[>..] = [];
     var skipped: u8[>..] = [];
     var stale_files: u8[>..] = [];
@@ -424,6 +456,7 @@ fn rename_symbol(db: i64, pattern: const u8[:], rel: const u8[:], new_name: cons
     json::format_string(out, old_path);
     out.append(",\"to\":");
     json::format_string(out, new_path);
+    if also.len > 0 { format(out, ",\"also_renamed\":[", also, "]"); }
     format(out, ",\"files\":", nfiles, ",\"sites\":[", plan, "],\"skipped\":[", skipped,
            "],\"conflicts\":[", conflicts, "],\"stale_files\":[", stale_files, "]");
     out.append(",\"not_covered\":\"strings, comments, docs and uses by name at run time\"");
@@ -442,9 +475,8 @@ fn rename_symbol(db: i64, pattern: const u8[:], rel: const u8[:], new_name: cons
     // Apply, file by file, rewriting only the checked sites.
     let again = prepare_or_die(db, """
         SELECT file, start_line, start_col, end_line, end_col FROM occurrences
-        WHERE symbol_id = ?1 ORDER BY file, start_line DESC, start_col DESC
+        WHERE symbol_id IN (SELECT id FROM temp.rename_family) ORDER BY file, start_line DESC, start_col DESC
         """);
-    sqlite::bind_int(again, 1, t.id);
     let d = new_name.len - old_name.len;   // identifiers are ASCII here
     var sites: Site[>..] = [];
     cur.clear();
@@ -509,19 +541,39 @@ fn rename_symbol(db: i64, pattern: const u8[:], rel: const u8[:], new_name: cons
     flush();
     sqlite::finalize(again);
 
-    // The map's names follow: the symbol, and the paths of what it holds.
+    // The map's names follow: each renamed symbol, and the paths of what it holds.
+    var members: u8[>..] = [];      // "name_path\tdef_file\n" for each one
+    let mq = prepare_or_die(db, "SELECT s.name_path, s.def_file FROM temp.rename_family f JOIN symbols s ON s.id = f.id");
+    while step_checked(mq, e) == 1 {
+        var np: u8[>..] = [];
+        var df: u8[>..] = [];
+        sqlite::col_text(mq, 0, np);
+        sqlite::col_text(mq, 1, df);
+        format(members, np, "\t", df, "\n");
+    }
+    sqlite::finalize(mq);
     let rn = prepare_or_die(db, """
         UPDATE symbols SET name_path = ?3 || substr(name_path, length(?2) + 1)
         WHERE def_file = ?4 AND (name_path = ?2 OR name_path LIKE ?2 || '/%')
         """);
-    sqlite::bind_text(rn, 4, rel);
-    sqlite::bind_text(rn, 2, old_path);
-    sqlite::bind_text(rn, 3, new_path);
-    step_done(rn);
+    each_split(members, '\n') { m =>
+        let tab = find(m, "\t");
+        if tab > 0 {
+            let was = m[..tab];
+            var now: u8[>..] = [];
+            let c2 = rfind(was, "/");
+            if c2 >= 0 { now.append(was[..c2 + 1]); }
+            now.append(new_name);
+            sqlite::reset(rn);
+            sqlite::bind_text(rn, 2, was);
+            sqlite::bind_text(rn, 3, now);
+            sqlite::bind_text(rn, 4, m[tab + 1..]);
+            step_done(rn);
+        }
+    };
     sqlite::finalize(rn);
-    let nm = prepare_or_die(db, "UPDATE symbols SET name = ?2 WHERE id = ?1");
-    sqlite::bind_int(nm, 1, t.id);
-    sqlite::bind_text(nm, 2, new_name);
+    let nm = prepare_or_die(db, "UPDATE symbols SET name = ?1 WHERE id IN (SELECT id FROM temp.rename_family)");
+    sqlite::bind_text(nm, 1, new_name);
     step_done(nm);
     sqlite::finalize(nm);
     format(out, ",\"applied\":true,\"files_written\":", written, "}");
