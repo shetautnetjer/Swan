@@ -137,6 +137,11 @@ fn main() {
         let ok = map_main(a[2], a[3], report, a.len == 5);
         print(report);
         if !ok { exit(1); }
+    } else if a[1] == "plan-python" && (a.len == 3 || a.len == 4) {
+        // The Python pieces a map would index in parallel, one per line ("" = the whole repo).
+        var k: i64 = 6;
+        if a.len == 4 { let v, ok = parse_int(a[3]); guard ok && v > 0 else { usage(); } k = v; }
+        write_stdout(plan_python(abs_path(a[2]), k));
     } else if a[1] == "stamp-bench" && a.len == 4 {
         if !stamp_bench_main(a[2], a[3]) { exit(1); }
     } else if a[1] == "stamp-worker" && a.len == 6 {
