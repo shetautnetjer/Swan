@@ -176,3 +176,42 @@ rows, which is scip-clang's own duplicate-definition noise between runs.
   unit) is what ships and takes about 8 s to rebuild after an edit.
   `SWAN_FLATTEN_PROFILE=quick scripts/build.sh` rebuilds in about 1.6 s for
   trying changes. blaze was tried and was slower than cargo for this crate.
+
+## One slow file must not hold a map (2026-11-17)
+
+Mapping pydantic/monty took 5 min 3 s, and 301 s of it was one scip-python
+piece: a flat folder of 785 small test scripts. Timing the folder by
+filename prefix showed the files were not the problem, one file was:
+`math__module.py` (39 KB, 123 `threw = False / try / except: threw = True /
+assert threw` blocks) took 282 s alone, where current pyright checks it in
+0.5 s. Time grew with about the fourth power of the number of blocks (25:
+1.3 s, 52: 8 s, 81: 44 s, 123: 282 s).
+
+A CPU profile, read back through the bundle's source map, put it in
+pyright's `isFlowNodeReachable`: to narrow `threw` at each `assert`, the
+pyright bundled in scip-python 0.6.8 (the newest release) asks whether each
+of the variable's 246 assignments can reach it, and walks the flow graph
+from scratch for every question, at every evaluation.
+
+Swan now gives its copy of the indexer a memo for that walk
+(`src/pypatch.goose` says exactly when an answer may be remembered and
+reused, and why those conditions keep every answer the same). `swan map`
+applies it before running scip-python; a scip-python it does not fit is
+left alone, with a line in the report.
+
+| | before | after |
+|---|---|---|
+| `math__module.py` alone | 282 s | 8.7 s |
+| monty, first map (1,398 files) | 5 min 3 s | 24.4 s |
+| Graphify, whole-repo index | 36.9 s | 30.9 s |
+
+The patched and unpatched indexers write byte-identical SCIP on Graphify
+(29 MB), monty's slow slice, Understand-Anything, the-full-monty and the
+fixtures, and monty's two maps hold the same 398,962 occurrence rows. The
+`pypatch` suite (`bin/swan-check pypatch`) keeps comparing a reverted copy
+with the patched one.
+
+How it was found is the method to reuse: time pieces by prefix
+(`--target-only` keeps every file whose path starts with the text it is
+given), bisect to the file, cut the file to see how time grows, profile the
+small case.

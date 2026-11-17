@@ -15,6 +15,6 @@ tests/refresh_check.sh
 tests/cosmetic_check.sh
 tests/layer_check.sh
 tests/pieces_check.sh
-bin/swan-check rust split agnostic diag kotlin game live trust edit lang structural || check_failed=1
+bin/swan-check rust split agnostic diag kotlin game live trust edit lang structural pypatch || check_failed=1
 # The Goose suites ran to the end; fail now if any of their checks did.
 [ "$check_failed" -eq 0 ]
