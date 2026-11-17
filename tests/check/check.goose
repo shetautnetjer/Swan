@@ -67,11 +67,18 @@ fn main() {
         print(str("== ", n));
         h_suite_failures = 0;
         let t0 = clock();
-        guard run_suite(n) else { print(str("unknown suite: ", n)); bad_suites++; return; };
-        let ms = ((clock() - t0) * 1000.0) as i64;
-        if h_suite_failures > 0 { bad_suites++; }
-        format(summary, if h_suite_failures == 0 { "  pass  " } else { "  FAIL  " }, n, " (", ms / 1000, " s",
-               if h_suite_failures > 0 { str(", ", h_suite_failures, " failed") } else { str("") }, ")\n");
+        // (No `return` in here: inside this block it would leave main, and
+        // the run would end with status 0 at the first unknown name.)
+        if run_suite(n) {
+            let ms = ((clock() - t0) * 1000.0) as i64;
+            if h_suite_failures > 0 { bad_suites++; }
+            format(summary, if h_suite_failures == 0 { "  pass  " } else { "  FAIL  " }, n, " (", ms / 1000, " s",
+                   if h_suite_failures > 0 { str(", ", h_suite_failures, " failed") } else { str("") }, ")\n");
+        } else {
+            print(str("unknown suite: ", n));
+            bad_suites++;
+            format(summary, "  FAIL  ", n, " (unknown suite)\n");
+        }
     };
     print(str("\n", summary, h_passes, " checks passed, ", h_failures, " failed"));
     if h_failures > 0 || bad_suites > 0 { exit(1); }

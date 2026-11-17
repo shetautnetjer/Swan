@@ -51,24 +51,28 @@ fn pypatch_suite() {
     tmp.append(trim(tmpo));
     var o: u8[>..] = [];
 
-    // Swan's copy gets the memo (a map would do this; here by hand, so the
-    // suite does not depend on an earlier map).
+    // Two copies, one with the memo and one without. The installed
+    // indexer is only read: patching it here would undo a deliberate
+    // SWAN_SCIP_PYTHON_PATCH=0 and could cross a map that is running.
+    let patched = str(tmp, "/patched");
+    guard sh(argv(["cp", "-r", pkg, patched]), "", o) else { rm_rf(tmp); return; }
+    let bundle2 = str(patched, "/dist/pyright-internal.js");
     var r: u8[>..] = [];
-    run(argv(["bin/swan", "scip-python-patch", bundle]), "", r, e);
+    run(argv(["bin/swan", "scip-python-patch", bundle2]), "", r, e);
     var text: u8[>..] = [];
-    read_file(bundle, text);
+    read_file(bundle2, text);
     check("Swan's scip-python has the reachability memo", find(text, "__swanReach") >= 0, r);
 
     // A reverted copy, to compare with.
     let plain = str(tmp, "/plain");
-    guard sh(argv(["cp", "-r", pkg, plain]), "", o) else { rm_rf(tmp); return; }
+    guard sh(argv(["cp", "-r", patched, plain]), "", o) else { rm_rf(tmp); return; }
     var rv: u8[>..] = [];
     run(argv(["bin/swan", "scip-python-patch", str(plain, "/dist/pyright-internal.js"), "--revert"]), "", rv, e);
     var ptext: u8[>..] = [];
     read_file(str(plain, "/dist/pyright-internal.js"), ptext);
     check("the patch reverts cleanly on a copy", trim(rv) == "reverted" && find(ptext, "__swanReach") < 0, rv);
     var again: u8[>..] = [];
-    run(argv(["bin/swan", "scip-python-patch", bundle]), "", again, e);
+    run(argv(["bin/swan", "scip-python-patch", bundle2]), "", again, e);
     check("applying it twice changes nothing", trim(again) == "already", again);
     write_file(str(tmp, "/other.js"), "function v(){}\n");
     var bad_o: u8[>..] = [];
@@ -79,7 +83,7 @@ fn pypatch_suite() {
 
     // Same output, patched and unpatched: a fixture, and the worst-case shape.
     let fx = str(here, "/fixtures/tiny-py");
-    let a1 = pp_index(pkg, fx, str(tmp, "/fx-patched.scip"));
+    let a1 = pp_index(patched, fx, str(tmp, "/fx-patched.scip"));
     let b1 = pp_index(plain, fx, str(tmp, "/fx-plain.scip"));
     var fa: u8[>..] = [];
     var fb: u8[>..] = [];
@@ -91,7 +95,7 @@ fn pypatch_suite() {
     let small = str(tmp, "/small");
     mkdir_p(small);
     write_file(str(small, "/blocks.py"), pp_script(30));
-    let a2 = pp_index(pkg, small, str(tmp, "/small-patched.scip"));
+    let a2 = pp_index(patched, small, str(tmp, "/small-patched.scip"));
     let b2 = pp_index(plain, small, str(tmp, "/small-plain.scip"));
     var sa: u8[>..] = [];
     var sb: u8[>..] = [];
@@ -104,7 +108,7 @@ fn pypatch_suite() {
     let big = str(tmp, "/big");
     mkdir_p(big);
     write_file(str(big, "/blocks.py"), pp_script(90));
-    let a3 = pp_index(pkg, big, str(tmp, "/big-patched.scip"));
+    let a3 = pp_index(patched, big, str(tmp, "/big-patched.scip"));
     check(str("90 try/except blocks index in seconds, not minutes (", a3, " ms)"), a3 >= 0 && a3 < 30000, str(a3, " ms"));
     rm_rf(tmp);
 }

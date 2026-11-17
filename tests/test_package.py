@@ -46,6 +46,10 @@ class PackageTests(unittest.TestCase):
         self.binary = self.base / "swan"
         self.binary.write_bytes(elf_header())
         self.binary.chmod(0o755)
+        # The native flattener: every package ships one (Swan has no other).
+        self.flatten = self.base / "swan-flatten"
+        self.flatten.write_bytes(elf_header() + b"flatten")
+        self.flatten.chmod(0o755)
         self.receipt = self.base / "receipt.json"
         self.write_receipt()
         self.licenses = self.base / "licenses"
@@ -61,20 +65,22 @@ class PackageTests(unittest.TestCase):
         """Bind the fixture receipt to its current revision and binary, with optional corruptions."""
         self.receipt.write_text(json.dumps({"source_revision": self.revision,
                                            "binary_sha256": package.sha256(self.binary.read_bytes()),
+                                           "flatten_sha256": package.sha256(self.flatten.read_bytes()),
                                            **values}))
 
     def build(self, **overrides):
         """Export the isolated fixture using test defaults and explicitly requested overrides."""
         values = {"root": self.root, "binary": self.binary, "output": self.output,
                   "revision": self.revision, "receipt_path": self.receipt,
-                  "licenses": self.licenses, "required_licenses": ["Goose-LICENSE"]}
+                  "licenses": self.licenses, "required_licenses": ["Goose-LICENSE"],
+                  "flatten": self.flatten}
         values.update(overrides)
         return package.build_package(**values)
 
     def test_inventory_checksums_modes_and_candidate_provenance(self):
         """Verify that inventory checksums modes and candidate provenance."""
         manifest = self.build()
-        expected = {*package.RUNTIME_FILES, "scripts/verify-live-trust.py", "bin/swan", "bin/eggshell",
+        expected = {*package.RUNTIME_FILES, "scripts/verify-live-trust.py", "bin/swan", "bin/eggshell", "bin/swan-flatten",
                     "BUILD-RECEIPT.json", "licenses/Goose-LICENSE",
                     "skills/swan-code-check/SKILL.md", "skills/swan-code-check/fixture/sec.py"}
         with tarfile.open(self.output / package.ARCHIVE) as archive:
@@ -126,8 +132,8 @@ class PackageTests(unittest.TestCase):
             self.build(flatten=flatten)
         self.assertFalse(self.output.exists())
         self.write_receipt(flatten_sha256=package.sha256(flatten.read_bytes()))
-        with self.assertRaisesRegex(package.PackageError, "none was supplied"):
-            self.build()
+        with self.assertRaisesRegex(package.PackageError, "bin/swan-flatten is required"):
+            self.build(flatten=None)
         self.assertFalse(self.output.exists())
         flatten.write_text("not an executable\n")
         self.write_receipt(flatten_sha256=package.sha256(flatten.read_bytes()))
@@ -135,12 +141,12 @@ class PackageTests(unittest.TestCase):
             self.build(flatten=flatten)
         self.assertFalse(self.output.exists())
 
-    def test_package_without_flattener_records_none(self):
-        """Verify that a build without cargo still packages, falling back to the TypeScript flattener."""
-        manifest = self.build()
-        self.assertIsNone(manifest["flatten_sha256"])
-        with tarfile.open(self.output / package.ARCHIVE) as archive:
-            self.assertNotIn("bin/swan-flatten", archive.getnames())
+    def test_package_without_flattener_is_refused(self):
+        """Verify that no package is written without the native flattener, whatever the receipt says."""
+        self.write_receipt(flatten_sha256=None)
+        with self.assertRaisesRegex(package.PackageError, "bin/swan-flatten is required"):
+            self.build(flatten=None)
+        self.assertFalse(self.output.exists())
 
     def test_private_and_generated_inputs_never_enter_archive(self):
         """Verify that private and generated inputs never enter archive."""

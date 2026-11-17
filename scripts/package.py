@@ -178,18 +178,14 @@ def build_package(root, binary, output, revision, receipt_path, licenses, requir
     # The SCIP flattener (native/swan-flatten, Rust), installed beside bin/swan
     # as <swan_home>/bin/swan-flatten. Required: Swan has no other flattener,
     # and the receipt must name this exact binary.
-    flatten_sha256 = None
     if flatten is None:
         raise PackageError("bin/swan-flatten is required: build it with scripts/build.sh (needs cargo)")
-    if flatten is not None:
-        flatten_data, flatten_mode = regular_file(flatten)
-        validate_elf(flatten_data, flatten_mode)
-        flatten_sha256 = sha256(flatten_data)
-        if receipt.get("flatten_sha256") != flatten_sha256:
-            raise PackageError("build receipt does not match the swan-flatten binary")
-        payload["bin/swan-flatten"] = (flatten_data, 0o755)
-    elif receipt.get("flatten_sha256"):
-        raise PackageError("build receipt names a swan-flatten binary but none was supplied")
+    flatten_data, flatten_mode = regular_file(flatten)
+    validate_elf(flatten_data, flatten_mode)
+    flatten_sha256 = sha256(flatten_data)
+    if receipt.get("flatten_sha256") != flatten_sha256:
+        raise PackageError("build receipt does not match the swan-flatten binary")
+    payload["bin/swan-flatten"] = (flatten_data, 0o755)
     skill_files = sorted(name for name in tracked if name.startswith("skills/swan-code-check/"))
     if "skills/swan-code-check/SKILL.md" not in skill_files:
         raise PackageError("tracked canonical skill is missing")
@@ -260,7 +256,7 @@ def main():
     parser.add_argument("--licenses", type=Path, required=True, help="Curated compiled third-party license directory")
     parser.add_argument("--require-license", action="append", default=[], metavar="RELATIVE_PATH",
                         help="Refuse export if this expected license is missing (repeatable)")
-    parser.add_argument("--flatten", type=Path,
+    parser.add_argument("--flatten", type=Path, required=True,
                         help="Built native flattener (bin/swan-flatten); its checksum must be in the build receipt")
     options = parser.parse_args()
     try:

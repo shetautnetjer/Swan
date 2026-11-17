@@ -33,7 +33,7 @@
 // runs scip-python: each of the six sites must occur exactly once in
 // dist/pyright-internal.js, or nothing is changed and the map says so (a
 // newer scip-python will simply not match). The file is replaced whole by
-// rename; a marker beside it records the size it was left at, so later
+// rename (from a temporary file no other process shares); a marker beside it records the size it was left at, so later
 // maps do not read it again. SWAN_SCIP_PYTHON_PATCH=0 leaves the indexer
 // alone. `swan scip-python-patch <file> [--revert]` applies or undoes it by
 // hand (the tests use it).
@@ -116,8 +116,11 @@ fn pypatch_file(path: const u8[:], revert: bool) -> const u8[:] {
     if has != revert { return "already"; }
     var out: u8[>..] = [];
     guard pypatch_apply(text, revert, out) else { return "no match"; }
-    let tmp = str(path, ".swan-tmp");
-    guard write_file(tmp, out) && rename_file(tmp, path) else { delete_file(tmp); return "no match"; }
+    // write_file_atomic: a temporary file of its own name, synced, then
+    // renamed. Two maps starting at once used to share one temporary name:
+    // a reader could see a half-written bundle, and the loser reported
+    // "does not fit" for a file that was being patched correctly.
+    guard write_file_atomic(path, out) else { return "no match"; }
     return if revert { "reverted" } else { "patched" };
 }
 
