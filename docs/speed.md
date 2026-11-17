@@ -215,3 +215,42 @@ How it was found is the method to reuse: time pieces by prefix
 (`--target-only` keeps every file whose path starts with the text it is
 given), bisect to the file, cut the file to see how time grows, profile the
 small case.
+
+## A folder of standalone scripts, on every core (2026-11-17)
+
+With the slow file fixed, monty's 785 test scripts were still one
+scip-python run on one core (22 s), and an edit to any one of them
+reindexed them all.
+
+`--target-only` is not "one folder": scip-python keeps every file whose
+path *starts with* the text it is given. So a flat folder can be split by
+filename prefix, and `plan_python` now does that (pieces written
+`dir/prefix*`), at most 64 files to a piece, when the folder's files stand
+alone: no more than one in ten imports a name that is a folder or module
+of the repo, or imports relatively. That condition matters. Graphify's 571
+tests each import the `graphify` package, and every scip-python run pays
+about 16 s to load it, so splitting them would cost more than it saves;
+they stay one piece, as before.
+
+The map's indexers also start in a better order now: one that runs once
+for its whole language (rust-analyzer, scip-java, scip-clang) starts
+before the many small pieces, where before it queued behind them and
+began only when they were nearly done.
+
+| monty | before | after |
+|---|---|---|
+| first map | 24.4 s | 20.2 s (16.3 s with `SWAN_JOBS=16`) |
+| refresh after editing one test script | about 22 s | 2.0 s |
+| refresh, nothing changed | 0.3 s | 0.3 s |
+
+The split costs CPU: 44 pieces take 92 s of indexer time in total, where
+the unsplit runs took about 43 s. It buys the 2-second edit.
+
+Same answers, with one caveat that is scip-python's own. Split and
+one-run maps of 200 generated scripts hold the same 3,200 rows (the
+`split` suite checks it). On monty, 26 of 398,962 rows differ, all uses
+of one stdlib name, `decimal.DivisionByZero`: how scip-python names it
+depends on which files share a run. One run calls all 16 uses the
+repo's (wrong package); split, 12 are stdlib (right) and 4 get another
+wrong name. Neither is exact, and folder pieces had the same property
+already.
