@@ -50,7 +50,11 @@ the server configured in `tools/modules.json`: pyright for Python,
 typescript-language-server for TS/JS, rust-analyzer for Rust, or JetBrains'
 `intellij-server` for Kotlin. The client syncs the requested file and waits
 for the server's analysis; changing languages swaps servers. Kotlin may
-need a Gradle import first. This is not the full JetBrains inspection or
+need a Gradle import first: the first question waits for it (a few seconds
+on a small project), later ones take about 0.1 s, because the Kotlin server
+is asked for the file's diagnostics (`"settle": "pull"`) rather than waited
+on. A Kotlin folder with no Gradle or Maven build gets no type errors from
+it. The same server returns nothing for Java files. This is not the full JetBrains inspection or
 refactoring engine. Java and CUDA have batch paths, not configured live
 servers in this version.
 
