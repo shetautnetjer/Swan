@@ -15,13 +15,17 @@ import .harness;
 import .rust_suite;
 import .split_suite;
 import .mcp_suite;
+import .agnostic_suite;
+import .diag_suite;
 
-let SUITES = ["mcp", "rust", "split"];
+let SUITES = ["mcp", "rust", "split", "agnostic", "diag"];
 
 fn run_suite(name: const u8[:]) -> bool {
     if name == "rust" { rust_suite(); return true; }
     if name == "split" { split_suite(); return true; }
     if name == "mcp" { mcp_suite(); return true; }
+    if name == "agnostic" { agnostic_suite(); return true; }
+    if name == "diag" { diag_suite(); return true; }
     return false;
 }
 

@@ -16,11 +16,9 @@ tests/refresh_check.sh
 tests/cosmetic_check.sh
 tests/layer_check.sh
 tests/pieces_check.sh
-bin/swan-check rust split || check_failed=1
+bin/swan-check rust split agnostic diag || check_failed=1
 bun tests/edit_check.ts
-bun tests/diag_check.ts
 bun tests/lang_check.ts
-bun tests/agnostic_check.ts
 bun tests/live_check.ts
 bun tests/structural_check.ts
 bun tests/kotlin_live_check.ts

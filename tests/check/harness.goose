@@ -272,3 +272,47 @@ fn jnum(n: json::Node?, key: const u8[:]) -> i64 {
     return -1;
 }
 fn jhas(n: json::Node?, key: const u8[:]) -> bool { json::member(n, key) != null }
+
+// "path:line" for each element of an array, sorted, comma-joined.
+fn jlines(arr: json::Node?) -> u8[>..] {
+    var l: u8[>..] = [];
+    if arr { json::each(arr) { e => format(l, jstr(e, "relative_path"), ":", jint(e, "line"), "\n"); }; }
+    return sorted_join(l);
+}
+// The call sites of the direct callers (distance 1), as jlines would list them.
+fn direct_sites(answer: json::Node?) -> u8[>..] {
+    var l: u8[>..] = [];
+    let cs = json::member(answer, "callers");
+    if cs {
+        json::each(cs) { c =>
+            if jint(c, "distance") == 1 {
+                let sites = json::member(c, "call_sites");
+                if sites { json::each(sites) { s => format(l, jstr(s, "relative_path"), ":", jint(s, "line"), "\n"); }; }
+            }
+        };
+    }
+    return sorted_join(l);
+}
+// `bin/swan query <db> <args...>`'s output (whatever it printed).
+fn swan_query(db: const u8[:], a: const u8[:], b: const u8[:], c: const u8[:]) -> u8[>..] {
+    var l: u8[>..] = [];
+    a1(l, "bin/swan"); a1(l, "query"); a1(l, db); a1(l, a);
+    if b.len > 0 { a1(l, b); }
+    if c.len > 0 { a1(l, c); }
+    var out: u8[>..] = [];
+    var err: u8[>..] = [];
+    run(l, "", out, err);
+    return out;
+}
+// Replaces the first `old` in a file with `new`; false if it is not there.
+fn replace_in_file(path: const u8[:], old: const u8[:], new: const u8[:]) -> bool {
+    var text: u8[>..] = [];
+    guard read_file(path, text) else { return false; }
+    let at = find(text, old);
+    guard at >= 0 else { return false; }
+    var out: u8[>..] = [];
+    out.append(text[..at]);
+    out.append(new);
+    out.append(text[at + old.len..]);
+    return write_file(path, out);
+}
