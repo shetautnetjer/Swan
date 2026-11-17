@@ -256,7 +256,7 @@ def main():
         require(shutil.which(tool) is not None, f"{tool} is missing; harness does not install dependencies")
     for tool in ("scip-typescript", "scip-python"):
         require((swan_root / "tools/node_modules/.bin" / tool).is_file(), f"candidate's {tool} is missing")
-    require((swan_root / "tools/scip-flatten.ts").is_file(), "candidate's SCIP flattener is missing")
+    require((swan_root / "bin/swan-flatten").is_file(), "candidate's SCIP flattener is missing")
     helper = options.mcp_helper.resolve(strict=True) if options.mcp_helper else None
     options.output_parent.mkdir(parents=True, exist_ok=True)
     folder = Path(tempfile.mkdtemp(prefix="swan-runtime-", dir=options.output_parent)).resolve()
@@ -291,7 +291,7 @@ def main():
     tool_paths["time"] = time_binary
     for tool in ("scip-typescript", "scip-python"):
         tool_paths[tool] = (swan_root / "tools/node_modules/.bin" / tool).resolve()
-    tool_paths["scip-flatten"] = swan_root / "tools/scip-flatten.ts"
+    tool_paths["scip-flatten"] = swan_root / "bin/swan-flatten"
     provenance["tools"] = {name: {"path": str(path), "sha256": sha(path)}
                            for name, path in tool_paths.items()}
     provenance["indexer_package_versions"] = {}

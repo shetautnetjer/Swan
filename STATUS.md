@@ -708,7 +708,7 @@ every chunk. Details and limits in DECISIONS.md.
 ## 2026-11-15: Swan's own steps use every core; the flattener is Rust
 
 - Code stamping runs in one worker process per core; the flattener is
-  `native/swan-flatten` (Rust), with `tools/scip-flatten.ts` as the fallback.
+  `native/swan-flatten` (Rust); since 2026-11-17 it is the only flattener.
   On rea, a 16-core box: full map 88.2 s to 65.5 s, map after a code edit
   9.10 s to 2.7 s. Details and settings in docs/speed.md. (PR 31)
 - `[profile.quick]` for the flattener: `SWAN_FLATTEN_PROFILE=quick` rebuilds

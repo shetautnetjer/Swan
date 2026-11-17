@@ -16,12 +16,16 @@ fi
 "$GOOSE" build src/swan.goose -o bin/swan "$@"
 # the egg-shell sealing runner sits beside the swan binary (swan_home/bin)
 install -m 755 eggshell/eggshell bin/eggshell
-# the native flattener, when cargo is here; without it Swan uses tools/scip-flatten.ts
-if command -v cargo >/dev/null 2>&1 && [ -f native/swan-flatten/Cargo.toml ]; then
+# the SCIP flattener (native/swan-flatten, Rust) is required: Swan has no other.
+# cargo from PATH, else rustup's default home.
+CARGO=$(command -v cargo || true)
+[ -n "$CARGO" ] || { [ -x "$HOME/.cargo/bin/cargo" ] && CARGO="$HOME/.cargo/bin/cargo"; }
+[ -n "$CARGO" ] || { echo "build.sh: cargo (Rust) is required for bin/swan-flatten; install rustup" >&2; exit 1; }
+if true; then
     # SWAN_FLATTEN_PROFILE=quick builds faster for trying changes (no LTO); release is what ships.
     flatten_profile=${SWAN_FLATTEN_PROFILE:-release}
     # Cargo puts the built-in dev and test profiles in target/debug.
     case "$flatten_profile" in dev|test) flatten_dir=debug ;; *) flatten_dir=$flatten_profile ;; esac
-    CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-$PWD/build/swan-flatten} cargo build --profile "$flatten_profile" --quiet --manifest-path native/swan-flatten/Cargo.toml
+    CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-$PWD/build/swan-flatten} "$CARGO" build --profile "$flatten_profile" --quiet --manifest-path native/swan-flatten/Cargo.toml
     install -m 755 "${CARGO_TARGET_DIR:-$PWD/build/swan-flatten}/$flatten_dir/swan-flatten" bin/swan-flatten
 fi

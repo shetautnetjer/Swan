@@ -213,8 +213,8 @@ Current evidence at `583e665`:
   needs a reviewed header correction and a new immutable dependency reference;
   editing a local compiler cache is only an experiment, not a distributable fix.
 - Fresh `npm ci` using the existing tools lockfile succeeded with Node
-  24.21.0. A lab-local Bun 1.3.14 installation also succeeded. Bun is needed
-  for mapping (`tools/scip-flatten.ts`), not just for Swan's tests.
+  24.21.0. A lab-local Bun 1.3.14 installation also succeeded. Bun is no longer
+  needed for mapping: the flattener is Rust and the syntax index Goose.
 - `fetch-tools.sh` unconditionally fetches the heavyweight language tools;
   Kotlin alone is documented as about 1.5 GB unpacked. It does not offer a
   read-only dependency report or a minimal language selection.

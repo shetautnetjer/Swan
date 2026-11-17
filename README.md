@@ -115,9 +115,9 @@ TS repo ──scip-typescript──▶ index.scip ──bin/swan-flatten (Rust)�
 ```
 
 The SCIP flattener is `bin/swan-flatten`, Rust in `native/swan-flatten/`,
-using every core. `scripts/build.sh` builds it when cargo is installed;
-without it, or with `SWAN_NATIVE_FLATTEN=0`, Swan runs the original
-`tools/scip-flatten.ts` under Bun, which writes the same files byte for byte.
+using every core, and Swan's only flattener: `scripts/build.sh` needs cargo
+(Rust) to build it. The syntax-level index is Goose (`swan syntax-index`),
+so a map runs no Bun.
 Native C also supplies SQLite,
 tree-sitter and its grammars, process/file helpers and the LSP bridge.
 The matcher and LSP client logic are Goose; the language servers they use
@@ -521,7 +521,7 @@ src/swan.build       Goose sidecar: native file/process helpers and LSP bridge
 native/swan_sys.c    file/process helpers
 native/swan-flatten/ the Rust SCIP flattener (bin/swan-flatten); release profile ships, quick profile for trying changes
 lsp/                goose-lsp submodule; standalone Goose client + C bridge
-tools/              scip-flatten.ts (fallback flattener), modules.json, external npm tool manifest
+tools/              modules.json, external npm tool manifest (the Node indexers and language servers)
 tests/               MCP smoke test, refresh-vs-fresh check, latency bench
 fixtures/tiny-ts/    a small repo with the tricky cases (re-export, rename, same-name method and function)
 skills/swan-code-check/  the agent skill for using Swan (single source; copies follow it, see its PROVENANCE.md)

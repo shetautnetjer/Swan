@@ -74,6 +74,7 @@ pattern pack, fixture and self-test are unchanged.
 
 On 2026-11-15, after PRs #31 and #32, a short "Refreshing is cheap" note was
 added: stamping on every core, the Rust flattener, how to rule them out
-(`SWAN_STAMP_JOBS=1 SWAN_NATIVE_FLATTEN=0`), and that the quick build
+(`SWAN_STAMP_JOBS=1 SWAN_NATIVE_FLATTEN=0`; on 2026-11-17 the Bun flattener
+was removed, so only `SWAN_STAMP_JOBS=1` remains), and that the quick build
 profile is for changing Swan, not for using it. The pattern pack, fixture
 and self-test are unchanged.
