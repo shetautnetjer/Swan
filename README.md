@@ -225,7 +225,7 @@ git merge-base --is-ancestor 821474fe12e06aaefd96580a4903ab8aba08568e HEAD
 
 <!-- coderabbit-ai-generated-section:v1:4a5b46aca3b744b82d0a1b7cd5e11e1e8c6c563b220004ff37c8fb0f836806ac -->
 
-[The regression test](tests/trust_check.ts) checks that the untrusted live
+[The regression test](tests/check/trust_suite.goose) checks that the untrusted live
 reply contains a `result` field without executing a planted interpreter,
 and that a trusted control does execute it. The `result` assertion does not
 establish successful diagnostics: MCP tool errors also contain that field.

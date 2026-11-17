@@ -4,7 +4,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 # The fixtures are ours: let indexers and servers run their build files
-# (tests/trust_check.ts checks what happens without this).
+# (the trust suite, tests/check/trust_suite.goose, checks what happens without it).
 export SWAN_TRUST_BUILD=1
 scripts/build.sh >/dev/null
 scripts/index-repo.sh fixtures/tiny-ts data/tiny-ts >/dev/null
@@ -16,10 +16,9 @@ tests/refresh_check.sh
 tests/cosmetic_check.sh
 tests/layer_check.sh
 tests/pieces_check.sh
-bin/swan-check rust split agnostic diag kotlin game live || check_failed=1
+bin/swan-check rust split agnostic diag kotlin game live trust || check_failed=1
 bun tests/edit_check.ts
 bun tests/lang_check.ts
 bun tests/structural_check.ts
-bun tests/trust_check.ts
 # The Goose suites ran to the end; fail now if any of their checks did.
 [ "$check_failed" -eq 0 ]
