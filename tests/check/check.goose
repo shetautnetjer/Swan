@@ -19,8 +19,9 @@ import .agnostic_suite;
 import .diag_suite;
 import .kotlin_suite;
 import .game_suite;
+import .live_suite;
 
-let SUITES = ["mcp", "rust", "split", "agnostic", "diag", "kotlin", "game"];
+let SUITES = ["mcp", "rust", "split", "agnostic", "diag", "kotlin", "game", "live"];
 
 fn run_suite(name: const u8[:]) -> bool {
     if name == "rust" { rust_suite(); return true; }
@@ -30,6 +31,7 @@ fn run_suite(name: const u8[:]) -> bool {
     if name == "diag" { diag_suite(); return true; }
     if name == "kotlin" { kotlin_suite(); return true; }
     if name == "game" { game_suite(); return true; }
+    if name == "live" { live_suite(); return true; }
     return false;
 }
 
