@@ -824,6 +824,21 @@ fn plan_python(repo: const u8[:], k: i64) -> u8[>..] {
         dir.append(queue[next..e]);
         next = e + 1;
         if size_under(dir) <= limit && dir.len > 0 { plan.append(dir); plan.push('\n'); continue; }
+        // scip-python takes one path per run, and every run analyses the
+        // whole program again. A folder with more loose .py files than
+        // there are pieces (a flat tests/ of hundreds of files) would become
+        // one run per file: hundreds of whole-program runs. Index such a
+        // folder in one run instead; at the root, index everything in one.
+        var loose = 0;
+        for p in paths {
+            let inside = dir.len == 0 || (starts_with(p, dir) && p.len > dir.len && p[dir.len] == '/');
+            if inside && find(if dir.len == 0 { p } else { p[dir.len + 1..] }, "/") < 0 { loose++; }
+        }
+        if loose > k {
+            if dir.len == 0 { plan.clear(); plan.push('\n'); return plan; }
+            plan.append(dir); plan.push('\n');
+            continue;
+        }
         var subs = dictionary<const u8[:], bool> {};
         for p in paths {
             let inside = dir.len == 0 || (starts_with(p, dir) && p.len > dir.len && p[dir.len] == '/');
