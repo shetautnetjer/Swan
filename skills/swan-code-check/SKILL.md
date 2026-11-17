@@ -73,7 +73,11 @@ and flattens indexes with a native Rust flattener (`bin/swan-flatten`), so a
 refresh after a code edit takes a few seconds even on a large repo (about
 3 s on rea, down from 9 s). Refresh after each batch of edits rather than
 answering from a stale map. The outside indexers still take most of a first
-map's time. Leave Swan's speed settings at their defaults. To check whether
+map's time, and a code edit in Python reruns scip-python for its piece,
+which starts the type checker cold: about 30 s on a 700-file repo (a
+comment-only edit is free). Batch Python edits before refreshing. A map runs
+no Bun: the flattener is Rust and the syntax-level index is built into
+Swan. Leave Swan's speed settings at their defaults. To check whether
 a wrong answer comes from the new steps, map once with
 `SWAN_STAMP_JOBS=1` (the old one-process stamping) and compare. `SWAN_FLATTEN_PROFILE=quick` only matters
 to someone changing Swan's own Rust code: it makes `scripts/build.sh`
@@ -104,7 +108,8 @@ Report every finding with its evidence kind. Never merge them into one
 
 **Syntax-level languages** (definitions, bodies and references by name, no
 compiler): Go, shell scripts (including ones known only by their `#!` line),
-Makefiles, Ruby and Lua. Callers and impact in these are name matches; say so.
+Makefiles, Ruby and Lua (`swan syntax-index`, built into Swan). Callers and
+impact in these are name matches; say so.
 
 **Known blind spots: never call these areas clean.**
 
