@@ -750,3 +750,20 @@ see each environment variable once. See DECISIONS.md.
   `structural_check` and `kotlin_live_check` fail as on main.
 - Still waiting for trust: Gradle/Maven/MSBuild indexers, `swan check`,
   live language servers.
+
+## 2026-11-17: a batch plan says what it reaches
+
+`edit_batch` without `apply` now has a `touches` part: for each rename and
+replaced body, Spread-Wings' `touches` answer, then the files those symbols
+reach (callers, importers) that the batch does not edit, the tests among
+everything reached, and the repo groups involved. Spread-Wings' graph is
+kept beside the map as `wings.db`, rebuilt (sealed) when the map is newer,
+and takes Swan's compiler answers. Found by `$SWAN_SPREAD_WINGS` or
+`spread-wings` on PATH; without it the plan is unchanged and says why.
+
+- On tiny-py: replacing `total_area`'s body lists `main.py` (calls it) and
+  `test_shapes.py` (a test) as reached but not edited; renaming it lists
+  nothing, since the rename edits both. A plan with the graph built takes
+  about 60 ms.
+- Limit: Spread-Wings knows a definition by name and file, so for a method
+  it counts every method of that name in the file (marked in the answer).

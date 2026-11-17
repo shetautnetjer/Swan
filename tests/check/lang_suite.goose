@@ -18,6 +18,7 @@ fn lang_suite() {
     lang_python();
     lang_java();
     lang_java_batch();
+    lang_batch_touches();
     lang_gradle();
     lang_cuda();
     lang_modules();
@@ -147,6 +148,48 @@ fn lang_java_batch() {
     read_file(str(w, "/repo/src/main/java/shapes/Square.java"), sq);
     check("batch: after it, javac finds no errors and the later edits saw the earlier ones",
           find(t, "\"errors\":0") >= 0 && find(sq, "public double surface()") >= 0 && find(sq, "Math.pow(side, 2)") >= 0, t);
+}
+
+// A planned batch says what it reaches beyond its own edits, from
+// Spread-Wings (built beside Swan, as ../spread-wings), and the tests to run.
+fn lang_batch_touches() {
+    var swb: u8[>..] = [];
+    env("PWD", swb);
+    swb.append("/../spread-wings/bin/spread-wings");
+    guard file_exists(swb) else {
+        write_stderr("skip: batch touches: ../spread-wings/bin/spread-wings is not built\n");
+        return;
+    }
+    var ev: u8[>..] = [];
+    format(ev, "SWAN_SPREAD_WINGS=", swb);
+    ev.push(0);
+    let w = "data/py-touches";
+    rm_rf(w);
+    mkdir_p(w);
+    var o: u8[>..] = [];
+    guard sh(argv(["cp", "-r", "fixtures/tiny-py", str(w, "/repo")]), "", o) else { return; }
+    guard sh(argv(["bin/swan", "map", str(w, "/repo"), str(w, "/map")]), "", o) else { return; }
+    let db = str(w, "/map/swan.db");
+    let body = """{"edits":[{"op":"replace_symbol_body","name_path":"total_area","relative_path":"shapes/__init__.py","body":"def total_area(shapes):\n    return 0"}]}""";
+    var t: u8[>..] = [];
+    var r: i64 = -1;
+    if mcp_open(argv(["bin/swan", "serve", db]), ev) { r = mcp_call("edit_batch", body, t); mcp_close(); }
+    check("batch touches: a replaced body lists the callers it does not edit, and their test",
+          r == 1 && find(t, "\"available\":true") >= 0 && find(t, "{\"path\":\"main.py\",\"why\":[\"calls it\"") >= 0 &&
+          find(t, "\"tests\":[\"test_shapes.py\"]") >= 0 && file_exists(str(w, "/map/wings.db")), t);
+
+    // A rename edits its callers itself: nothing is left reached but not edited.
+    let ren = """{"edits":[{"op":"rename_symbol","name_path":"total_area","relative_path":"shapes/__init__.py","new_name":"sum_area"}]}""";
+    if mcp_open(argv(["bin/swan", "serve", db]), ev) { r = mcp_call("edit_batch", ren, t); mcp_close(); }
+    check("batch touches: a rename's own sites are not listed again", r == 1 && find(t, "\"reached_not_edited\":[]") >= 0 &&
+          find(t, "\"tests\":[\"test_shapes.py\"]") >= 0, t);
+
+    if mcp_open(argv(["bin/swan", "serve", db]), argv(["SWAN_SPREAD_WINGS=/nonexistent/spread-wings"])) { r = mcp_call("edit_batch", body, t); mcp_close(); }
+    var same: u8[>..] = [];
+    var e0: u8[>..] = [];
+    let unchanged = run(argv(["diff", "-r", "fixtures/tiny-py", str(w, "/repo")]), "", same, e0) == 0;
+    check("batch touches: without spread-wings the plan still works and says why", r == 1 &&
+          find(t, "\"available\":false,\"why\":\"SWAN_SPREAD_WINGS is /nonexistent/spread-wings") >= 0 && unchanged, t);
 }
 
 fn lang_java() {
