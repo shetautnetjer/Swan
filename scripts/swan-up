@@ -22,7 +22,8 @@
 #       Show the active version and any running Swan servers on an older one.
 #
 # Agents launch ROOT/current/bin/swan, so a later update is the same command;
-# running Swan servers keep their old version until their agent restarts.
+# running Swan servers move to the new version by themselves after their
+# next answer (swan serve follows the current link; SWAN_NO_RESTART=1 stops it).
 # Maps live in --maps (default ROOT/maps), never inside a repository.
 # Turn it off: point the agent back at another binary (claude mcp add ...) or
 # remove the MCP entry; versions/<rev> folders can be deleted once unused.
@@ -302,7 +303,7 @@ cmd_status() {
   for pid in $(pgrep -u "$(id -u)" -f 'swan serve' || true); do
     exe="$(readlink -f "/proc/$pid/exe" 2>/dev/null || true)"
     case "$exe" in */swan|*/swan\ \(deleted\))
-      [ "$exe" = "$cur" ] || say "still on an older Swan until its agent restarts: pid $pid ($exe)";;
+      [ "$exe" = "$cur" ] || say "still on an older Swan; it moves after its next answer: pid $pid ($exe)";;
     esac
   done
 }
