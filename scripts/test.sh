@@ -8,14 +8,14 @@ cd "$(dirname "$0")/.."
 export SWAN_TRUST_BUILD=1
 scripts/build.sh >/dev/null
 scripts/index-repo.sh fixtures/tiny-ts data/tiny-ts >/dev/null
-bun tests/mcp_smoke.ts bin/swan data/tiny-ts/swan.db
+# Suites ported to Goose (tests/check/) run to the end; the result counts at the end.
+check_failed=0
+bin/swan-check mcp || check_failed=1
 bun tests/maps_check.ts
 tests/refresh_check.sh
 tests/cosmetic_check.sh
 tests/layer_check.sh
 tests/pieces_check.sh
-# Suites ported to Goose (tests/check/); every named suite runs, totals at the end.
-check_failed=0
 bin/swan-check rust split || check_failed=1
 bun tests/edit_check.ts
 bun tests/diag_check.ts

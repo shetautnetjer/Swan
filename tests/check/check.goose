@@ -14,12 +14,14 @@ import sqlite from "shetautnetjer/goose-sqlite@c759de735ae936dcbc197bb9aae40e135
 import .harness;
 import .rust_suite;
 import .split_suite;
+import .mcp_suite;
 
-let SUITES = ["rust", "split"];
+let SUITES = ["mcp", "rust", "split"];
 
 fn run_suite(name: const u8[:]) -> bool {
     if name == "rust" { rust_suite(); return true; }
     if name == "split" { split_suite(); return true; }
+    if name == "mcp" { mcp_suite(); return true; }
     return false;
 }
 
