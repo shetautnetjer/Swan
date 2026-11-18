@@ -27,6 +27,7 @@ import .structural;
 import .change;
 import .syntax;
 import .pypatch;
+import .tspatch;
 import .wings;
 import .broke;
 import .lspindex;
@@ -163,6 +164,11 @@ fn main() {
     } else if a[1] == "scip-python-patch" && (a.len == 3 || (a.len == 4 && a[3] == "--revert")) {
         // Applies (or undoes) the reachability memo on one pyright-internal.js.
         let r = pypatch_file(a[2], a.len == 4);
+        print(r);
+        if r == "no match" { exit(1); }
+    } else if a[1] == "scip-typescript-patch" && (a.len == 3 || (a.len == 4 && a[3] == "--revert")) {
+        // Applies (or undoes) the stable names on one scip-typescript FileIndexer.js.
+        let r = tspatch_file(a[2], a.len == 4);
         print(r);
         if r == "no match" { exit(1); }
     } else if a[1] == "stamp-bench" && a.len == 4 {

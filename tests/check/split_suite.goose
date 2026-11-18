@@ -51,6 +51,32 @@ fn split_only(a: const u8[:], b: const u8[:], shown: u8[>..]&, max: i64) -> i64 
     return n;
 }
 
+// Swan's stable names for scip-typescript (src/tspatch.goose), on a copy of
+// the indexer's file: applied, it carries the mark; undone, it is the file
+// it was, byte for byte.
+fn split_names_patch(w: const u8[:]) {
+    let src = "tools/node_modules/@sourcegraph/scip-typescript/dist/src/FileIndexer.js";
+    if !file_exists(src) { print("skipped: no scip-typescript in tools/node_modules"); return; }
+    let copy = str(w, "/FileIndexer.js");
+    let plain = str(w, "/FileIndexer.plain.js");
+    var o: u8[>..] = [];
+    var e: u8[>..] = [];
+    guard sh(argv(["cp", src, copy]), "", o) else { return; }
+    run(argv(["bin/swan", "scip-typescript-patch", copy, "--revert"]), "", o, e);     // whichever state the installed one is in
+    guard sh(argv(["cp", copy, plain]), "", o) else { return; }
+    let applied = run(argv(["bin/swan", "scip-typescript-patch", copy]), "", o, e);
+    var text: u8[>..] = [];
+    read_file(copy, text);
+    let marked = find(text, "function swanOrdinal(") >= 0 && find(text, "counter.next()") < 0;
+    let again = run(argv(["bin/swan", "scip-typescript-patch", copy]), "", o, e);
+    let again_said = trim(o) == "already";
+    let undone = run(argv(["bin/swan", "scip-typescript-patch", copy, "--revert"]), "", o, e);
+    let same = run(argv(["cmp", "-s", copy, plain]), "", o, e);
+    check("the stable-names patch applies to scip-typescript once, and undone leaves the file it was",
+          applied == 0 && marked && again == 0 && again_said && undone == 0 && same == 0,
+          str("apply ", applied, ", marked ", marked, ", again ", again, " ", again_said, ", undo ", undone, ", cmp ", same));
+}
+
 fn split_suite() {
     let w = "data/split-check";
     rm_rf(w);
@@ -66,6 +92,21 @@ fn split_suite() {
         format(t, "s.id;\n}\n");
         format(t, "export const box", i, ": Box", i, " = { value: f", i, "(", i, "), inner: { depth: ", i, " } };\n");
         write_file(str(w, "/repo/src/m", i, ".ts"), t);
+    }
+    // An object with two keys of one name and a type with two type literals,
+    // used from eight other files, which the chunks spread out. Each use
+    // reads only the second of the two: an indexer that numbers keys in the
+    // order one process meets them calls it the first (six of the eight
+    // uses of `steps` went to the wrong key before src/tspatch.goose).
+    write_file(str(w, "/repo/src/table.ts"),
+               "export const table = {\n  first: { steps: \"one\" },\n  second: { steps: [\"a\", \"b\"] },\n};\nexport type Shape = { kind: { tag: string }; size: { tag: number } };\n");
+    for i in 8 {
+        var t: u8[>..] = [];
+        format(t, "import { table, Shape } from \"./table\";\n");
+        format(t, "export function use", i, "(s: Shape): number {\n");
+        for k in i { format(t, "  const pad", k, " = ", k, ";\n"); }
+        format(t, "  return table.second.steps.length + s.size.tag", if i > 0 { str(" + pad", i - 1) } else { str("") }, ";\n}\n");
+        write_file(str(w, "/repo/src/use", i, ".ts"), t);
     }
     var single: u8[>..] = [];
     guard sh(argv(["bin/swan", "map", str(w, "/repo"), str(w, "/single")]), envv("SWAN_JOBS", "1"), single) else { return; }
@@ -100,6 +141,31 @@ fn split_suite() {
     let only_b = split_only(b, a, shown_b, 3);
     check(str("split and single maps hold the same ", na, " rows"), only_a == 0 && only_b == 0,
           str(shown_a, "vs\n     ", shown_b));
+    // Where the eight uses of `steps` and of `tag` point, in the split map:
+    // line 3 of table.ts (the second `steps`), and the `tag` of `size`.
+    var err: u8[>..] = [];
+    var right = 0;
+    var wrong = 0;
+    let db = sqlite::open_existing(str(w, "/split/swan.db"), err);
+    if db != 0 {
+        let st = sqlite::prepare_or_die(db, """
+            SELECT s.name, s.def_line, s.def_col FROM occurrences o JOIN symbols s ON s.id = o.symbol_id
+            WHERE o.file LIKE 'src/use%.ts' AND o.is_def = 0 AND s.def_file = 'src/table.ts' AND (s.name LIKE 'steps%' OR s.name = 'tag')
+            """);
+        var name: u8[>..] = [];
+        while sqlite::step(st, err) == 1 {
+            name.clear();
+            sqlite::col_text(st, 0, name);
+            let line = sqlite::col_int(st, 1);
+            let col = sqlite::col_int(st, 2);
+            if (starts_with(name, "steps") && line == 2) || (name == "tag" && line == 4 && col > 40) { right++; } else { wrong++; }
+        }
+        sqlite::finalize(st);
+        sqlite::close(db);
+    }
+    check("each chunk names another file's object keys and type literals as that file's own chunk does: 16 uses, all at the second of the two",
+          right == 16 && wrong == 0, str(right, " right, ", wrong, " wrong"));
+    split_names_patch(w);
     split_python();
 }
 
@@ -119,6 +185,21 @@ fn split_python() {
             write_file(str(w, "/repo/", pre, "__case_", i, ".py"), t);
             n++;
         }
+    }
+    // An object with two keys of one name and a type with two type literals,
+    // used from eight other files, which the chunks spread out. Each use
+    // reads only the second of the two: an indexer that numbers keys in the
+    // order one process meets them calls it the first (six of the eight
+    // uses of `steps` went to the wrong key before src/tspatch.goose).
+    write_file(str(w, "/repo/src/table.ts"),
+               "export const table = {\n  first: { steps: \"one\" },\n  second: { steps: [\"a\", \"b\"] },\n};\nexport type Shape = { kind: { tag: string }; size: { tag: number } };\n");
+    for i in 8 {
+        var t: u8[>..] = [];
+        format(t, "import { table, Shape } from \"./table\";\n");
+        format(t, "export function use", i, "(s: Shape): number {\n");
+        for k in i { format(t, "  const pad", k, " = ", k, ";\n"); }
+        format(t, "  return table.second.steps.length + s.size.tag", if i > 0 { str(" + pad", i - 1) } else { str("") }, ";\n}\n");
+        write_file(str(w, "/repo/src/use", i, ".ts"), t);
     }
     var single: u8[>..] = [];
     guard sh(argv(["bin/swan", "map", str(w, "/repo"), str(w, "/single")]), envv("SWAN_JOBS", "1"), single) else { return; }
