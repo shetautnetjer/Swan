@@ -13,7 +13,7 @@
 # CLI and its daemon. The exit status is the command's own.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-checkpoint=${SWAN_SPACE_CHECKPOINT:-swan-test-v3}
+checkpoint=${SWAN_SPACE_CHECKPOINT:-swan-test-v4}
 guest=/home/cua/Work/Swan
 name="swan-test-$(date +%H%M%S)-$$"
 

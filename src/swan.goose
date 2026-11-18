@@ -150,7 +150,8 @@ fn main() {
         let ok = map_main(a[2], a[3], report, a.len == 5);
         print(report);
         if !ok { exit(1); }
-    } else if a[1] == "syntax-index" && a.len == 4 {
+    } else if a[1] == "syntax-index" && (a.len == 4 || (a.len == 6 && a[4] == "--skip")) {
+        if a.len == 6 && a[5] == "go" { sx_skip_go = true; }
         if !syntax_index_main(a[2], a[3]) { exit(1); }
     } else if a[1] == "plan-python" && (a.len == 3 || a.len == 4) {
         // The Python pieces a map would index in parallel, one per line ("" = the whole repo).

@@ -113,6 +113,13 @@ fn detect(repo: const u8[:]) -> Langs {
             l.cuda = true;
         } else if is_c_source(name) || ends_with(name, ".h") || ends_with(name, ".hpp") || ends_with(name, ".hh") {
             l.c = true;
+        } else if ends_with(name, ".go") {
+            // Mapped through gopls when it is installed (tools/modules.json
+            // "map": "lsp"); by syntax otherwise (syntax_file above).
+            if find(str(" ", l.other, " "), " go ") < 0 && l.other.len + 3 < 256 {
+                if l.other.len > 0 { l.other.push(' '); }
+                l.other.append("go");
+            }
         } else if ends_with(name, ".goose") {
             // No grammar and no SCIP indexer: mapped through its language
             // server (tools/modules.json "map": "lsp").
@@ -1612,27 +1619,12 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
     }
 
     if skipped.len > 0 { format(report, untrusted_note(skipped, repo), "\n"); }
-    if l.syn {
-        // No compiler, no repo code run: a syntax-level map (definitions,
-        // bodies, references by name) for the languages above.
-        let target = str(out, "/index-syntax.scip");
-        var a: u8[>..] = [];
-        // `swan syntax-index` (src/syntax.goose), this binary itself: no Bun.
-        let swan_bin = str(home, "/bin/swan");
-        arg(a, swan_bin);
-        arg(a, "syntax-index");
-        arg(a, repo);
-        arg(a, target);
-        var fp: u64 = hash(str("syntax-goose-1\t", swan_bin, "\t", swan_file_size(swan_bin)));
-        each_file(repo) { full, name =>
-            if syntax_file(full, name) { fp = hash_combine(fp, hash_combine(hash(full), stamp(full))); }
-        };
-        add_lang_job("syntax-index", target, a, child_env(l, ""), fp);
-    }
     // Languages with a language server and no SCIP indexer, when their entry
     // in tools/modules.json says "map": "lsp": `swan lsp-index` (this binary,
     // src/lspindex.goose) asks the server for every definition and its
     // references. Left out when the server is not installed here.
+    var lsp_mapped: u8[>..] = [];      // " go goose ": the languages mapped this way in this run
+    lsp_mapped.push(' ');
     var mods_text: u8[>..] = [];
     if l.other.len > 0 && read_file(str(home, "/tools/modules.json"), mods_text) {
         var mdoc: json::Node[>..] = [];
@@ -1656,8 +1648,30 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
                     if lang_of_path(name) == lang { fp = hash_combine(fp, hash_combine(hash(full), stamp(full))); }
                 };
                 add_lang_job(str("lsp-index ", lang), target, a, child_env(l, ""), fp);
+                format(lsp_mapped, lang, " ");
             }
         };
+    }
+    if l.syn {
+        // No compiler, no repo code run: a syntax-level map (definitions,
+        // bodies, references by name) for the languages above.
+        let target = str(out, "/index-syntax.scip");
+        var a: u8[>..] = [];
+        // `swan syntax-index` (src/syntax.goose), this binary itself: no Bun.
+        let swan_bin = str(home, "/bin/swan");
+        arg(a, swan_bin);
+        arg(a, "syntax-index");
+        arg(a, repo);
+        arg(a, target);
+        // Go mapped by its language server is left out here: its rows would
+        // only repeat, by name, what the server resolved.
+        let skip_go = find(lsp_mapped, " go ") >= 0;
+        if skip_go { arg(a, "--skip"); arg(a, "go"); }
+        var fp: u64 = hash(str("syntax-goose-1\t", swan_bin, "\t", swan_file_size(swan_bin), if skip_go { "\tskip-go" } else { "" }));
+        each_file(repo) { full, name =>
+            if syntax_file(full, name) && !(skip_go && ends_with(name, ".go")) { fp = hash_combine(fp, hash_combine(hash(full), stamp(full))); }
+        };
+        add_lang_job("syntax-index", target, a, child_env(l, ""), fp);
     }
     map_held.append(trim(skipped[..]));
     if jobs.len == 0 && (l.kt || l.other.len > 0 || skipped.len > 0) {

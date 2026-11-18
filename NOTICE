@@ -9,6 +9,17 @@ is GPL-3.0-or-later (https://github.com/oraios/serena/blob/main/LICENSE).
 Copying code or tool descriptions from the Serena application into Swan
 would bring GPL terms with it, so Swan follows the interface only.
 
+SolidLSP, checked 2026-11-17 at oraios/serena 0cef825: scripts/fetch-tools.sh
+fetches only src/solidlsp (MIT, Copyright (c) 2025-2026 Jain & Panchenko
+IT-Berater Partnerschaft (Oraios AI) and contributors) with its licence
+texts, as an installed tool; it is not part of this repository. SolidLSP's
+ls.py imports two helpers from the GPL-3.0-or-later Serena application
+(serena.util.file_system.match_path and
+serena.util.text_utils.MatchedConsecutiveLines). Swan does not fetch or use
+those: tools/solidlsp/shim holds Swan's own versions, written from how
+SolidLSP's MIT code calls them. SolidLSP's C#, F# and VB.NET servers need
+more of the Serena application and are not used.
+
 SQLite (public domain, https://sqlite.org/copyright.html) comes through the
 goose-sqlite package (https://github.com/shetautnetjer/goose-sqlite).
 

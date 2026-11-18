@@ -103,7 +103,7 @@ fn live_suite() {
     write_file(lib, original);
 
     var java: u8[>..] = [];
-    let jok = mcp_call("get_diagnostics", """{"relative_path":"src/missing.go","live":true}""", java);
+    let jok = mcp_call("get_diagnostics", """{"relative_path":"src/missing.rb","live":true}""", java);
     check("a language without a live server says so instead of failing hard", jok == 0 && find(java, "no live server") >= 0, java);
 
     // Switching language: pyright replaces rust-analyzer in the same serve.

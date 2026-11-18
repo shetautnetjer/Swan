@@ -55,6 +55,12 @@ answer.
    a language with a server and no SCIP indexer, the map is made by asking
    the server (document symbols, then references per definition). Declared
    as data, `"map": "lsp"` in tools/modules.json; Goose is the first.
+3b. **SolidLSP behind the same door** (built 2026-11-17,
+   `tools/solidlsp/bridge.py`): for the languages SolidLSP knows how to run,
+   a small bridge answers Swan's client from SolidLSP, so a language is a
+   module entry plus a pinned fetch. Go (gopls) is the first. Order of
+   preference per language: a SCIP indexer, Swan's own client, the bridge,
+   then syntax.
 4. **Syntax layer**: the fallback for any language without a compiler indexer.
    Built today as `swan syntax-index`, src/syntax.goose (Go, shell, Make, Ruby, Lua; line
    patterns). Next: tree-sitter through goose-treesitter.

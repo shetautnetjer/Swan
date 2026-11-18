@@ -231,7 +231,7 @@ PY
 
 cmd_install() {
   local dist="" root="$ROOT_DEFAULT" maps="" profile="python-typescript" agents="claude,pi"
-  local pidir="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}" trust_from="" langs="${SWAN_LANGS:-c,java,rust}"
+  local pidir="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}" trust_from="" langs="${SWAN_LANGS:-c,java,rust,go}"
   while [ $# -gt 0 ]; do case "$1" in
     --dist) dist="$2"; shift 2;; --root) root="$2"; shift 2;; --maps) maps="$2"; shift 2;;
     --profile) profile="$2"; shift 2;; --agents) agents="$2"; shift 2;;

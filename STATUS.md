@@ -872,3 +872,36 @@ with nested closures over shared locals), `syntax_index_main` (496),
   (only what the repo defines is asked about); symbols nested more than
   four deep are left out; the server analyses each file as it is first
   opened (about 0.3 s a file on Swan), with no per-file reuse yet.
+
+## 2026-11-17: Go through SolidLSP, behind a bridge
+
+- `tools/solidlsp/bridge.py` speaks LSP to Swan's client and answers from
+  SolidLSP (Serena's MIT language-server library), which starts, configures
+  and waits for the real server. `swan lsp-index` and the live tools need
+  no change: Go is one entry in tools/modules.json (`"map": "lsp"`).
+- Fetched pinned by `SWAN_LANGS=go scripts/fetch-tools.sh`: only
+  src/solidlsp from oraios/serena 0cef825 (sha256), its Python packages in
+  a uv venv, Go 1.27.4 (sha256) and gopls v0.24.0 built by that Go. Installs
+  fetch it too (about 400 MB).
+- Licence: SolidLSP's ls.py imports two helpers from the GPL Serena
+  application; tools/solidlsp/shim holds Swan's own versions, so no Serena
+  application code is fetched or used. See NOTICE.
+- `swan lsp-index` now also asks what implements each interface or class
+  and their methods, and writes SCIP relationships.
+- Go is left out of the by-name syntax index when it is mapped this way.
+- Outside modules: Swan's own module cache (`.tools/go-mod`), filled when
+  the repo is trusted (the seal then has the network), read offline
+  otherwise. Without them gopls resolves nothing: cobra gave 789
+  definitions and 0 references until its modules were there.
+- eggshell sets XDG_CACHE_HOME to the scratch home: a desktop session's
+  value pointed into the read-only real home and gopls died at start.
+- Checked: fixtures/tiny-go (references across packages, Square implements
+  Shape, one TotalArea not two, rename across packages); live errors
+  (a string returned as float64, with gopls's code); spf13/cobra adbc881:
+  36 files, 789 definitions, 5,920 references, 3 implementations in 6.9 s,
+  trusted and untrusted alike once the modules are cached, repo untouched;
+  `refs ExecuteC` gives the 5 real call sites, where grep also matches two
+  comments and TestSubcommandExecuteC.
+- Limits: a Go method is named without its receiver type (`Area`, not
+  `Square/Area`); an untrusted Go repo whose modules were never fetched
+  gets definitions only; only Go is wired through the bridge so far.

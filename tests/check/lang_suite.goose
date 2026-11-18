@@ -21,6 +21,7 @@ fn lang_suite() {
     lang_batch_touches();
     lang_what_broke();
     lang_goose_map();
+    lang_go_map();
     lang_py_attr_family();
     lang_gradle();
     lang_cuda();
@@ -274,6 +275,47 @@ fn lang_goose_map() {
     read_file(str(w, "/repo/shapes.goose"), b);
     check("goose: renaming UNIT rewrites its definition and its use in the other file",
           rr == 1 && find(a, "let SCALE = 2;") >= 0 && find(b, "side * side * SCALE;") >= 0 && find(r, "\"files_written\":2") >= 0, r);
+}
+
+// A Go map through the SolidLSP bridge (tools/solidlsp/bridge.py) and gopls,
+// sealed: references across packages, what implements an interface (Go
+// says so nowhere in the source), no second by-name copy from the syntax
+// index, and a rename across packages.
+fn lang_go_map() {
+    guard file_exists(".tools/solidlsp/venv/bin/python") && file_exists(".tools/gopls/gopls") else {
+        write_stderr("skip: go map: SolidLSP and gopls are not fetched (SWAN_LANGS=go scripts/fetch-tools.sh)\n");
+        return;
+    }
+    let w = "data/go-map";
+    rm_rf(w);
+    mkdir_p(w);
+    var o: u8[>..] = [];
+    guard sh(argv(["cp", "-r", "fixtures/tiny-go", str(w, "/repo")]), "", o) else { return; }
+    guard sh(argv(["bin/swan", "map", str(w, "/repo"), str(w, "/map")]), "", o) else { return; }
+    let db = str(w, "/map/swan.db");
+    var t: u8[>..] = [];
+    lg_db_query(db, "refs", "TotalArea", "", t);
+    check("go: TotalArea in package shapes is used from main.go, inside main (resolved by gopls through the import)",
+          find(t, "\"relative_path\":\"main.go\",\"line\":10") >= 0 && find(t, "\"in_symbol\":\"main\"") >= 0, t);
+    var defs = 0;
+    var at = 0;
+    loop {
+        let k = find(t[at..], "\"symbol\":{\"name_path\":\"TotalArea\"");
+        guard k >= 0 else { break; }
+        defs++;
+        at += k + 10;
+    }
+    check("go: one TotalArea in the map, not a second by-name copy from the syntax index", defs == 1, t);
+    lg_db_query(db, "impls", "Shape", "", t);
+    check("go: Square implements Shape, which only the compiler knows", find(t, "\"implementations\":[{\"name_path\":\"Square\"") >= 0, t);
+    var r: u8[>..] = [];
+    let rr = serve_once(db, "rename_symbol", """{"name_path":"TotalArea","relative_path":"shapes/shapes.go","new_name":"SumArea","apply":true}""", r);
+    var a: u8[>..] = [];
+    var b: u8[>..] = [];
+    read_file(str(w, "/repo/main.go"), a);
+    read_file(str(w, "/repo/shapes/shapes.go"), b);
+    check("go: renaming TotalArea rewrites its definition and the call in the other package",
+          rr == 1 && find(a, "shapes.SumArea(") >= 0 && find(b, "func SumArea(") >= 0 && find(r, "\"files_written\":2") >= 0, r);
 }
 
 fn lang_java() {

@@ -12,7 +12,7 @@
 // in the repo). The flattener marks them "name" (found by name, not resolved
 // by a compiler), and answers show them as by_name.
 //
-//   swan syntax-index <repo> <out.scip>
+//   swan syntax-index <repo> <out.scip> [--skip go]
 //
 // This replaces tools/syntax-index.ts (Bun) line for line, with three
 // deliberate differences: columns are UTF-8 bytes (the encoding the index
@@ -82,8 +82,10 @@ fn sx_shebang_word(head: const u8[:], w: const u8[:]) -> bool {
 }
 
 // The language of a file, or -1.
+var sx_skip_go = false;       // `--skip go`: Go is mapped by its language server in this run
+
 fn sx_lang_of(full: const u8[:], name: const u8[:]) -> i64 {
-    if ends_with(name, ".go") { return SX_GO; }
+    if ends_with(name, ".go") { return if sx_skip_go { -1 } else { SX_GO }; }
     for e in [".sh", ".bash", ".zsh", ".ksh"] { if ends_with(name, e) { return SX_SHELL; } }
     if name == "GNUmakefile" || name == "makefile" || name == "Makefile" || ends_with(name, ".mk") { return SX_MAKE; }
     if ends_with(name, ".rb") || name == "Rakefile" { return SX_RUBY; }

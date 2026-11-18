@@ -21,7 +21,7 @@ fn sandbox_on() -> bool {
 // Every repo is sealed: no host writes except the map dir, no host sockets.
 // Trust only loosens the seal: a trusted repo gets the network and the
 // writable directories its build tools need (the repo itself for obj/ and
-// build/, Cargo's home, Swan's Gradle and .NET caches); it never runs
+// build/, Cargo's home, Swan's Gradle, .NET and Go module caches); it never runs
 // unsealed. The runner refuses (exit 3) if the kernel cannot seal, which
 // surfaces as a failed step rather than an unconfined run.
 fn seal_argv(inner: const u8[:], repo: const u8[:], out: const u8[:], trusted: bool) -> u8[>..] {
@@ -37,6 +37,7 @@ fn seal_argv(inner: const u8[:], repo: const u8[:], out: const u8[:], trusted: b
         arg(a, "--rw"); arg(a, str(t, "/gradle-home"));
         arg(a, "--rw"); arg(a, str(t, "/dotnet-home"));
         arg(a, "--rw"); arg(a, str(t, "/nuget"));
+        arg(a, "--rw"); arg(a, str(t, "/go-mod"));      // Go's module cache: a trusted repo's dependencies are fetched into it
     }
     arg(a, "--");
     a.append(inner);
