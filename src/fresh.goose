@@ -26,6 +26,11 @@ fn load_freshness(db: i64) {
     if v.len > 0 && v.len < 4000 {
         format(fresh_root, v);
         if v[v.len - 1] != '/' { fresh_root.push('/'); }
+        // What git ignores there, for every walk this process makes of the
+        // repo (new files, structural search): kept in the map's folder.
+        var src: u8[>..] = [];
+        meta_value(db, "source", src);
+        if src.len > 0 { walk_ignore_load(if v[v.len - 1] == '/' { v[..v.len - 1] } else { v[..] }, src); }
     }
     var t: u8[>..] = [];
     meta_value(db, "scip_time", t);

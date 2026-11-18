@@ -184,6 +184,7 @@ fn check_main(repo_arg: const u8[:], out_arg: const u8[:], report: u8[>..]&) -> 
     guard file_exists(db) else { format(report, "no map at ", db, "; run swan map first"); return false; }
     let home = swan_home();
     let bin = str(home, "/tools/node_modules/.bin/");
+    walk_ignore_load(repo, out);
     var l = detect(repo);
     var rows: u8[>..] = [];
     var ran: u8[>..] = [];

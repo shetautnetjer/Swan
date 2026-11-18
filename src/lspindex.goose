@@ -75,6 +75,7 @@ fn lx_line(text: const u8[:], n: i64) -> const u8[:] {
 
 fn lsp_index_main(repo: const u8[:], out: const u8[:], lang: const u8[:], target: const u8[:]) -> bool {
     let t0 = clock();
+    walk_ignore_load(repo, out);
     var why: u8[>..] = [];
     guard live_start_at(repo, out, lang, why) else {
         write_stderr(str("lsp-index: ", why, "\n"));

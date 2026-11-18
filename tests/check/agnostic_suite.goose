@@ -30,7 +30,52 @@ fn ag_map(work: const u8[:], fixture: const u8[:], report: u8[>..]&) -> i32 {
     return code;
 }
 
+// A folder git ignores is not the repo's code: no walk enters it, no cargo
+// project in it is run, and what an indexer finds there by itself (scip-java
+// compiles every .java it sees) is left out of the map. The same folder in
+// a copy that is not a git repo is mapped like any other.
+fn agnostic_ignored() {
+    var o: u8[>..] = [];
+    var e: u8[>..] = [];
+    if run(argv(["git", "--version"]), "", o, e) != 0 { print("skipped: no git here"); return; }
+    let w = "data/ignore-check";
+    rm_rf(w);
+    for d in ["repo/src", "repo/scratch/rs/src"] { mkdir_p(str(w, "/", d)); }
+    let r = str(w, "/repo");
+    write_file(str(r, "/.gitignore"), "scratch/\n");
+    write_file(str(r, "/src/kept.py"), "def kept():\n    return 1\n");
+    write_file(str(r, "/src/Kept.java"), "class Kept {\n    int v() {\n        return 1;\n    }\n}\n");
+    write_file(str(r, "/scratch/dropped.py"), "def dropped():\n    return 2\n");
+    write_file(str(r, "/scratch/Old.java"), "class Old {\n    int v() {\n        return 2;\n    }\n}\n");
+    write_file(str(r, "/scratch/rs/Cargo.toml"), "[package]\nname = \"lost\"\nversion = \"0.1.0\"\nedition = \"2021\"\n");
+    write_file(str(r, "/scratch/rs/src/lib.rs"), "pub fn lost() -> u32 {\n    1\n}\n");
+    guard sh(argv(["git", "-C", r, "init", "-q"]), "", o) else { return; }
+
+    var report: u8[>..] = [];
+    let code = run(argv(["bin/swan", "map", r, str(w, "/map")]), "", report, e);
+    fn found(db: const u8[:], name: const u8[:]) -> bool {
+        var t: u8[>..] = [];
+        var e2: u8[>..] = [];
+        run(argv(["bin/swan", "query", db, "symbol", name]), "", t, e2);
+        return find(t, "\"name_path\"") >= 0;
+    }
+    let db = str(w, "/map/swan.db");
+    check("git repo: the map says which folder git ignores, and runs no cargo project inside it",
+          code == 0 && find(report, "not mapped, git ignores this folder: scratch") >= 0 && find(report, "rust") < 0, str(report, "\n", e));
+    check("git repo: what is outside the ignored folder is mapped (kept, Kept)", found(db, "kept") && found(db, "Kept"), report);
+    check("git repo: nothing inside it is, not even what an indexer found by itself (dropped, Old, lost)",
+          !found(db, "dropped") && !found(db, "Old") && !found(db, "lost"), report);
+
+    // The same files with no git: nothing is ignored.
+    rm_rf(str(r, "/.git"));
+    let code2 = run(argv(["bin/swan", "map", r, str(w, "/map-plain")]), "", report, e);
+    let db2 = str(w, "/map-plain/swan.db");
+    check("not a git repo: the same folder is mapped like any other (dropped, Old)",
+          code2 == 0 && find(report, "git ignores") < 0 && found(db2, "dropped") && found(db2, "Old"), str(report, "\n", e));
+}
+
 fn agnostic_suite() {
+    agnostic_ignored();
     var tmp: u8[>..] = [];
     var e: u8[>..] = [];
     run(argv(["mktemp", "-d", "-t", "swan-agnostic-XXXXXX"]), "", tmp, e);

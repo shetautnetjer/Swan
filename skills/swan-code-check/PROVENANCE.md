@@ -78,3 +78,10 @@ added: stamping on every core, the Rust flattener, how to rule them out
 was removed, so only `SWAN_STAMP_JOBS=1` remains), and that the quick build
 profile is for changing Swan, not for using it. The pattern pack, fixture
 and self-test are unchanged.
+
+On 2026-11-18 a section on reading the map report was added: the lines
+that say what a map does not cover (folders git ignores, cargo projects
+that were not mapped, a pinned Rust toolchain, tsconfig projects) and what
+each means for an answer. It follows Swan #64 to #67. The pattern pack,
+fixtures and self-test behavior are unchanged.
+

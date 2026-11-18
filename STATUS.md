@@ -1047,3 +1047,37 @@ with nested closures over shared locals), `syntax_index_main` (496),
   the indexer cannot be patched (previous entry) TypeScript runs whole under
   the root config, as before.
 
+## 2026-11-18: folders git ignores are not the repo's code
+
+- Swan's map of its own repo held 1,919 files; 148 are Swan's. The rest
+  came from folders git ignores: 482 files of old test output in `data/`
+  (seven cargo projects among them, each given a rust-analyzer run), and
+  about 1,300 from `.tools`, where the syntax index walked into the Lua
+  server's library (29,744 symbols) and the C fixtures pulled in compiler
+  headers.
+- `swan map` now asks git, sealed, which folders it ignores
+  (`git ls-files --others --ignored --exclude-standard --directory`) and no
+  walk of the repo enters them: language detection, fingerprints, Python
+  pieces, cargo and tsconfig projects, the syntax index, the server-built
+  maps, `swan check`, the search for new files and structural search. The
+  list is kept in the map folder (git-ignored.txt) for the map's other
+  processes and for `swan serve`. The report names the folders.
+- An indexer that finds its own sources (scip-java without a build tool
+  compiles every .java it sees) or follows an include into such a folder
+  still reads those files; the flattener leaves their documents out
+  (`--ignored`), so nothing under an ignored folder is in the map.
+- The syntax index skips hidden folders, as the main walk has since
+  2026-11-17.
+- A folder holding a file git tracks is never left out: git lists a folder
+  as ignored only when nothing in it is tracked. A repo that is not a git
+  repo is walked as before.
+- Swan on itself: 148 files and 3,278 symbols (1,919 and 38,037), two
+  cargo projects instead of seven, 21.5 s (26.3 s).
+- Checked: a git repo with an ignored folder holding Python, Java and a
+  cargo project. None of it is in the map and no cargo project is run; the
+  same files without git are all mapped.
+- Limits: only whole folders are left out, not single ignored files; code
+  generated into an ignored folder is now outside the map, so uses of it
+  resolve to symbols with no definition row, like a dependency's; an
+  indexer still spends its time on what it finds there.
+

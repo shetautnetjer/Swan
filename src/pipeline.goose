@@ -39,6 +39,46 @@ let SKIP_DIRS = ["node_modules", ".git", "target", ".venv", "venv", "__pycache__
 
 extern fn swan_is_symlink(path: const u8[:]) -> bool;
 
+// The folders of a repo that git ignores (its .gitignore files and
+// .git/info/exclude), as paths from the repo, one per line: build output,
+// caches, a test run's leftovers. They are not the repo's code, and no walk
+// of the repo enters them. Swan's map of its own repo held 482 files of old
+// test output from its ignored data/ folder, among them seven cargo projects
+// (2026-11-18). A file git tracks is never in such a folder: git lists a
+// folder as ignored only when nothing in it is tracked.
+//
+// `swan map` asks git at its start (walk_ignore_refresh) and keeps the
+// answer in the map folder, git-ignored.txt, where the map's other
+// processes and later questions read it (walk_ignore_load). Fixed room: a
+// list that outgrows it is cut at a line and the folders past the cut are
+// walked as before.
+var walk_ignored: u8[..65536];
+var walk_ignored_repo: u8[..4096];
+
+fn walk_ignore_set(repo: const u8[:], lines: const u8[:]) {
+    walk_ignored.clear();
+    walk_ignored_repo.clear();
+    guard repo.len > 0 && repo.len < 4000;
+    walk_ignored_repo.append(repo);
+    each_split(lines, '\n') { line =>
+        if line.len > 0 && walk_ignored.len + line.len + 1 < 65000 { walk_ignored.append(line); walk_ignored.push('\n'); }
+    };
+}
+
+// For a process that walks a repo whose map folder is `map_dir`.
+fn walk_ignore_load(repo: const u8[:], map_dir: const u8[:]) {
+    var lines: u8[>..] = [];
+    read_file(str(map_dir, "/git-ignored.txt"), lines);
+    walk_ignore_set(repo, lines);
+}
+
+// Whether a walk leaves this folder out.
+fn walk_skips(full: const u8[:]) -> bool {
+    let r = walk_ignored_repo[..];
+    guard walk_ignored.len > 0 && full.len > r.len + 1 && starts_with(full, r) && full[r.len] == '/' else { return false; }
+    return contains_line(walk_ignored[..], full[r.len + 1..]);
+}
+
 // F(path, name) for each file under repo, breadth-first, skipping folders
 // that hold dependencies, caches or build output. A symlinked folder is not
 // entered: it could lead out of the repo or loop back into it (a link to "."
@@ -67,11 +107,59 @@ fn each_file<F>(repo: const u8[:]) {
                 // and caches, not the repo's code: Swan's own .tools is 3.7 GB of
                 // fetched compilers, and walking it made its map take over ten
                 // minutes.
-                if name[0] != '.' && !contains(SKIP_DIRS, name) && !swan_is_symlink(full) { dirs.append(full); dirs.push('\n'); }
+                if name[0] != '.' && !contains(SKIP_DIRS, name) && !swan_is_symlink(full) && !walk_skips(full) { dirs.append(full); dirs.push('\n'); }
             } else {
                 F(full[..], name);
             }
         };
+    }
+}
+
+// Asks git which folders it ignores and keeps the answer for this map
+// (see walk_ignored). Sealed like every other step: git reads the repo's
+// own config. Folders a walk skips anyway (hidden ones, node_modules,
+// target, ...) are left out of the list. `said` gets a line for the report
+// when the list is not empty.
+fn walk_ignore_refresh(repo: const u8[:], out: const u8[:], trusted: bool, said: u8[>..]&) {
+    var list: u8[>..] = [];
+    var all: u8[>..] = [];
+    if is_dir(str(repo, "/.git")) || file_exists(str(repo, "/.git")) {
+        var a: u8[>..] = [];
+        arg(a, "git");
+        arg(a, "-c");
+        arg(a, "core.fsmonitor=false");
+        arg(a, "ls-files");
+        arg(a, "-z");
+        arg(a, "--others");
+        arg(a, "--ignored");
+        arg(a, "--exclude-standard");
+        arg(a, "--directory");
+        var o: u8[>..] = [];
+        var e: u8[>..] = [];
+        if sealed_run(a, repo, out, trusted, "", 60000, o, e) == 0 {
+            each_split(o, 0) { entry =>
+                guard entry.len > 1 && entry[entry.len - 1] == '/';
+                let dir = entry[..entry.len - 1];
+                format(all, dir, "\n");
+                var walked = true;      // would a walk reach it, were it not ignored
+                each_split(dir, '/') { seg => if seg.len == 0 || seg[0] == '.' || contains(SKIP_DIRS, seg) { walked = false; } };
+                if walked { format(list, dir, "\n"); }
+            };
+        }
+    }
+    write_file(str(out, "/git-ignored.txt"), list);
+    // Every ignored folder, the ones no walk enters included, for the
+    // flattener: an indexer follows includes and imports wherever they lead
+    // (Swan's C fixtures pulled 22 compiler headers out of its .tools).
+    write_file(str(out, "/git-ignored-all.txt"), all);
+    walk_ignore_set(repo, list);
+    let n = count_lines(list);
+    if n > 0 {
+        format(said, "not mapped, git ignores ", if n == 1 { "this folder" } else { "these folders" }, ":");
+        var shown = 0;
+        each_split(list, '\n') { d => if d.len > 0 && shown < 6 { format(said, " ", d); shown++; } };
+        if n > 6 { format(said, " and ", n - 6, " more"); }
+        said.push('\n');
     }
 }
 
@@ -718,8 +806,11 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
     let t_start = clock();
     let home = swan_home();
     let bin = str(home, "/tools/node_modules/.bin/");
-    var l = detect(repo);
     let trusted = build_trusted(repo, out);
+    // Before any walk of the repo: the folders git ignores are left out.
+    var ignored_said: u8[>..] = [];
+    walk_ignore_refresh(repo, out, trusted, ignored_said);
+    var l = detect(repo);
     // A virtualenv inside the repo is the repo's own code (its python, its pip, its PATH):
     // use it only once the repo is trusted, like any other build-running step.
     if !trusted { l.venv.clear(); }
@@ -728,6 +819,7 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
            if l.java { " java" } else { "" }, if l.c { " c/c++" } else { "" }, if l.cuda { " cuda" } else { "" },
            if l.py { " python" } else { "" }, if l.rs || l.cargo { " rust" } else { "" }, if l.kt { " kotlin" } else { "" }, if l.syn { " go/shell/make/ruby/lua (syntax only)" } else { "" }, if l.other.len > 0 { str(" ", l.other) } else { str("") },
            if l.venv.len > 0 { str(" (venv ", l.venv, ")") } else { str("") }, "\n");
+    report.append(ignored_said);
     // A map from an older Swan is rebuilt from scratch, indexers included:
     // reusing their output would skip what the new schema needs.
     let old_db = str(out, "/swan.db");
@@ -1129,6 +1221,7 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
             json::format_string(cfg, str(repo, "/**/*"));
             cfg.append("],\"exclude\":[");
             json::format_string(cfg, str(repo, "/**/node_modules"));
+            each_split(walk_ignored[..], '\n') { d => if d.len > 0 { cfg.push(','); json::format_string(cfg, str(repo, "/", d)); } };
             cfg.append("]}\n");
             write_file(str(dir, "/tsconfig.json"), cfg);
             arg(a, "--cwd");
@@ -2102,6 +2195,8 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
     arg(fl, str(out, "/kept-texts.tsv"));
     arg(fl, "--root");
     arg(fl, repo);
+    // Whatever an indexer found by itself in a folder git ignores is left out.
+    if swan_file_size(str(out, "/git-ignored-all.txt")) > 0 { arg(fl, "--ignored"); arg(fl, str(out, "/git-ignored-all.txt")); }
     let parts = split(scips[..scips.len - 1], 0);
     arg(fl, parts[0]);
     arg(fl, out);

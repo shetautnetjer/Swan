@@ -84,6 +84,27 @@ to someone changing Swan's own Rust code: it makes `scripts/build.sh`
 rebuild the flattener faster and does not change how Swan answers. See
 `docs/speed.md` for the numbers and every setting.
 
+**Read the map report for what the map does not cover.** `use_repo` and
+`update_map` return it as `report` (the CLI prints it). An answer of "no
+references" means little for code the map never held, so before relying on
+one, look for these lines and pass them on:
+
+| Line in the report | What it means for your answers |
+|---|---|
+| `not mapped, git ignores these folders: ...` | Nothing under them is in the map (build output, generated code, leftovers). Uses of code generated there resolve to symbols with no definition. |
+| `rust project <dir>: ... not mapped, the map goes on without it` | A cargo project inside the repo (a fuzz crate, an excluded tool) could not be loaded; cargo's reason follows. The rest of the map is sound. |
+| `rust: no rows for these crates: ...` | These crates are in no cargo project that was mapped. Treat them as unmapped. |
+| `rust: N more cargo projects not mapped` | The repo has more than twelve cargo projects; the rest were not run. |
+| `rust: the repo pins toolchain ...` | The pinned Rust is missing or older than the installed default: Swan indexed with the default, or read the default's standard library. Answers hold; mention it if a Rust result looks odd. |
+| `typescript: N more tsconfig projects own files ...; M could not be read by tsc` | Each package is indexed under its own tsconfig. The M unreadable ones (their config extends a package that is not installed) fall back to the root config, where their aliases and JSX settings do not apply. |
+| `scip-typescript: Swan's stable names are not applied ...` | TypeScript ran as one slower process. Answers hold. |
+| `(some indexers failed; see above)` | A whole language may be missing or stale. Say which, from the lines above it. |
+
+Rust is indexed with every cargo feature on, so code under
+`#[cfg(not(feature = "..."))]` is the part matched by name.
+`<swan-binary> cargo-projects <repo>` prints which cargo projects a map
+would run and with what settings, and runs nothing.
+
 **Don't ask for trust; work with what the seal covers.** Rust maps sealed
 and offline for any repo, against the crates already in Cargo's cache: a
 crate that isn't cached leaves its uses unresolved, so say so. Gradle,
