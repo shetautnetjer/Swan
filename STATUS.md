@@ -835,3 +835,16 @@ it 0). On a copy of Swan's own source a real error in src/edit.goose comes
 back in about half a second. `fixtures/tiny-goose` and three `live` checks.
 Not done: a Goose map (definitions, references, callers); `swan check` with
 `goose check --diagnostics json`; the installed Swan ships no Goose compiler.
+
+## 2026-11-17: pipeline.goose split by job (no behaviour change)
+
+A review for modularity found `src/pipeline.goose` doing nine jobs in 3,200
+lines. Five self-contained groups moved out, text unchanged:
+`gradle.goose` (356), `seal.goose` (141), `pyplan.goose` (290),
+`stamp.goose` (237), `checkers.goose` (351); pipeline.goose is 1,867.
+Two comments that had drifted off their functions were put back. The full
+suite passes unchanged.
+
+Still to do, largest first: `map_main_locked` (1,176 lines, one function
+with nested closures over shared locals), `syntax_index_main` (496),
+`rename_symbol` (295), `check_main` (173), `edit_batch` (169).
