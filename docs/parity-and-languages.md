@@ -136,6 +136,14 @@ workspace (21 .rs files), mapped together with its one Python file.**
     `impl/Tile/Area/area`.
   - rust-analyzer logs "definition should have been in an SCIP document"
     for a few symbols (6 here).
+  - One rust-analyzer run for each cargo project in the repo (the root
+    workspace, a `[workspace]` fuzz or xtask crate, an excluded crate,
+    crates side by side with no root Cargo.toml), every cargo feature on.
+    A repo pinning an installed Rust older than rustup's default keeps its
+    toolchain for cargo, and rust-analyzer reads the default one's
+    standard library: with Rust 1.88's own it resolved no `vec!`,
+    `matches!` or prelude name. `swan cargo-projects <repo>` shows the
+    plan. See STATUS.md, 2026-11-17.
   - It runs `cargo` and writes build output. `swan map` points
     `CARGO_TARGET_DIR` into the output folder. Cargo still writes a
     `Cargo.lock` into a repo that has none, so map a copy of such a repo.

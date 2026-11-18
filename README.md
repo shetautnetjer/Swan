@@ -318,6 +318,7 @@ scripts/build.sh                                # bin/swan; the first build fetc
 # SWAN_FLATTEN_PROFILE=quick scripts/build.sh   # while changing native/swan-flatten: ~1.6 s rebuilds instead of ~8 s; plain build.sh is what ships
 bin/swan map <repo> data/<name>                 # every indexer the repo needs -> map (refreshes if it exists)
 bin/swan check <repo> data/<name>               # tsc / cargo check / pyright -> diagnostics in the map
+bin/swan cargo-projects <repo>                  # the cargo projects map would run rust-analyzer in, with its settings (runs nothing)
 scripts/index-repo.sh <ts-repo> data/<name>     # index.scip, TSV rows, swan.db
 scripts/refresh-repo.sh <ts-repo> data/<name>   # after edits: rerun SCIP, rewrite only changed files
 scripts/diagnose-repo.sh <ts-repo> data/<name>  # tsc / cargo check, loaded into the map
@@ -562,6 +563,7 @@ src/pyplan.goose     splits a Python repo into pieces for scip-python
 src/stamp.goose      content stamps, computed one worker per core
 src/checkers.goose   `swan check`: compilers and linters, their output parsed into diagnostics
 src/lspindex.goose   `swan lsp-index`: a map for a language from its language server (Goose, Go)
+src/rustproj.goose   the cargo projects of a repo: which folders rust-analyzer runs in, and its settings
 tools/solidlsp/      the SolidLSP bridge, and Swan's stand-ins for the two helpers SolidLSP imports from Serena
 src/db.goose         map helpers over the imported SQLite package
 src/swan.build       Goose sidecar: native file/process helpers and LSP bridge

@@ -782,26 +782,32 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
     // Edits after this moment make answers stale (src/fresh.goose).
     write_file(str(out, "/scip-started"), "");
 
-    // The jobs, each "label \x01 index file \x01 argv \x01 env \x01 base",
-    // separated by \x02. base is the folder the job's document paths are
-    // relative to, when that is not the repo (scip-python --target-only).
+    // The jobs, each "label \x01 index file \x01 argv \x01 env \x01 base
+    // \x01 optional", separated by \x02. base is the folder the job's
+    // document paths are relative to, when that is not the repo (scip-python
+    // --target-only, a cargo project in a subfolder). optional is "1" for a
+    // job the map can do without: when it fails the report says so and the
+    // map is still made (a fuzz crate that does not resolve).
     var jobs: u8[>..] = [];
     var prev_index: u8[>..] = [];
     read_file(str(out, "/index-manifest.tsv"), prev_index);
     var index_manifest: u8[>..] = [];
     var reused_all = true;
-    fn add_job(label: const u8[:], target: const u8[:], a: const u8[:], e: const u8[:], base: const u8[:]) {
+    fn add_job(label: const u8[:], target: const u8[:], a: const u8[:], e: const u8[:], base: const u8[:], optional: bool = false) {
         if label.len > 0 { reused_all = false; }
         jobs.append(label); jobs.push(1);
         jobs.append(target); jobs.push(1);
         jobs.append(a); jobs.push(1);
         jobs.append(e); jobs.push(1);
-        jobs.append(base); jobs.push(2);
+        jobs.append(base); jobs.push(1);
+        if optional { jobs.push('1'); }
+        jobs.push(2);
     }
     // A whole-language job, unless its files have the fingerprint they had
     // when its index was made. `force` runs it anyway, with the fingerprint
     // recorded as usual (a file whose indexed text is unknown, see below).
-    fn add_lang_job(label: const u8[:], target: const u8[:], a: const u8[:], e: const u8[:], fp: u64, force: bool = false) {
+    fn add_lang_job(label: const u8[:], target: const u8[:], a: const u8[:], e: const u8[:], fp: u64, force: bool = false,
+                    base: const u8[:] = "", optional: bool = false) {
         let fps = str(fp);
         var hit = false;
         each_split(prev_index, '\n') { line =>
@@ -811,9 +817,9 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
         format(index_manifest, label, "\t", fps, "\t", target, "\n");
         if hit && !force {
             format(report, label, ": reused (no changes)\n");
-            add_job("", target, "", "", "");
+            add_job("", target, "", "", base);
         } else {
-            add_job(label, target, a, e, "");
+            add_job(label, target, a, e, base, optional);
         }
     }
 
@@ -1507,29 +1513,84 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
         }
     }
 
-    if l.cargo && !trusted && !sandbox_on() {
+    // Rust: one rust-analyzer run for each cargo project (src/rustproj.goose),
+    // the repo root's first. `rust_dirs` is every folder with a Cargo.toml.
+    let rust_dirs = cargo_manifest_dirs(repo);
+    var rust_over: u8[>..] = [];
+    let rust_plan = rust_projects(repo, rust_dirs, rust_over);
+    var rust_indexed = false;
+    if rust_plan.len > 0 && !trusted && !sandbox_on() {
         skipped.append(" rust-analyzer scip (Rust: cargo build scripts, proc macros)");
-        delete_file(str(out, "/index-rust.scip"));   // this map drops it; after trust it is rebuilt, not reused
-    } else if l.cargo {
-        let target = str(out, "/index-rust.scip");
-        var a: u8[>..] = [];
-        arg(a, str(home, "/.tools/rust-analyzer/rust-analyzer"));
-        arg(a, "scip");
-        arg(a, ".");
-        arg(a, "--output");
-        arg(a, target);
-        // Build scripts and proc macros run inside the seal. Untrusted repos
-        // run offline against the crates already cached in Cargo's home;
-        // a missing crate leaves those uses unresolved, never unsealed.
-        var renv: u8[>..] = [];
-        renv.append(env_entry("CARGO_TARGET_DIR", str(out, "/cargo-target")));
-        add_toolchain_env(renv, "RUSTUP_HOME", ".rustup");
-        add_toolchain_env(renv, "CARGO_HOME", ".cargo");
-        if !trusted { renv.append(env_entry("CARGO_NET_OFFLINE", "true")); }
-        let tc = rust_toolchain_override(repo);
-        if tc.len > 0 { renv.append(env_entry("RUSTUP_TOOLCHAIN", tc)); }
-        add_lang_job("rust-analyzer scip", target, a, child_env(l, renv),
-                     lang_fingerprint(repo, [".rs"], ["Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "rust-toolchain"]) { f => stamp(f) });
+        // This map drops them; after trust they are rebuilt, not reused.
+        var had: u8[>..] = [];
+        if list_dir(out, had) {
+            each_split(had, '\n') { nm => if starts_with(nm, "index-rust") && ends_with(nm, ".scip") { delete_file(str(out, "/", nm)); } };
+        }
+    } else if rust_plan.len > 0 {
+        rust_indexed = true;
+        // Any Rust file or cargo file anywhere in the repo: a project's index
+        // also holds what it resolved in the crates it depends on by path.
+        let rust_files = lang_fingerprint(repo, [".rs", "Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "rust-toolchain"], []) { f => stamp(f) };
+        // What each folder with a rust-toolchain file means for the run, asked
+        // (and said on stderr) once: "folder \x01 library source \x01 toolchain".
+        var rust_toolchains: u8[>..] = [];
+        each_split(rust_plan, '\n') { dir =>
+            guard dir.len > 0;
+            let at_root = dir == ".";
+            let target: u8[>..] = if at_root { str(out, "/index-rust.scip") } else { str(out, "/index-rust-", hash(dir), ".scip") };
+            let label: u8[>..] = if at_root { str("rust-analyzer scip") } else { str("rust project ", dir) };
+            let base: u8[>..] = if at_root { str("") } else { str(dir) };
+            var a: u8[>..] = [];
+            arg(a, str(home, "/.tools/rust-analyzer/rust-analyzer"));
+            arg(a, "scip");
+            arg(a, dir);
+            arg(a, "--output");
+            arg(a, target);
+            // The settings, in a file named by what they say: projects that
+            // agree share it.
+            let tc_dir = rust_toolchain_dir(repo, dir);
+            var std_src: u8[>..] = [];
+            var tc: u8[>..] = [];
+            var asked = false;
+            each_split(rust_toolchains, '\n') { line =>
+                let f = split(line, 1);
+                if f.len == 3 && f[0] == tc_dir { asked = true; std_src.append(f[1]); tc.append(f[2]); }
+            };
+            if !asked {
+                std_src.append(rust_std_source(tc_dir));
+                tc.append(rust_toolchain_override(tc_dir));
+                rust_toolchains.append(tc_dir); rust_toolchains.push(1);
+                rust_toolchains.append(std_src); rust_toolchains.push(1);
+                rust_toolchains.append(tc); rust_toolchains.push('\n');
+            }
+            let settings = rust_analyzer_config(std_src);
+            let cfg = str(out, "/rust-analyzer-", hash(settings), ".json");
+            write_file(cfg, settings);
+            arg(a, "--config-path");
+            arg(a, cfg);
+            // Build scripts and proc macros run inside the seal. Untrusted repos
+            // run offline against the crates already cached in Cargo's home;
+            // a missing crate leaves those uses unresolved, never unsealed.
+            var renv: u8[>..] = [];
+            renv.append(env_entry("CARGO_TARGET_DIR", str(out, "/cargo-target")));
+            add_toolchain_env(renv, "RUSTUP_HOME", ".rustup");
+            add_toolchain_env(renv, "CARGO_HOME", ".cargo");
+            if !trusted { renv.append(env_entry("CARGO_NET_OFFLINE", "true")); }
+            // A run that fails then ends on its reason (cargo's own error),
+            // which the report quotes, not on forty lines of stack.
+            renv.append(env_entry("RUST_BACKTRACE", "0"));
+            if tc.len > 0 { renv.append(env_entry("RUSTUP_TOOLCHAIN", tc)); }
+            // A project inside another one (a fuzz crate, an excluded tool) is
+            // one the map can do without; a project with none above it is the
+            // repo's own code, and its failure is the map's.
+            var inside = false;
+            each_split(rust_dirs, '\n') { d => if d.len > 0 && cargo_inside(dir, d) { inside = true; } };
+            add_lang_job(label, target, a, child_env(l, renv), hash_combine(rust_files, hash(settings)), false, base, inside);
+        };
+        if rust_over.len > 0 {
+            format(report, "rust: ", count_lines(rust_over), " more cargo projects not mapped (", RUST_PROJECT_LIMIT, " at most in one map), starting with ",
+                   rust_over[..find(rust_over, "\n")], "\n");
+        }
     }
 
     // scip-java indexes Java, and Kotlin built with Gradle (its compiler
@@ -1765,12 +1826,13 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
             if f[0].len > 0 { format(fresh_scips, f[1], "\n"); }
             if f[4].len > 0 { arg(scips, str(f[1], "=", f[4])); } else { arg(scips, f[1]); }
         } else {
-            ok = false;
+            if f[5].len == 0 { ok = false; }
             failed.append(f[1]);
             failed.push('\n');
             var log: u8[>..] = [];
             read_file(str(out, "/log-", idx, ".txt"), log);
-            format(report, " (exit ", code, ") ", if log.len > 400 { log[log.len - 400..] } else { log[..] });
+            format(report, if f[5].len > 0 { " not mapped, the map goes on without it" } else { "" },
+                   " (exit ", code, ") ", if log.len > 400 { log[log.len - 400..] } else { log[..] });
         }
         if f[0].len > 0 { report.push('\n'); }
         idx++;
@@ -1812,6 +1874,15 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
         };
     }
     let db = str(out, "/swan.db");
+    // Said at the end of every map that indexed Rust: the crates the
+    // finished map has no rows for (src/rustproj.goose).
+    fn rust_gaps() {
+        guard rust_indexed;
+        let gaps = rust_unmapped(repo, db, rust_dirs);
+        if gaps.len > 0 {
+            format(report, "\nrust: no rows for these crates: ", gaps, " (in no cargo project that was mapped, or their project's run failed)");
+        }
+    }
     write_file(str(out, "/content-stamps.tsv"), stamp_lines);
     if !clean && reused_all && file_exists(db) && file_exists(str(out, "/occurrences.tsv")) {
         // No indexer ran, but files edited only in comments or layout still
@@ -1836,8 +1907,9 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
                 sqlite::close(h);
             }
         }
-        format(report, if n_cosmetic > 0 { "\nno code changed since the last map" } else { "nothing changed since the last map" },
-               "\nswan map: ", ((clock() - t_start) * 1000.0) as i64, " ms in all");
+        format(report, if n_cosmetic > 0 { "\nno code changed since the last map" } else { "nothing changed since the last map" });
+        rust_gaps();
+        format(report, "\nswan map: ", ((clock() - t_start) * 1000.0) as i64, " ms in all");
         return ok;
     }
     // Only failed indexers ran (rea's scip-java fails every map): the index
@@ -1850,8 +1922,9 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
        read_file(flat_marker, flat_prev) && flat_prev == scips {
         idx_new.append(idx_prev);
         finish_cosmetic(false);
-        format(report, "\nflatten: skipped (only failed indexers ran; rows as last flattened)",
-               "\nswan map: ", ((clock() - t_start) * 1000.0) as i64, " ms in all, up to ", limit, " indexers at once");
+        format(report, "\nflatten: skipped (only failed indexers ran; rows as last flattened)");
+        rust_gaps();
+        format(report, "\nswan map: ", ((clock() - t_start) * 1000.0) as i64, " ms in all, up to ", limit, " indexers at once");
         if !ok { report.append("\n(some indexers failed; see above)"); }
         return ok;
     }
@@ -1916,6 +1989,7 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
             }
         }
     }
+    rust_gaps();
     format(report, "\nswan map: ", ((clock() - t_start) * 1000.0) as i64, " ms in all, up to ", limit, " indexers at once");
     if !ok { report.append("\n(some indexers failed; see above)"); }
     return ok;

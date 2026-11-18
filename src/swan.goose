@@ -30,6 +30,7 @@ import .pypatch;
 import .wings;
 import .broke;
 import .lspindex;
+import .rustproj;
 import treesitter from "shetautnetjer/goose-treesitter@59313e9da0b9f1cce8df83cabe53ed73fa92345c";   // tree-sitter and its grammars, built once and cached
 import sqlite from "shetautnetjer/goose-sqlite@c759de735ae936dcbc197bb9aae40e13565ef21c";   // open_existing never creates a missing map
 
@@ -41,6 +42,7 @@ fn usage() {
                swan broke <out-dir> <file>...   errors new in these files since last asked (exit 1 if any)
                swan trust <repo>                let map, check and live answers run the repo's build files
                swan gradle-tasks <repo>         the Gradle tasks map would give scip-java (runs nothing)
+               swan cargo-projects <repo>       the cargo projects map would run rust-analyzer in, with its settings (runs nothing)
                swan lsp-index <repo> <out-dir> <lang> <target.scip>   a SCIP index from the language's server (what swan map runs)
                swan lsp-ask <repo> <out-dir> <file> <method> [line col] [more]   one question to the file's language server
                swan format <repo> <out-dir> <file>...
@@ -174,6 +176,8 @@ fn main() {
         if !ok { exit(1); }
     } else if a[1] == "gradle-tasks" && a.len == 3 {
         write_stdout(gradle_scip_tasks(abs_path(a[2])));
+    } else if a[1] == "cargo-projects" && a.len == 3 {
+        write_stdout(cargo_projects_report(abs_path(a[2])));
     } else if a[1] == "check" && a.len == 4 {
         var report: u8[>..] = [];
         let ok = check_main(a[2], a[3], report);
