@@ -997,3 +997,53 @@ with nested closures over shared locals), `syntax_index_main` (496),
 - Not fixed by this: every file is still indexed under the root tsconfig
   (the next entry's subject).
 
+## 2026-11-18: TypeScript: each file under the tsconfig that owns it
+
+- Found with the fault above, on Understand-Anything: Swan indexed every
+  file under the root tsconfig. The root one has no `jsx`; the dashboard
+  package's own sets it. TypeScript does not follow an import that resolves
+  to a .tsx file while `jsx` is unset, so a .tsx file in another chunk was
+  not loaded and the import and every use of what it brought in was lost
+  (621 rows, 136 of App.tsx's 450). A package's own `paths` aliases were
+  ignored the same way, and a package the root config did not include had
+  no rows.
+- Now (src/tsproj.goose): a config is a project when it is a tsconfig.json
+  somewhere in the repo, or one that such a config or the root's references
+  (tsconfig.app.json beside a tsconfig.json that only points at it). Each
+  file belongs to the nearest config above it that lists it, as an editor's
+  language service has it; what a config lists is tsc's own answer
+  (`tsc -p <config> --showConfig`, sealed). Chunks are planned inside each
+  project, each chunk's config extends its project's, with that project's
+  declaration files. An edit is a layer for each project it touches.
+- A config tsc cannot read (it extends a package that is not installed) is
+  counted in the report and its files stay with the root's config. 64
+  configs at most are asked about. The answers are kept until a file comes
+  or goes or any tsconfig changes.
+- A repo with one tsconfig is planned exactly as before.
+- Measured on Understand-Anything b861852 (six tsconfig files):
+
+  | | one process, root config | 7 chunks, root config | now (8 chunks, 4 projects) |
+  |---|---|---|---|
+  | TypeScript rows | 36,031 | 35,410 | 36,526 |
+  | rows in dashboard/src/App.tsx | 450 | 314 | 542 |
+
+  The map takes 4.5 s (3.7 s before). WebStorm, 3,000 sampled references:
+  2,816 the same definition, 154 it has no answer for, 12 constructors
+  (Swan has the class and the constructor), 18 where it names the import
+  line of the using file (aliases and default imports) and Swan the
+  declaration. No site left where the two name different declarations.
+  morluto/rea (one tsconfig.json) maps as before: 1,509,193 TypeScript rows,
+  60 s.
+- Checked in the split suite: a repo with a root config that takes in
+  everything, a package with its own tsconfig, a package whose tsconfig.json
+  only references a tsconfig.app.json with `jsx` and a `paths` alias, and a
+  config tsc cannot read. Twelve .tsx components importing one another
+  across chunks all resolve; the alias import resolves in all twelve (0 of
+  12 before); one chunk for each project and several hold the same rows; an
+  edit in two projects is two layers and gives the rows of a fresh map.
+- Limits: `tsc --listFilesOnly` is still asked of the root config only, so
+  a file a nested project imports from outside every config's list is not
+  watched for changes; `swan check` runs tsc on the root config only; when
+  the indexer cannot be patched (previous entry) TypeScript runs whole under
+  the root config, as before.
+
