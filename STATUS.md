@@ -807,3 +807,14 @@ pinned by sha256 in `scripts/fetch-tools.sh`.
 - Live find_implementations works through it too: Shape gives Circle and
   Square, Shape/area their two area() overrides (checked by hand).
 - Not done: the other live servers are still unsealed; Lombok.
+
+## 2026-11-17: live Goose errors from the compiler's own server
+
+`tools/modules.json` gains "goose": `goose lsp`, sealed. `{goose_entry_files}`
+names the repo's programs (files with `fn main(`) in the server's
+initialization options; without it a module checked alone reports every
+name its importer provides as unknown (src/edit.goose: 6 false errors, with
+it 0). On a copy of Swan's own source a real error in src/edit.goose comes
+back in about half a second. `fixtures/tiny-goose` and three `live` checks.
+Not done: a Goose map (definitions, references, callers); `swan check` with
+`goose check --diagnostics json`; the installed Swan ships no Goose compiler.

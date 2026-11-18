@@ -161,6 +161,35 @@ fn live_suite() {
     check("serve exits cleanly and stops rust-analyzer", code == 0, str("exit ", code));
     live_java("0");
     live_java("1");
+    live_goose();
+}
+
+// Goose's own language server (tools/modules.json "goose"), sealed. A module
+// that only compiles as part of the program importing it has no false errors
+// (Swan names the repo's entry files), and a real one shows up live.
+fn live_goose() {
+    let base = "data/live-goose";
+    let repo = str(base, "/repo");
+    rm_rf(base);
+    mkdir_p(base);
+    var o: u8[>..] = [];
+    guard sh(argv(["cp", "-r", "fixtures/tiny-goose", repo]), "", o) else { return; }
+    write_file(str(repo, "/tool.py"), "x = 1\n");      // something the map can index
+    guard sh(argv(["bin/swan", "map", repo, str(base, "/out")]), "", o) else { return; }
+    guard mcp_open(argv(["bin/swan", "serve", str(base, "/out/swan.db")]), "") else { return; }
+    var hit = false;
+    let args = """{"relative_path":"shapes.goose","live":true}""";
+    var clean: u8[>..] = [];
+    let ok1 = mcp_call("get_diagnostics", args, clean) == 1;
+    check("goose: a module that uses its importer's names has no errors", ok1 && lv_errors(clean, "", 0, hit) == 0, clean);
+    let f = str(repo, "/shapes.goose");
+    replace_in_file(f, "side * side * UNIT", "side * no_such(side)");
+    var bad: u8[>..] = [];
+    let ok2 = mcp_call("get_diagnostics", args, bad) == 1;
+    lv_errors(bad, "", 5, hit);
+    check("goose: an unknown function is an error on line 5", ok2 && hit && find(bad, "no_such") >= 0, bad);
+    let code = mcp_close_code();
+    check("goose: serve stops the Goose server", code == 0, str("exit ", code));
 }
 
 // Eclipse JDT LS (tools/modules.json "java"): with trust "0" the repo is

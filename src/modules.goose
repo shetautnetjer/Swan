@@ -38,13 +38,40 @@ fn expand(s: const u8[:], c: const ModCtx&, into: u8[>..]&) {
     format_replaced(b, a, "{bin}", str(c.home, "/tools/node_modules/.bin"));
     a.clear();
     format_replaced(a, b, "{compdb}", c.compdb);
-    if find(a, "{java_source_paths}") >= 0 {
+    if find(a, "{goose_entry_files}") >= 0 {
+        b.clear();
+        format_replaced(b, a, "{python}", c.python);
+        format_replaced(into, b, "{goose_entry_files}", goose_entry_files(c.repo));
+    } else if find(a, "{java_source_paths}") >= 0 {
         b.clear();
         format_replaced(b, a, "{python}", c.python);
         format_replaced(into, b, "{java_source_paths}", java_source_paths(c.repo));
     } else {
         format_replaced(into, a, "{python}", c.python);
     }
+}
+
+// The repo's Goose programs as a JSON array of absolute paths: the .goose
+// files that define `fn main(` at the start of a line. Goose's server checks
+// each open file as a program of its own unless told which programs there
+// are; a module alone then reports every name its importer provides as
+// unknown. At most 32.
+fn goose_entry_files(repo: const u8[:]) -> u8[>..] {
+    var out: u8[>..] = [];
+    out.push('[');
+    var count = 0;
+    each_file(repo) { full, name =>
+        if count < 32 && ends_with(name, ".goose") {
+            var text: u8[>..] = [];
+            if read_file(full, text) && (starts_with(text, "fn main(") || find(text, "\nfn main(") >= 0) {
+                if count > 0 { out.push(','); }
+                json::format_string(out, full);
+                count++;
+            }
+        }
+    };
+    out.push(']');
+    return out;
 }
 
 // The repo's Java source folders as a JSON array of repo-relative paths, for
@@ -245,6 +272,7 @@ fn lang_of_path(p: const u8[:]) -> const u8[:] {
     if ends_with(p, ".rs") { return "rust"; }
     if ends_with(p, ".kt") || ends_with(p, ".kts") { return "kotlin"; }
     if ends_with(p, ".java") { return "java"; }
+    if ends_with(p, ".goose") { return "goose"; }
     if ends_with(p, ".c") || ends_with(p, ".cc") || ends_with(p, ".cpp") || ends_with(p, ".cxx") || ends_with(p, ".h") ||
        ends_with(p, ".hpp") || ends_with(p, ".hh") || ends_with(p, ".hxx") || ends_with(p, ".cu") || ends_with(p, ".cuh") { return "cpp"; }
     if ends_with(p, ".cs") { return "csharp"; }
