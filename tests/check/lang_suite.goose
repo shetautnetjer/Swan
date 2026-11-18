@@ -19,6 +19,7 @@ fn lang_suite() {
     lang_java();
     lang_java_batch();
     lang_batch_touches();
+    lang_py_attr_family();
     lang_gradle();
     lang_cuda();
     lang_modules();
@@ -190,6 +191,26 @@ fn lang_batch_touches() {
     let unchanged = run(argv(["diff", "-r", "fixtures/tiny-py", str(w, "/repo")]), "", same, e0) == 0;
     check("batch touches: without spread-wings the plan still works and says why", r == 1 &&
           find(t, "\"available\":false,\"why\":\"SWAN_SPREAD_WINGS is /nonexistent/spread-wings") >= 0 && unchanged, t);
+}
+
+// A class attribute a subclass overrides is renamed as one family: the
+// base's declaration, each subclass's own assignment, and every use.
+fn lang_py_attr_family() {
+    let w = "data/py-attrs";
+    rm_rf(w);
+    mkdir_p(str(w, "/repo"));
+    write_file(str(w, "/repo/chan.py"),
+               "class Channel:\n    session: str = \"\"\n\n    def home(self) -> str:\n        return self.session\n\n\nclass Boss(Channel):\n    session = \"boss\"\n\n    def where(self) -> str:\n        return self.session\n\n\nclass Plain(Channel):\n    pass\n\n\ndef show(c: Channel) -> str:\n    return c.session + Boss().session\n");
+    var o: u8[>..] = [];
+    guard sh(argv(["bin/swan", "map", str(w, "/repo"), str(w, "/map")]), "", o) else { return; }
+    let db = str(w, "/map/swan.db");
+    var t: u8[>..] = [];
+    let r = serve_once(db, "rename_symbol", """{"name_path":"Boss/session","relative_path":"chan.py","new_name":"login","apply":true}""", t);
+    var text: u8[>..] = [];
+    read_file(str(w, "/repo/chan.py"), text);
+    check("python: renaming a subclass's class attribute renames the base's and every use with it",
+          r == 1 && find(text, "session") < 0 && find(text, "login: str = \"\"") >= 0 && find(text, "login = \"boss\"") >= 0 &&
+          find(text, "return c.login + Boss().login") >= 0, str(t, "\n", text));
 }
 
 fn lang_java() {
