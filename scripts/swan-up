@@ -63,11 +63,17 @@ cmd_pack() {
     git -C "$repo" worktree add --detach "$src" "$rev" >/dev/null
   fi
   ( cd "$src"
-    if [ -d "$repo/lsp/.git" ] || [ -f "$repo/lsp/.git" ]; then
-      git -c protocol.file.allow=always -c submodule.lsp.url="$repo/lsp" submodule update --init lsp >/dev/null
-    else
-      git submodule update --init lsp >/dev/null
-    fi
+    # The pinned parts: goose-lsp (compiled in) and Spread-Wings (its own
+    # program, shipped beside swan). From the checkout's own copies when it
+    # has them, so a pack needs no network.
+    local sub
+    for sub in lsp wings; do
+      if [ -d "$repo/$sub/.git" ] || [ -f "$repo/$sub/.git" ]; then
+        git -c protocol.file.allow=always -c "submodule.$sub.url=$repo/$sub" submodule update --init "$sub" >/dev/null
+      else
+        git submodule update --init "$sub" >/dev/null
+      fi
+    done
     mkdir -p .tools
     if [ ! -d .tools/goose-home ]; then
       if [ -d "$repo/.tools/goose-home/pkg" ]; then
@@ -85,10 +91,12 @@ src, rev, goose, work = sys.argv[1:]
 h = lambda p: hashlib.sha256(open(p, "rb").read()).hexdigest()
 import os
 flatten = f"{src}/bin/swan-flatten"
+wings = f"{src}/bin/spread-wings"
 json.dump({
   "source_revision": rev,
   "binary_sha256": h(f"{src}/bin/swan"),
   "flatten_sha256": h(flatten) if os.path.isfile(flatten) else None,
+  "wings_sha256": h(wings) if os.path.isfile(wings) else None,
   "goose_binary_sha256": h(goose),
   "gcc": subprocess.run(["gcc", "--version"], capture_output=True, text=True).stdout.splitlines()[0],
   "system": platform.platform(), "libc": list(platform.libc_ver()),
@@ -97,13 +105,15 @@ json.dump({
   "build_log": f"{work}/build.log",
 }, open(f"{work}/build-receipt.json", "w"), indent=1)
 PY
-  # Third-party notices for what is compiled in: Goose, goose-sqlite (SQLite),
-  # goose-treesitter (tree-sitter and grammars) and goose-lsp.
+  # Third-party notices for what is compiled in or shipped beside: Goose,
+  # goose-sqlite (SQLite), goose-treesitter (tree-sitter and grammars),
+  # goose-lsp and Spread-Wings.
   local lic="$work/licenses"; rm -rf "$lic"; mkdir -p "$lic"
   local gdir; gdir="$(dirname "$goose")"
   cp "$gdir/LICENSE" "$lic/Goose-LICENSE"
   [ -d "$gdir/licenses" ] && for f in "$gdir"/licenses/*; do [ -f "$f" ] && cp "$f" "$lic/Goose-$(basename "$f")"; done
   cp "$src/lsp/LICENSE" "$lic/goose-lsp-LICENSE"
+  cp "$src/wings/LICENSE" "$lic/spread-wings-LICENSE"
   local pkg
   for pkg in goose-sqlite goose-treesitter; do
     local d; d="$(ls -d "$src/.tools/goose-home/pkg/github.com/shetautnetjer/$pkg"/*/ 2>/dev/null | head -1)"
@@ -134,7 +144,8 @@ for p in json.load(sys.stdin)["packages"]:
   fi
   python3 "$src/scripts/package.py" --binary "$src/bin/swan" --output "$dist.partial" \
     --source-revision "$rev" --build-receipt "$work/build-receipt.json" \
-    --licenses "$lic" --require-license Goose-LICENSE "${flatten_args[@]}" >/dev/null
+    --licenses "$lic" --require-license Goose-LICENSE "${flatten_args[@]}" \
+    --wings "$src/bin/spread-wings" >/dev/null
   cp "$work/build-receipt.json" "$dist.partial/"
   cp "$src/scripts/swan-up" "$dist.partial/swan-up"
   ( cd "$dist.partial" && sha256sum swan-up > swan-up.sha256 )

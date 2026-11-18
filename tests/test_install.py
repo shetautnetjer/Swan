@@ -283,13 +283,15 @@ class PackagingTests(unittest.TestCase):
         receipt = self.root / "build.json"
         # Any real x86-64 ELF stands in for the native flattener.
         flatten = Path("/usr/bin/false")
+        wings = Path("/usr/bin/env")       # and for Spread-Wings
         receipt.write_text(json.dumps({"source_revision": revision, "binary_sha256": install.sha256(binary),
-                                       "flatten_sha256": install.sha256(flatten)}))
+                                       "flatten_sha256": install.sha256(flatten),
+                                       "wings_sha256": install.sha256(wings)}))
         licenses = self.root / "licenses"
         licenses.mkdir()
         (licenses / "test-license").write_text("fixture license\n")
         output = self.root / "builder-output"
-        built = builder.build_package(source, binary, output, revision, receipt, licenses, flatten=flatten)
+        built = builder.build_package(source, binary, output, revision, receipt, licenses, flatten=flatten, wings=wings)
         archive = output / builder.ARCHIVE
         checked = install.inspect_archive(archive, install.sha256(archive))
         self.assertEqual(built, checked)

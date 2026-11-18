@@ -85,3 +85,7 @@ that were not mapped, a pinned Rust toolchain, tsconfig projects) and what
 each means for an answer. It follows Swan #64 to #67. The pattern pack,
 fixtures and self-test behavior are unchanged.
 
+On 2026-11-18, with Spread-Wings shipped inside Swan, a "Find your way
+first" section and a "Broad map" evidence kind were added for the three
+tools that answer from it (`repo_overview`, `what_touches`,
+`file_neighbors`). Guidance is conditional on the server listing them.

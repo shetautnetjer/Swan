@@ -115,6 +115,23 @@ for that repo. Even then the repo runs sealed: trust adds the network and
 write access to the repo and its build caches, nothing else. Never set
 `SWAN_TRUST_BUILD=1`.
 
+## Find your way first
+
+When the server lists them (Swan from 2026-11-18 on), three tools answer
+from Spread-Wings, a syntax-level graph Swan builds beside the map in
+seconds:
+
+- `repo_overview` in a repo you do not know: its groups of files, their main
+  files and most-called definitions. Start here, then use the exact tools on
+  what looks relevant.
+- `what_touches {"name": ...}` before changing a definition: the files that
+  define, call or import it, which are tests, and the groups they sit in.
+- `file_neighbors {"relative_path": ...}`: what a file imports, who imports
+  it, where its calls go.
+
+They are broad and quick, not exact: report them as "broad map" evidence
+(below), never as the list of sites an edit must change.
+
 ## Say what kind of evidence each answer is
 
 Report every finding with its evidence kind. Never merge them into one
@@ -125,6 +142,7 @@ Report every finding with its evidence kind. Never merge them into one
 | Compiler | SCIP indexers: TypeScript/JavaScript, Python, Rust, Java, Kotlin, C, C++, CUDA, C# (only those the map report shows ran) | Resolved by the compiler: exact |
 | Matched by name | Rows marked `by_name: true`; whole syntax-level languages below; Rust uses inside unresolved macros | An identifier with the same name: a lead, not proof. Two things with one name are not told apart |
 | Structural pattern | `search_pattern` on on-disk syntax | Shape of the code only; check `files_searched`, `pattern_does_not_parse_in`, `truncated` |
+| Broad map | `repo_overview`, `what_touches`, `file_neighbors`, and `touches` in a planned `edit_batch` (Spread-Wings, by syntax) | Links matched by import, by the type a call names, and by name: for finding your way and for "what might this reach". Each answer carries `"source":"spread-wings"`; confirm what matters with `find_referencing_symbols` or `get_callers` |
 | Live diagnostics, checks, tests | The language server, checker or test runner actually run | Only what the call returned; "available" is not "passed" |
 
 **Syntax-level languages** (definitions, bodies and references by name, no

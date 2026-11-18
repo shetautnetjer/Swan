@@ -1,3 +1,6 @@
 [submodule "lsp"]
 	path = lsp
 	url = https://github.com/shetautnetjer/goose-lsp
+[submodule "wings"]
+	path = wings
+	url = https://github.com/shetautnetjer/spread-wings

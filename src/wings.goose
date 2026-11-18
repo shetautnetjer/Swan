@@ -6,8 +6,13 @@
 // changes (renames and replaced bodies) and lists what the change reaches
 // that the batch does not edit, and the tests to run afterwards.
 //
-// Optional: without spread-wings the plan is the same, and says why this
-// part is missing.
+// Without spread-wings the plan is the same, and says why this part is
+// missing.
+//
+// The same graph answers three questions through Swan's server
+// (wings_answer): the lay of a repo, what changing a name reaches, and a
+// file's neighbours. They are Spread-Wings' answers, by syntax, and say so;
+// Swan's own tools give the exact sites.
 
 import std;
 import os;
@@ -17,8 +22,10 @@ import .db;
 import .run;
 import .pipeline;
 
-// The spread-wings program: $SWAN_SPREAD_WINGS, else `spread-wings` on PATH.
-// "" when neither; `why` says which was tried.
+// The spread-wings program: $SWAN_SPREAD_WINGS when set, else the one that
+// ships with this Swan (<swan home>/bin/spread-wings, built from the wings/
+// submodule at the commit Swan pins), else `spread-wings` on PATH. "" when
+// none; `why` says what was tried.
 fn wings_bin(why: u8[>..]&) -> u8[>..] {
     var found: u8[>..] = [];
     var v: u8[>..] = [];
@@ -27,13 +34,17 @@ fn wings_bin(why: u8[>..]&) -> u8[>..] {
         else { format(why, "SWAN_SPREAD_WINGS is ", v, ", which is not there"); }
         return found;
     }
+    let own = str(swan_home(), "/bin/spread-wings");
+    if file_exists(own) { found.append(own); return found; }
     var p: u8[>..] = [];
     if env("PATH", p) {
         each_split(p, ':') { d =>
             if found.len == 0 && d.len > 0 && file_exists(str(d, "/spread-wings")) { format(found, d, "/spread-wings"); }
         };
     }
-    if found.len == 0 { why.append("spread-wings is not installed: put it on PATH or set SWAN_SPREAD_WINGS to its path"); }
+    if found.len == 0 {
+        format(why, "spread-wings is not beside this swan (", own, ") nor on PATH: rebuild or reinstall Swan, or set SWAN_SPREAD_WINGS to its path");
+    }
     return found;
 }
 
@@ -255,4 +266,42 @@ fn wings_report(db: i64, map_db: const u8[:], root: const u8[:], asks: const u8[
     sqlite::finalize(gs);
     out.append("],\"evidence\":\"from Spread-Wings, by syntax: the files that define, call or import each renamed or rewritten symbol. Broader than Swan's sites and not compiler-checked; reached_not_edited are files to look at before applying, tests are the ones to run after.\"}");
     exec_or_die(db, "DROP TABLE temp.w_reach; DROP TABLE temp.w_planned;");
+}
+
+// What Spread-Wings' answers are worth, said with each of them.
+let WINGS_EVIDENCE = "from Spread-Wings, by syntax: links are matched by import, by the type a call names, and by name, not resolved by a compiler (each call site's resolution says which). Broad and quick, for finding your way; find_referencing_symbols and get_callers give the exact sites.";
+
+// One Spread-Wings query about the selected repo, through the server:
+// `cmd` is overview, touches or neighbors; a and b its arguments ("" for
+// none). Builds or refreshes wings.db beside the map first. The answer is
+// Spread-Wings' own JSON under "result". False with the reason in `out`
+// when Spread-Wings is missing or the query fails.
+fn wings_answer(db: i64, map_db: const u8[:], cmd: const u8[:], a: const u8[:], b: const u8[:], out: u8[>..]&) -> bool {
+    var root: u8[>..] = [];
+    meta_value(db, "root", root);
+    var why: u8[>..] = [];
+    let bin = wings_bin(why);
+    guard bin.len > 0 else { out.append(why); return false; }
+    let g = wings_graph(bin, map_db, root, why);
+    guard g.len > 0 else { out.append(why); return false; }
+    var argv: u8[>..] = [];
+    arg(argv, bin); arg(argv, cmd); arg(argv, g);
+    if a.len > 0 { arg(argv, a); }
+    if b.len > 0 { arg(argv, b); }
+    var o: u8[>..] = [];
+    var e: u8[>..] = [];
+    let code = sealed_run(argv, root, g[..rfind(g, "/")], false, "", 60000, o, e);
+    let answer = trim(o);
+    guard code == 0 && answer.len > 0 && (answer[0] == '{' || answer[0] == '[') else {
+        // Spread-Wings says what was wrong on stderr ("no definition named x").
+        let said = trim(if e.len > 0 { e[..] } else { o[..] });
+        out.append(if said.len > 0 { said } else { "spread-wings gave no answer" });
+        return false;
+    }
+    out.append("{\"source\":\"spread-wings\",\"evidence\":");
+    json::format_string(out, WINGS_EVIDENCE);
+    out.append(",\"result\":");
+    out.append(answer);
+    out.push('}');
+    return true;
 }
