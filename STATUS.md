@@ -968,3 +968,32 @@ with nested closures over shared locals), `syntax_index_main` (496),
   than mapped; with every feature on, code under `#[cfg(not(feature =
   "..."))]` is the part left to names.
 
+## 2026-11-17: TypeScript: one name for one object key, whichever chunk asks
+
+- Found by comparing with WebStorm on Egonex-AI/Understand-Anything
+  (b861852): `locales.en.onboarding.steps` was linked to another `steps`
+  key of the same object, 224 lines up.
+- Cause: scip-typescript 0.5.2 names a property of an object literal
+  `steps0`, `steps1`, ... from a counter of the file it is indexing, the
+  first time it meets the property. Swan runs it as several processes over
+  parts of a project (chunks, and layers for changed files), and each
+  numbered the other parts' keys from its own point of view.
+- Fix (src/tspatch.goose): Swan patches its own copy of the indexer, as it
+  does scip-python's, so that the number is the key's place among the keys
+  of that name in its own file. Two sites in dist/src/FileIndexer.js, each
+  required to match exactly once; `swan scip-typescript-patch <file>
+  [--revert]` by hand. The indexer's size is now part of every TypeScript
+  fingerprint, so existing maps index TypeScript again once.
+- If the indexer cannot be patched (another version, a read-only install,
+  SWAN_SCIP_TYPESCRIPT_PATCH=0) the map says so and runs TypeScript as one
+  process with no layers.
+- Type literals carry the same kind of number (`typeLiteral3`) and needed
+  nothing: the flattener already drops it, and their owner tells them apart.
+- Checked: the split suite's project gains an object with two `steps` keys
+  read from eight other files. Swan before this fix, in 4 chunks, sent 6 of
+  the 8 uses to the wrong key; now all 8 are right and the split and single
+  maps hold the same rows. The patch applied and undone leaves the file
+  byte for byte as it was.
+- Not fixed by this: every file is still indexed under the root tsconfig
+  (the next entry's subject).
+

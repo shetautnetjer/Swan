@@ -78,13 +78,14 @@ fn pypatch_count(text: const u8[:], what: const u8[:]) -> i64 {
     return n;
 }
 
-// The text with the patch applied (or, with revert, undone) in out. False,
-// with nothing in out, unless every site is there exactly once.
-fn pypatch_apply(text: const u8[:], revert: bool, out: u8[>..]&) -> bool {
+// The text with a patch's sites applied (or, with revert, undone) in out.
+// `sites` is old, new, old, new, ... False, with nothing in out, unless
+// every site is there exactly once.
+fn sites_apply(text: const u8[:], sites: const u8[:][:], revert: bool, out: u8[>..]&) -> bool {
     out.clear();
-    let pairs = PYPATCH_SITES.len / 2;
+    let pairs = sites.len / 2;
     for k in pairs {
-        let from = if revert { PYPATCH_SITES[2 * k + 1] } else { PYPATCH_SITES[2 * k] };
+        let from = if revert { sites[2 * k + 1] } else { sites[2 * k] };
         if pypatch_count(text, from) != 1 { return false; }
     }
     // The sites do not overlap, so one pass in file order rebuilds the text.
@@ -93,13 +94,13 @@ fn pypatch_apply(text: const u8[:], revert: bool, out: u8[>..]&) -> bool {
         var best = -1;
         var best_k = -1;
         for k in pairs {
-            let from = if revert { PYPATCH_SITES[2 * k + 1] } else { PYPATCH_SITES[2 * k] };
+            let from = if revert { sites[2 * k + 1] } else { sites[2 * k] };
             let i = find(text[at..], from);
             if i >= 0 && (best < 0 || i < best) { best = i; best_k = k; }
         }
         if best < 0 { out.append(text[at..]); break; }
-        let from = if revert { PYPATCH_SITES[2 * best_k + 1] } else { PYPATCH_SITES[2 * best_k] };
-        let to = if revert { PYPATCH_SITES[2 * best_k] } else { PYPATCH_SITES[2 * best_k + 1] };
+        let from = if revert { sites[2 * best_k + 1] } else { sites[2 * best_k] };
+        let to = if revert { sites[2 * best_k] } else { sites[2 * best_k + 1] };
         out.append(text[at..at + best]);
         out.append(to);
         at = at + best + from.len;
@@ -107,21 +108,27 @@ fn pypatch_apply(text: const u8[:], revert: bool, out: u8[>..]&) -> bool {
     return true;
 }
 
-// Rewrites one pyright-internal.js in place (whole, by rename). Returns
+// Rewrites one file of an indexer in place (whole, by rename) with a
+// patch's sites; `mark` is text only the patched file holds. Returns
 // "patched", "reverted", "already" (nothing to do) or "no match".
-fn pypatch_file(path: const u8[:], revert: bool) -> const u8[:] {
+fn sites_patch_file(path: const u8[:], sites: const u8[:][:], mark: const u8[:], revert: bool) -> const u8[:] {
     var text: u8[>..] = [];
     guard read_file(path, text) else { return "no match"; }
-    let has = find(text, PYPATCH_MARK) >= 0;
+    let has = find(text, mark) >= 0;
     if has != revert { return "already"; }
     var out: u8[>..] = [];
-    guard pypatch_apply(text, revert, out) else { return "no match"; }
+    guard sites_apply(text, sites, revert, out) else { return "no match"; }
     // write_file_atomic: a temporary file of its own name, synced, then
     // renamed. Two maps starting at once used to share one temporary name:
     // a reader could see a half-written bundle, and the loser reported
     // "does not fit" for a file that was being patched correctly.
     guard write_file_atomic(path, out) else { return "no match"; }
     return if revert { "reverted" } else { "patched" };
+}
+
+// scip-python's pyright-internal.js, with the memo or (revert) without.
+fn pypatch_file(path: const u8[:], revert: bool) -> const u8[:] {
+    return sites_patch_file(path, PYPATCH_SITES, PYPATCH_MARK, revert);
 }
 
 // Before a map runs scip-python: make sure Swan's copy has the memo. `size`

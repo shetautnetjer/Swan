@@ -1132,7 +1132,14 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
             arg(a, repo);
             arg(a, dir);
         }
-        let ts_fp = lang_fingerprint(repo, [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"], ["tsconfig.json", "package.json"]) { f => stamp(f) };
+        // The indexer first (src/tspatch.goose): several processes may index
+        // parts of one project only once it names the properties of object
+        // literals by their place. What it is (its size) is part of every TypeScript
+        // fingerprint, so the indexes are made again when it changes.
+        let ts_stable = ensure_scip_typescript_patch(home, report);
+        let ts_indexer = hash(str("scip-typescript\t", swan_file_size(str(home, "/tools/node_modules/@sourcegraph/scip-typescript/dist/src/FileIndexer.js"))));
+        let ts_fp = hash_combine(lang_fingerprint(repo, [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"], ["tsconfig.json", "package.json"]) { f => stamp(f) },
+                                 ts_indexer);
         // What tsc would compile, to split it.
         let base: u8[>..] = if l.tsconfig { str(repo, "/tsconfig.json") } else { str(out, "/tsproject/tsconfig.json") };
         var la: u8[>..] = [];
@@ -1164,7 +1171,7 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
         var layer_min: i64 = 200;
         var lm: u8[>..] = [];
         if env("SWAN_TS_LAYER_MIN", lm) { let n, ok = parse_int(lm); if ok && n > 0 { layer_min = n; } }
-        let plan_k = if ts_k >= 2 { ts_k } else if ts_count >= layer_min { 1 } else { 0 };
+        let plan_k = if !ts_stable { 0 } else if ts_k >= 2 { ts_k } else if ts_count >= layer_min { 1 } else { 0 };
         for r in ["tsconfig.json", "package.json"] {
             let pth = str(repo, "/", r);
             if file_exists(pth) { names_key = hash_combine(names_key, hash_combine(hash(pth[..]), stamp(pth[..]))); }
@@ -1248,7 +1255,7 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
                 let pth = str(repo, "/", r);
                 if file_exists(pth) { shared = hash_combine(shared, hash_combine(hash(r), stamp(pth[..]))); }
             }
-            shared = hash_combine(shared, hash(base));
+            shared = hash_combine(hash_combine(shared, hash(base)), ts_indexer);
             each_split(decls, '\n') { f =>
                 if f.len > repo.len {
                     let st = str(f[repo.len + 1..], "\t", stamp(f) as! i64);
