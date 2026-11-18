@@ -14,6 +14,15 @@ if [ ! -f build/golsp.c ] || [ -n "$(find -L lsp -newer build/golsp.c -print -qu
     GOOSE="$GOOSE" lsp/scripts/build.sh build
 fi
 "$GOOSE" build src/swan.goose -o bin/swan "$@"
+# Spread-Wings (the wings/ submodule, pinned to a commit): the broad map
+# beside Swan's exact one. Its own program, built here from its sources and
+# installed beside bin/swan, where Swan looks for it first (src/wings.goose).
+if [ ! -f wings/src/spread-wings.goose ]; then
+    echo "build.sh: wings/ is empty; run: git submodule update --init wings" >&2; exit 1
+fi
+if [ ! -f bin/spread-wings ] || [ -n "$(find -L wings/src wings/native -newer bin/spread-wings -print -quit)" ]; then
+    "$GOOSE" build wings/src/spread-wings.goose -o bin/spread-wings
+fi
 # Swan's test runner (tests/check/), Goose like Swan: bin/swan-check [suite...]
 "$GOOSE" build tests/check/check.goose -o bin/swan-check
 # the egg-shell sealing runner sits beside the swan binary (swan_home/bin)

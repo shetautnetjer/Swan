@@ -4,6 +4,7 @@ import importlib.util
 import json
 from pathlib import Path
 import struct
+import shutil
 import subprocess
 import tarfile
 import tempfile
@@ -50,6 +51,10 @@ class PackageTests(unittest.TestCase):
         self.flatten = self.base / "swan-flatten"
         self.flatten.write_bytes(elf_header() + b"flatten")
         self.flatten.chmod(0o755)
+        # Spread-Wings: every package ships it beside swan.
+        self.wings = self.base / "spread-wings"
+        self.wings.write_bytes(elf_header() + b"wings")
+        self.wings.chmod(0o755)
         self.receipt = self.base / "receipt.json"
         self.write_receipt()
         self.licenses = self.base / "licenses"
@@ -66,6 +71,7 @@ class PackageTests(unittest.TestCase):
         self.receipt.write_text(json.dumps({"source_revision": self.revision,
                                            "binary_sha256": package.sha256(self.binary.read_bytes()),
                                            "flatten_sha256": package.sha256(self.flatten.read_bytes()),
+                                           "wings_sha256": package.sha256(self.wings.read_bytes()),
                                            **values}))
 
     def build(self, **overrides):
@@ -73,14 +79,14 @@ class PackageTests(unittest.TestCase):
         values = {"root": self.root, "binary": self.binary, "output": self.output,
                   "revision": self.revision, "receipt_path": self.receipt,
                   "licenses": self.licenses, "required_licenses": ["Goose-LICENSE"],
-                  "flatten": self.flatten}
+                  "flatten": self.flatten, "wings": self.wings}
         values.update(overrides)
         return package.build_package(**values)
 
     def test_inventory_checksums_modes_and_candidate_provenance(self):
         """Verify that inventory checksums modes and candidate provenance."""
         manifest = self.build()
-        expected = {*package.RUNTIME_FILES, "scripts/verify-live-trust.py", "bin/swan", "bin/eggshell", "bin/swan-flatten",
+        expected = {*package.RUNTIME_FILES, "scripts/verify-live-trust.py", "bin/swan", "bin/eggshell", "bin/swan-flatten", "bin/spread-wings",
                     "BUILD-RECEIPT.json", "licenses/Goose-LICENSE",
                     "skills/swan-code-check/SKILL.md", "skills/swan-code-check/fixture/sec.py"}
         with tarfile.open(self.output / package.ARCHIVE) as archive:
@@ -139,6 +145,28 @@ class PackageTests(unittest.TestCase):
         self.write_receipt(flatten_sha256=package.sha256(flatten.read_bytes()))
         with self.assertRaisesRegex(package.PackageError, "ELF64"):
             self.build(flatten=flatten)
+        self.assertFalse(self.output.exists())
+
+    def test_spread_wings_ships_bound_to_the_receipt_or_not_at_all(self):
+        """Verify that bin/spread-wings ships executable under the receipt's checksum, and that a package without it is refused."""
+        manifest = self.build()
+        with tarfile.open(self.output / package.ARCHIVE) as archive:
+            self.assertEqual(archive.extractfile("bin/spread-wings").read(), self.wings.read_bytes())
+            self.assertEqual(archive.getmember("bin/spread-wings").mode, 0o755)
+        self.assertEqual(manifest["wings_sha256"], package.sha256(self.wings.read_bytes()))
+        shutil.rmtree(self.output)
+        self.write_receipt(wings_sha256="0" * 64)
+        with self.assertRaisesRegex(package.PackageError, "spread-wings"):
+            self.build()
+        self.assertFalse(self.output.exists())
+        self.write_receipt()
+        with self.assertRaisesRegex(package.PackageError, "bin/spread-wings is required"):
+            self.build(wings=None)
+        self.assertFalse(self.output.exists())
+        self.wings.write_text("not an executable\n")
+        self.write_receipt()
+        with self.assertRaisesRegex(package.PackageError, "ELF64"):
+            self.build()
         self.assertFalse(self.output.exists())
 
     def test_package_without_flattener_is_refused(self):

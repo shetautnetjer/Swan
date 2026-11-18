@@ -148,7 +148,7 @@ only that whole path. Lines and columns in answers are 1-based.
 | `insert_after_symbol`, `insert_before_symbol` | `name_path`, `relative_path`, `body` | adds code next to a definition |
 | `rename_symbol` | `name_path`, `relative_path`, `new_name`, `apply?` | plans by default: every site, skipped aliases, conflicts, stale files; `apply` writes it |
 | `what_broke` | `files` (the repo-relative paths just edited) | the errors the language server reports now in those files that it did not when last asked: what the edit broke, without the errors that were already there. Also `swan broke <map-dir> <file>...` (exit 1 when something is new), which `scripts/hooks/what-broke-after-edit.py` runs as a Claude Code post-edit hook |
-| `edit_batch` | `edits` (a list of `{op, ...}`: `rename_symbol`, `replace_symbol_body`, `insert_after_symbol`, `insert_before_symbol`, `rewrite_pattern`, each with that tool's arguments), `apply?` | several edits as one change, all or nothing: planned together without `apply`, with `touches`: what the renamed or rewritten symbols reach that the batch does not edit, and the tests to run (from [Spread-Wings](https://github.com/shetautnetjer/spread-wings), when it is on PATH or `SWAN_SPREAD_WINGS` names it); with it they run in order, each seeing the earlier ones, and if one fails the map and every file already written go back |
+| `edit_batch` | `edits` (a list of `{op, ...}`: `rename_symbol`, `replace_symbol_body`, `insert_after_symbol`, `insert_before_symbol`, `rewrite_pattern`, each with that tool's arguments), `apply?` | several edits as one change, all or nothing: planned together without `apply`, with `touches`: what the renamed or rewritten symbols reach that the batch does not edit, and the tests to run (from [Spread-Wings](https://github.com/shetautnetjer/spread-wings), which ships with Swan); with it they run in order, each seeing the earlier ones, and if one fails the map and every file already written go back |
 | `run_tests` | `name_path` or `relative_path`, `depth?` | runs the tests that reach a symbol through calls, overrides included, with the language's runner from `tools/modules.json` |
 | `format_file` | `relative_path` | the language's formatter from `tools/modules.json` |
 | `get_diagnostics` | `name_path?`, `relative_path?`, `depth?`, `errors_only?`, `live?` | compiler errors and lint findings pinned to symbols and their referencing symbols (see `docs/diagnostics.md`); `live` asks a configured server (Rust, Python, TS/JS or Kotlin) about one file |
@@ -156,6 +156,9 @@ only that whole path. Lines and columns in answers are 1-based.
 | `rewrite_pattern` | `pattern`, `rewrite`, `language?`, `relative_path?`, `apply?` | structural rewrite: plans by default; `apply` writes it, refused for files changed since the map |
 | `find_unused_symbols` | `relative_path?`, `include_tests?`, `max_results?` | functions, classes, methods, types and variables nothing references or implements: removal candidates, not proof |
 | `index_info` | none | repo root, build time, counts, and the files changed since the SCIP run |
+| `repo_overview` | none | the lay of a repo: its groups of files that import and call each other, with their main files, most-called definitions and tests. From Spread-Wings, by syntax, in seconds: where to start in a repo you do not know |
+| `what_touches` | `name`, `relative_path?` | before changing a definition: the files that define it, call it or import its file, which are tests, and the groups they sit in. From Spread-Wings: broader than `find_referencing_symbols`, not compiler-checked, and it says how many call sites were matched by name only |
+| `file_neighbors` | `relative_path` | the files a file imports, is imported by, and calls into. From Spread-Wings |
 | `use_repo` | `path`, `build?` | choose the repo the tools answer about, building its map the first time; `path` is the repo's root or a path inside it |
 
 Every answer about a file that changed after the SCIP run carries
@@ -566,6 +569,7 @@ src/lspindex.goose   `swan lsp-index`: a map for a language from its language se
 src/rustproj.goose   the cargo projects of a repo: which folders rust-analyzer runs in, and its settings
 src/tspatch.goose    Swan's fix to its copy of scip-typescript: one name for one object key in every process
 src/tsproj.goose     the tsconfig projects of a repo: which config owns each file
+src/wings.goose      Spread-Wings from Swan: its graph beside the map, what an edit plan reaches, and the three broad-map tools
 integrations/hermes/ the Swan plugin for Hermes agents: what an edit broke, in the edit's result
 tools/solidlsp/      the SolidLSP bridge, and Swan's stand-ins for the two helpers SolidLSP imports from Serena
 src/db.goose         map helpers over the imported SQLite package
@@ -573,6 +577,7 @@ src/swan.build       Goose sidecar: native file/process helpers and LSP bridge
 native/swan_sys.c    file/process helpers
 native/swan-flatten/ the Rust SCIP flattener (bin/swan-flatten); release profile ships, quick profile for trying changes
 lsp/                goose-lsp submodule; standalone Goose client + C bridge
+wings/              Spread-Wings submodule, pinned to a commit; built as bin/spread-wings and shipped beside swan
 tools/              modules.json, external npm tool manifest (the Node indexers and language servers)
 tests/               MCP smoke test, refresh-vs-fresh check, latency bench
 fixtures/tiny-ts/    a small repo with the tricky cases (re-export, rename, same-name method and function)

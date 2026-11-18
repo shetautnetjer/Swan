@@ -154,7 +154,8 @@ def collect_licenses(directory, required):
     return {"licenses/" + name: value for name, value in result.items()}
 
 
-def build_package(root, binary, output, revision, receipt_path, licenses, required_licenses=(), flatten=None):
+def build_package(root, binary, output, revision, receipt_path, licenses, required_licenses=(), flatten=None,
+                  wings=None):
     """Export a deterministic candidate bound to its clean source and binary receipt."""
     root = Path(root).resolve()
     output = Path(os.path.abspath(output))
@@ -189,6 +190,17 @@ def build_package(root, binary, output, revision, receipt_path, licenses, requir
     if receipt.get("flatten_sha256") != flatten_sha256:
         raise PackageError("build receipt does not match the swan-flatten binary")
     payload["bin/swan-flatten"] = (flatten_data, 0o755)
+    # Spread-Wings (the wings/ submodule), installed beside bin/swan as
+    # <swan_home>/bin/spread-wings, where Swan looks for it first. Required,
+    # so it is wherever Swan is; the receipt must name this exact binary.
+    if wings is None:
+        raise PackageError("bin/spread-wings is required: build it with scripts/build.sh (the wings submodule)")
+    wings_data, wings_mode = regular_file(wings)
+    validate_elf(wings_data, wings_mode)
+    wings_sha256 = sha256(wings_data)
+    if receipt.get("wings_sha256") != wings_sha256:
+        raise PackageError("build receipt does not match the spread-wings binary")
+    payload["bin/spread-wings"] = (wings_data, 0o755)
     skill_files = sorted(name for name in tracked if name.startswith("skills/swan-code-check/"))
     if "skills/swan-code-check/SKILL.md" not in skill_files:
         raise PackageError("tracked canonical skill is missing")
@@ -210,6 +222,7 @@ def build_package(root, binary, output, revision, receipt_path, licenses, requir
         "tracked_source_clean": True,
         "binary_sha256": sha256(binary_data),
         "flatten_sha256": flatten_sha256,
+        "wings_sha256": wings_sha256,
         "installer_sha256": sha256(installer),
         "installer_support_sha256": sha256(payload["scripts/package_support.py"][0]),
         "files": {name: {"sha256": sha256(data), "size": len(data), "mode": mode}
@@ -261,10 +274,13 @@ def main():
                         help="Refuse export if this expected license is missing (repeatable)")
     parser.add_argument("--flatten", type=Path, required=True,
                         help="Built native flattener (bin/swan-flatten); its checksum must be in the build receipt")
+    parser.add_argument("--wings", type=Path, required=True,
+                        help="Built Spread-Wings (bin/spread-wings); its checksum must be in the build receipt")
     options = parser.parse_args()
     try:
         build_package(root, options.binary, options.output, options.source_revision,
-                      options.build_receipt, options.licenses, options.require_license, options.flatten)
+                      options.build_receipt, options.licenses, options.require_license, options.flatten,
+                      options.wings)
     except (PackageError, OSError) as error:
         parser.exit(1, "package: " + str(error) + "\n")
     print("Candidate exported: " + str(options.output / ARCHIVE))

@@ -154,19 +154,14 @@ fn lang_java_batch() {
           find(t, "\"errors\":0") >= 0 && find(sq, "public double surface()") >= 0 && find(sq, "Math.pow(side, 2)") >= 0, t);
 }
 
-// A planned batch says what it reaches beyond its own edits, from
-// Spread-Wings (built beside Swan, as ../spread-wings), and the tests to run.
+// A planned batch says what it reaches beyond its own edits, from the
+// Spread-Wings that ships with Swan (bin/spread-wings, built from the wings/
+// submodule at the pinned commit), and the tests to run. Nothing points Swan
+// at it: it is found beside the swan binary. The same graph answers
+// repo_overview, what_touches and file_neighbors.
 fn lang_batch_touches() {
-    var swb: u8[>..] = [];
-    env("PWD", swb);
-    swb.append("/../spread-wings/bin/spread-wings");
-    guard file_exists(swb) else {
-        write_stderr("skip: batch touches: ../spread-wings/bin/spread-wings is not built\n");
-        return;
-    }
-    var ev: u8[>..] = [];
-    format(ev, "SWAN_SPREAD_WINGS=", swb);
-    ev.push(0);
+    check("spread-wings: built beside swan from the pinned wings/ submodule", file_exists("bin/spread-wings"), "bin/spread-wings is missing: scripts/build.sh builds it");
+    let ev = "";
     let w = "data/py-touches";
     rm_rf(w);
     mkdir_p(w);
@@ -194,6 +189,34 @@ fn lang_batch_touches() {
     let unchanged = run(argv(["diff", "-r", "fixtures/tiny-py", str(w, "/repo")]), "", same, e0) == 0;
     check("batch touches: without spread-wings the plan still works and says why", r == 1 &&
           find(t, "\"available\":false,\"why\":\"SWAN_SPREAD_WINGS is /nonexistent/spread-wings") >= 0 && unchanged, t);
+
+    // The broad-map questions, through Swan's own server.
+    var ov: u8[>..] = [];
+    var tc: u8[>..] = [];
+    var nb: u8[>..] = [];
+    var bad: u8[>..] = [];
+    var r1: i64 = -1;
+    var r2: i64 = -1;
+    var r3: i64 = -1;
+    var r4: i64 = -1;
+    if mcp_open(argv(["bin/swan", "serve", db]), "") {
+        r1 = mcp_call("repo_overview", "{}", ov);
+        r2 = mcp_call("what_touches", "{\"name\":\"total_area\"}", tc);
+        r3 = mcp_call("file_neighbors", "{\"relative_path\":\"main.py\"}", nb);
+        r4 = mcp_call("what_touches", "{\"name\":\"no_such_name_here\"}", bad);
+        mcp_close();
+    }
+    check("repo_overview: the repo's groups, said to come from Spread-Wings and not from a compiler",
+          r1 == 1 && find(ov, "\"source\":\"spread-wings\"") >= 0 && find(ov, "not resolved by a compiler") >= 0 &&
+          find(ov, "\"communities\":[") >= 0 && find(ov, "\"files\":") >= 0, ov);
+    check("what_touches: total_area is defined in shapes/__init__.py, called from main.py, tested by test_shapes.py",
+          r2 == 1 && find(tc, "\"path\":\"shapes/__init__.py\"") >= 0 && find(tc, "\"path\":\"main.py\"") >= 0 &&
+          find(tc, "\"path\":\"test_shapes.py\"") >= 0 && find(tc, "\"is_test\":true") >= 0, tc);
+    check("file_neighbors: main.py imports the shapes package", r3 == 1 && find(nb, "\"imports\":[\"shapes/__init__.py\"") >= 0, nb);
+    check("what_touches: a name the repo does not define is an error that says so", r4 == 0 && find(bad, "no definition named") >= 0, bad);
+    if mcp_open(argv(["bin/swan", "serve", db]), argv(["SWAN_SPREAD_WINGS=/nonexistent/spread-wings"])) { r1 = mcp_call("repo_overview", "{}", ov); mcp_close(); }
+    check("repo_overview: without spread-wings it is an error that says where it was looked for",
+          r1 == 0 && find(ov, "SWAN_SPREAD_WINGS is /nonexistent/spread-wings") >= 0, ov);
 }
 
 // what_broke / `swan broke`: only the errors an edit introduced.

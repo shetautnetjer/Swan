@@ -1108,3 +1108,37 @@ with nested closures over shared locals), `syntax_index_main` (496),
   terminal tool is not. The first answer for a language can wait on its
   server starting (60 s at most, then the result goes through untouched).
 
+## 2026-11-18: Spread-Wings ships inside Swan
+
+Spread-Wings was a second program to build, put on PATH and point Swan at
+(`SWAN_SPREAD_WINGS`); on this machine it was installed nowhere, so a
+planned `edit_batch` said "spread-wings is not installed" for every agent.
+
+- `wings/` is the Spread-Wings repo as a submodule at 6fe7e10 (definitions
+  by node kind, the type a call names, `score`). `scripts/build.sh` builds
+  it as `bin/spread-wings` (3.5 s); the package requires and ships it beside
+  `bin/swan`, bound to the build receipt like the flattener, with its
+  license. Swan looks beside itself first, then on PATH;
+  `SWAN_SPREAD_WINGS` still overrides.
+- Three server tools answer from its graph (`wings.db` beside the map,
+  built sealed, Swan's answers applied): `repo_overview`, `what_touches`,
+  `file_neighbors`. Each answer carries `"source":"spread-wings"` and what
+  that evidence is worth.
+- `docs/wings-and-swan.md`: who does what between the two, as agreed with
+  the owner, and the order of what comes next (survey, corrections for any
+  guessed link, the watcher, more languages).
+- The swan-code-check skill has a "Find your way first" section and a
+  "Broad map" evidence kind.
+
+Checked: lang suite (the plan's touches with no variable set, the three
+tools, the errors for an unknown name and a missing Spread-Wings); package
+tests (ships under the receipt's checksum; refused without it, with a
+mismatch, or when it is no ELF file).
+
+Limits:
+- The graph is rebuilt whole and only when the map is newer than it: an
+  edit made since the last `update_map` is not in it.
+- The package grows by the Spread-Wings binary (34 MB), which needs
+  libcurl on the machine it runs on (for its optional `decide` step).
+- An installed Swan from before this change has no `bin/spread-wings`:
+  `swan-up update` brings it.
