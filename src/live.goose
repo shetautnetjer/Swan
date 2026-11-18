@@ -22,11 +22,26 @@ var live_quiet: i64 = 0;        // its "quiet_ms": silence that means a file has
 // Starts the server for `lang` unless it is already running; one at a time.
 fn live_start(db: i64, lang: const u8[:], why: u8[>..]&) -> bool {
     if live_lang.len > 0 && live_lang == lang { return true; }
-    live_stop();
     var root: u8[>..] = [];
     var dir: u8[>..] = [];
     meta_value(db, "root", root);
     meta_value(db, "source", dir);
+    return live_start_at(root, dir, lang, why);
+}
+
+// Whether this process is already inside eggshell's seal (it exports
+// EGG_REPO): a server started from here is sealed with it, and sealing it
+// again would need namespaces the seal does not hand out.
+fn inside_seal() -> bool {
+    var v: u8[>..] = [];
+    return env("EGG_REPO", v) && v.len > 0;
+}
+
+// The same for a repo and map folder given directly: the map need not exist
+// yet (`swan lsp-index` runs while it is being built).
+fn live_start_at(root: const u8[:], dir: const u8[:], lang: const u8[:], why: u8[>..]&) -> bool {
+    if live_lang.len > 0 && live_lang == lang { return true; }
+    live_stop();
     guard root.len > 0 && dir.len > 0 else { why.append("the map does not record its repo; rebuild it with swan map"); return false; }
     let home = swan_home();
     var text: u8[>..] = [];
@@ -52,7 +67,7 @@ fn live_start(db: i64, lang: const u8[:], why: u8[>..]&) -> bool {
                 // "sealed": the server runs inside eggshell, like the map's
                 // indexers: it reads the repo and writes only the map folder.
                 let sl, sl_ok = json::as_bool(json::member(cand, "sealed"));
-                if sl_ok && sl && sandbox_on() {
+                if sl_ok && sl && sandbox_on() && !inside_seal() {
                     let wrapped = seal_argv(argv, root, dir, false);
                     argv.clear();
                     argv.append(wrapped);
@@ -102,6 +117,27 @@ fn live_ask(db: i64, rel: const u8[:], question: const u8[:], out: u8[>..]&) -> 
     if find(a, "\"gone\":true") >= 0 { live_lang.clear(); }   // the next question starts it again
     out.append(a);
     return starts_with(a, "{\"ok\":true");
+}
+
+// Any LSP request about a file (and a 1-based place in it, when line > 0),
+// answered with the server's own result: see goose-lsp's "request".
+fn live_request(root: const u8[:], dir: const u8[:], rel: const u8[:], method: const u8[:], line: i64, col: i64,
+                more: const u8[:], out: u8[>..]&) -> bool {
+    let lang = lang_of_path(rel);
+    guard lang.len > 0 else { format(out, "no live server for ", rel); return false; }
+    var why: u8[>..] = [];
+    guard live_start_at(root, dir, lang, why) else { out.append(why); return false; }
+    var q: u8[>..] = [];
+    q.append("{\"op\":\"request\",\"file\":");
+    json::format_string(q, rel);
+    q.append(",\"method\":");
+    json::format_string(q, method);
+    if line > 0 { format(q, ",\"line\":", line, ",\"col\":", col); }
+    if more.len > 0 { q.append(",\"more\":"); json::format_string(q, more); }
+    q.push('}');
+    golsp_ask(q, out);
+    if find(out, "\"gone\":true") >= 0 { live_lang.clear(); }
+    return starts_with(out, "{\"ok\":true");
 }
 
 // get_diagnostics with live: what the server reports for one file now.
