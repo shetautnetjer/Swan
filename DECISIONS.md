@@ -567,3 +567,38 @@ Decided:
 - **The answer says what changed** (`files_changed`), once. Swan does not
   refresh its own map from it: that runs the language tools, which is the
   agent's call (`swan map`).
+
+## 2026-11-18 14:45 PT — A virtualenv is read, never run; a stand-in answers for its interpreter
+
+A project's virtualenv holds what the project imports. Swan used it only
+for trusted repos, because the one way it knew to use it was to put its
+`bin` first on PATH, which runs the repo's python. Every other repo was
+indexed against this machine's Python.
+
+Decided:
+
+- **Read it.** What scip-python needs from a virtualenv is two lists: the
+  packages (name, version, files) and the folders to look in. Both are
+  files to read: `*.dist-info` and `lib/python*/site-packages`. Nothing in
+  the virtualenv has to run, so trust is not involved.
+- **A stand-in interpreter, not a change to pyright.** scip-python's
+  pyright learns the folders by running `python3 -c <script>`. Swan puts a
+  small `python3` of its own first on that step's PATH; it runs the script
+  in the machine's python3 with `sys.path` set from the virtualenv. The
+  other ways were to patch the folders into Swan's copy of the bundle
+  (breaks when the bundle changes) or to copy the virtualenv out of the
+  repo (hundreds of megabytes).
+- **The names are fixed in Swan's copy of scip-python.** Upstream names
+  anything under the folder it runs in as the project, and a virtualenv
+  sits there. A link or a copy outside does not help (pyright resolves
+  links; a copy is the megabytes again). Five places, applied and checked
+  the way the reachability memo is, and left alone when they do not fit.
+- **The Python version comes from `pyvenv.cfg`**, through the same fix:
+  scip-python never asks its interpreter.
+- **One environment for a repo, for now.** A repo with several
+  virtualenvs gets the union, the top first. One scip-python run for each
+  project, as Go has one for each module, is the right shape and is not
+  built: the pieces a Python repo is split into would have to follow
+  project borders.
+- **A trusted repo's top virtualenv is still run**, as it was. It gives
+  the same names now; reading it instead is a later simplification.

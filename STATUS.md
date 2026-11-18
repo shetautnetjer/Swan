@@ -1263,3 +1263,95 @@ Limits:
 - Swan does not start `spread-wings watch`.
 - `repo_overview` takes 3.2 s on relate, before and after: its "most
   called" list, in Spread-Wings.
+
+## 2026-11-18: a Python project's own virtualenv is read, not run
+
+Swan looked for a virtualenv only at the top of a repo, and used it only
+once the repo was trusted, since using it meant running its python. A repo
+that is not trusted (every repo, by default) was indexed against this
+machine's own Python instead: the packages the project had installed were
+not found, their uses not tied to anything, and the few outside names that
+did come out carried whatever versions this machine happens to hold. And
+scip-python read every project as Python 3.11.
+
+- The virtualenvs come from the survey (each Python project's `.venv` or
+  `venv`, wherever the project is) and from Swan's own look at the top (a
+  repo of scripts has no manifest, so the survey names no project there).
+- They are read. A sealed `python3 -I` lists the packages from their
+  dist-info folders (`importlib.metadata`, no package imported), as
+  `python-env.json`. scip-python finds the packages through a stand-in for
+  the interpreter, written to `py-standin/` in the map folder and put first
+  on its PATH: its pyright asks `python3 -c` where packages are, and the
+  stand-in answers in the machine's python3 with the virtualenv's
+  site-packages. The virtualenv's own interpreter is never started (inside
+  the seal it is usually not there: `bin/python` is a link out of the
+  repo). So this needs no trust.
+- Swan's second fix to its copy of scip-python (src/pypatch.goose, five
+  places in dist/scip-python.js): a definition under a site-packages
+  folder inside the repo is the package's, not the project's; a class a
+  package hands on from one of its modules (`requests.Response`,
+  `unittest.TestCase`) is named by its own file, not by the file that uses
+  it; and the Python version of the virtualenv (`pyvenv.cfg`) is the one
+  the code is read as, unless the project sets one for pyright itself.
+- The map's report says so: `python: 86 packages read from the project's
+  own virtualenv (.venv, Python 3.12); nothing in it was run`.
+- A virtualenv at the top of a trusted repo is run as before, now with the
+  same names and Python version as when it is read.
+- Each Python piece's key holds the virtualenv read (its folders, its
+  Python, its package list), so a changed virtualenv is indexed again.
+
+| graphify with its own `.venv` (86 packages, Python 3.12), not trusted | Before (9e2ed87) | After |
+|---|---|---|
+| The virtualenv's packages named with the version it holds | 3 | 30 |
+| Uses tied to networkx | 0 | 3,065 |
+| Uses tied to pytest | 0 | 3,812 |
+| Occurrences in the map | 192,080 | 199,858 |
+| The map, from nothing | 33.3 s | 35.1 s |
+
+On fixtures/tiny-py with a uv virtualenv holding requests 2.32.5: not
+trusted, `requests.get` was missing and is now `requests 2.32.5`, the same
+as trusted; `requests.Response` and `unittest.TestCase` were named `repo 0`
+in both and are now `requests 2.32.5` and `python-stdlib 3.12`.
+
+Checked:
+- 6 new checks in the lang suite on a project below the top with a
+  hand-made virtualenv of Python 3.9 (files only: no interpreter, no pip,
+  no network), mapped as not trusted: the report line; a function imported
+  from the virtualenv's package resolves and is named by package and
+  version; the code is read as 3.9 (the other branch of a version check,
+  `python-stdlib 3.9`); a class the package hands on from one of its
+  modules is named by the package wherever it is used; an unchanged map
+  keeps its piece and a changed virtualenv is indexed again; a virtualenv
+  at the top of a repo with no manifest is read too. 1 new check in the
+  pypatch suite: the second fix goes on a copy of scip-python.js once and
+  comes off leaving the file as it shipped.
+- Seen failing in the microVM: with src as on main, all 7. With the
+  version site off, the virtualenv left out of the piece key and the top
+  virtualenv dropped as before: those three checks and the pypatch one.
+  With the three site-packages sites off: the naming check and the three
+  that depend on names. With the class site off: the class check alone.
+
+Limits:
+- `swan check`, live answers and `run_tests` do not use what was read. In
+  a repo that is not trusted pyright still reports the project's packages
+  as imports it cannot resolve. The next piece of this step.
+- One environment for a whole repo. With several virtualenvs, a package
+  two of them hold is taken from the first (the top of the repo first),
+  and the first one's Python is the version read as. One run for each
+  project is not built.
+- With a virtualenv at the top of a trusted repo, virtualenvs further down
+  are not read (as before).
+- `.pth` files are not followed, so an editable install that points
+  elsewhere is not found; `include-system-site-packages` is not honoured.
+  Only folders named `.venv` and `venv` are looked for, in the Linux
+  layout (`lib/python*/site-packages`).
+- A Python later than 3.12 is read as 3.12, the newest this scip-python
+  knows.
+- Names change once. Every repo's Python pieces are indexed again on its
+  next map (the key now ends in `-n2`), and classes handed on by a package
+  get the package's name instead of the repo's.
+- The second fix fits scip-python 0.6.8. A newer one that does not match
+  is left alone, and the map says so.
+- Not looked into: the repo's own modules that a map holds as outside
+  symbols (graphify: 171, `tools.skillgen.gen` among them). They were
+  there before and are named rightly, as the repo's.

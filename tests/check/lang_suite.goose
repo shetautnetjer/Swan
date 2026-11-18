@@ -16,6 +16,7 @@ fn lg_db_query(db: const u8[:], a: const u8[:], b: const u8[:], c: const u8[:], 
 fn lang_suite() {
     lang_js();
     lang_python();
+    lang_python_own_venv();
     lang_java();
     lang_java_batch();
     lang_batch_touches();
@@ -50,6 +51,112 @@ fn lang_js() {
     let r3, e3 = json::parse(t, d3, x3);
     check("js: Counter.bump is a method", jstr(nth(r3, 0), "kind") == "method", t);
     check("js: the repo was not written to (no tsconfig.json appeared)", !file_exists("fixtures/tiny-js/tsconfig.json"), "");
+}
+
+// A hand-made virtualenv, <dir>/.venv, of the given Python ("3.9.18"),
+// holding one installed package: fakepkg at pkg_version. Files only: no
+// interpreter in it, no pip, no network.
+fn fake_venv(dir: const u8[:], python: const u8[:], pkg_version: const u8[:]) -> bool {
+    let site = str(dir, "/.venv/lib/python", python[..rfind(python, ".")], "/site-packages");
+    let info = str(site, "/fakepkg-", pkg_version, ".dist-info");
+    mkdir_p(str(site, "/fakepkg"));
+    mkdir_p(info);
+    return write_file(str(dir, "/.venv/pyvenv.cfg"), str("home = /nonexistent/python/bin\nimplementation = CPython\nversion_info = ", python, "\ninclude-system-site-packages = false\n")) &&
+           write_file(str(site, "/fakepkg/__init__.py"), "from . import tools\nfrom .tools import Loud\n\nNAME = \"fake\"\n") &&
+           write_file(str(site, "/fakepkg/tools.py"), "class Loud:\n    \"\"\"Says things loudly.\"\"\"\n\n    def say(self, s: str) -> str:\n        return s.upper()\n\n\ndef shout(s: str) -> str:\n    return s.upper()\n\n\ndef whisper(s: str) -> str:\n    return s.lower()\n") &&
+           write_file(str(info, "/METADATA"), str("Metadata-Version: 2.1\nName: fakepkg\nVersion: ", pkg_version, "\n")) &&
+           write_file(str(info, "/RECORD"), str("fakepkg/__init__.py,,\nfakepkg/tools.py,,\nfakepkg-", pkg_version, ".dist-info/METADATA,,\nfakepkg-", pkg_version, ".dist-info/RECORD,,\n"));
+}
+
+// The package a `callees` answer names for the first of two callees that is
+// among them (whichever branch of a version check was read); "" for neither.
+fn either_package(answer: const u8[:], a: const u8[:], b: const u8[:]) -> u8[>..] {
+    let p = callee_package(answer, a);
+    return if p.len > 0 { p } else { callee_package(answer, b) };
+}
+
+// True when a `callees` answer has the callee, and under no package but pkg.
+fn callee_only_from(answer: const u8[:], name: const u8[:], pkg: const u8[:]) -> bool {
+    var text: u8[>..] = [];
+    text.append(answer);
+    var doc: json::Node[>..] = [];
+    var dec: u8[>..] = [];
+    let r, err = json::parse(text, doc, dec);
+    var right = 0;
+    var wrong = 0;
+    let cl = json::member(r, "callees");
+    if cl { json::each(cl) { c => if jstr(c, "name_path") == name { if jstr(c, "package") == pkg { right++; } else { wrong++; } } }; }
+    return right > 0 && wrong == 0;
+}
+
+// The package a `callees` answer names for one callee: "" when the callee
+// is not among them.
+fn callee_package(answer: const u8[:], name: const u8[:]) -> u8[>..] {
+    var pkg: u8[>..] = [];
+    var text: u8[>..] = [];
+    text.append(answer);
+    var doc: json::Node[>..] = [];
+    var dec: u8[>..] = [];
+    let r, err = json::parse(text, doc, dec);
+    let cl = json::member(r, "callees");
+    if cl { json::each(cl) { c => if pkg.len == 0 && jstr(c, "name_path") == name { pkg.append(jstr(c, "package")); } }; }
+    return pkg;
+}
+
+// A Python project's own virtualenv is read, not run: where the survey
+// finds it (here below the top of the repo), without trust, and as the
+// Python it holds. The suite runs trusted, so these maps say they are not.
+fn lang_python_own_venv() {
+    let w = "data/py-own-venv";
+    rm_rf(w);
+    let svc = str(w, "/repo/svc");
+    mkdir_p(svc);
+    // Loud is defined in fakepkg.tools and handed on by fakepkg itself
+    // (as requests does with Response): it is named here as fakepkg.Loud.
+    let app = "import sys\n\nimport fakepkg\nfrom fakepkg.tools import shout, whisper\n\nif sys.version_info >= (3, 10):\n    def pick() -> str:\n        return shout(fakepkg.NAME)\nelse:\n    def pick() -> str:\n        return whisper(fakepkg.NAME)\n\n\ndef make() -> str:\n    loud: fakepkg.Loud = fakepkg.Loud()\n    return loud.say(\"x\")\n";
+    let made = write_file(str(svc, "/pyproject.toml"), "[project]\nname = \"svc\"\nversion = \"0.1.0\"\nrequires-python = \">=3.9\"\ndependencies = [\"fakepkg==1.2.3\"]\n") &&
+               write_file(str(svc, "/app.py"), app) && fake_venv(svc, "3.9.18", "1.2.3");
+    guard made else { check("python own venv: the project and its virtualenv could be written", false, svc); return; }
+    let not_trusted = envv("SWAN_TRUST_BUILD", "0");
+    let db = str(w, "/map/swan.db");
+    var o: u8[>..] = [];
+    guard sh(argv(["bin/swan", "map", str(w, "/repo"), str(w, "/map")]), not_trusted, o) else { return; }
+    check("python own venv: the map says which virtualenv it read, its Python, and that nothing in it was run",
+          find(o, "python: 1 package read from the project's own virtualenv (svc/.venv, Python 3.9.18); nothing in it was run") >= 0, o);
+    var t: u8[>..] = [];
+    lg_db_query(db, "callees", "pick", "", t);
+    check("python own venv: a function imported from the virtualenv's package resolves, named by package and version",
+          either_package(t, "whisper", "shout") == "fakepkg 1.2.3" && callee_package(t, "NAME") == "fakepkg 1.2.3", t);
+    check("python own venv: the code is read as the virtualenv's Python (3.9: the other branch of a version check)",
+          callee_package(t, "whisper").len > 0 && callee_package(t, "shout").len == 0 && callee_package(t, "str") == "python-stdlib 3.9", t);
+    var tm: u8[>..] = [];
+    lg_db_query(db, "callees", "make", "", tm);
+    check("python own venv: a class a package hands on from one of its modules is named by that package wherever it is used, never as the repo",
+          callee_only_from(tm, "Loud", "fakepkg 1.2.3"), tm);
+
+    // Nothing changed: the piece is kept. Then the virtualenv holds another
+    // version of the package: the piece is indexed again and names it.
+    var o2: u8[>..] = [];
+    guard sh(argv(["bin/swan", "map", str(w, "/repo"), str(w, "/map")]), not_trusted, o2) else { return; }
+    rm_rf(str(svc, "/.venv"));
+    let remade = fake_venv(svc, "3.9.18", "1.2.4");
+    var o3: u8[>..] = [];
+    guard sh(argv(["bin/swan", "map", str(w, "/repo"), str(w, "/map")]), not_trusted, o3) else { return; }
+    lg_db_query(db, "callees", "pick", "", t);
+    check("python own venv: an unchanged map keeps its piece; a changed virtualenv is read and indexed again",
+          remade && find(o2, "python: 1 pieces reused") >= 0 && find(o3, "pieces reused") < 0 && either_package(t, "whisper", "shout") == "fakepkg 1.2.4", str(o2, "\n", o3, "\n", t));
+
+    // A repo of scripts with a virtualenv at the top and no manifest: the
+    // survey names no project there, and Swan's own look at the top does.
+    let w2 = "data/py-own-venv-top";
+    rm_rf(w2);
+    mkdir_p(str(w2, "/repo"));
+    let made2 = write_file(str(w2, "/repo/app.py"), app) && fake_venv(str(w2, "/repo"), "3.9.18", "1.2.3");
+    var o4: u8[>..] = [];
+    guard made2 && sh(argv(["bin/swan", "map", str(w2, "/repo"), str(w2, "/map")]), not_trusted, o4) else { return; }
+    lg_db_query(str(w2, "/map/swan.db"), "callees", "pick", "", t);
+    check("python own venv: a virtualenv at the top of a repo that is not trusted is read too, not left out",
+          find(o4, "read from the project's own virtualenv (.venv, Python 3.9.18)") >= 0 && either_package(t, "whisper", "shout") == "fakepkg 1.2.3", str(o4, "\n", t));
 }
 
 fn lang_python() {

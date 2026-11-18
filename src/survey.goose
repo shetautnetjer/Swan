@@ -13,6 +13,12 @@
 //          took 50 s for relatedb/relate's 38 Go files (2026-11-18); from
 //          the module that holds 27 of them, 6 s, with the same rows.
 //
+//   Python a project's own virtualenv is read, not run, for the packages
+//          it holds and the Python it was made with, wherever the project
+//          is (src/pipeline.goose, the Python step). Swan looked only at
+//          the top of the repo, and used what it found only once the repo
+//          was trusted.
+//
 // Without Spread-Wings, or when the survey fails, a map goes on as before
 // and says so.
 
@@ -83,6 +89,36 @@ fn survey_paths(survey: const u8[:], kind: const u8[:], ignored: const u8[:]) ->
         if k_ok && at_ok && k == kind && !in_ignored(ignored, at) { format(paths, at, "\n"); }
     };
     return paths;
+}
+
+// The virtualenvs of a survey's Python projects, one per line, in the
+// survey's order (the top of the repo first):
+// "<project folder>\t<virtualenv, relative to the repo>\t<its Python>".
+// The Python version is what the virtualenv's pyvenv.cfg says ("" when it
+// says none). Without the projects in folders git ignores.
+fn survey_python_envs(survey: const u8[:], ignored: const u8[:]) -> u8[>..] {
+    var envs: u8[>..] = [];
+    guard survey.len > 0 else { return envs; }
+    var text: u8[>..] = [];
+    text.append(survey);
+    var doc: json::Node[>..] = [];
+    var dec: u8[>..] = [];
+    let root, err = json::parse(text, doc, dec);
+    let list = json::member(root, "projects");
+    guard list else { return envs; }
+    json::each(list) { p =>
+        let k, k_ok = json::as_string(json::member(p, "kind"));
+        let at, at_ok = json::as_string(json::member(p, "path"));
+        let e = json::member(p, "environment");
+        let v, v_ok = json::as_string(json::member(e, "venv"));
+        let py, py_ok = json::as_string(json::member(e, "python"));
+        if k_ok && at_ok && k == "python" && v_ok && v.len > 0 && !in_ignored(ignored, at) {
+            format(envs, at, "\t", v, "\t");
+            if py_ok { envs.append(trim(py)); }
+            envs.push('\n');
+        }
+    };
+    return envs;
 }
 
 // What the repo holds, for the map's report: the projects by kind, and the
