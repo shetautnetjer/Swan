@@ -379,6 +379,32 @@ fn rename_symbol(db: i64, pattern: const u8[:], rel: const u8[:], new_name: cons
     sqlite::bind_text(fam, 2, old_name);
     step_done(fam);
     sqlite::finalize(fam);
+    // A class attribute is a family too: the same name assigned in the
+    // classes above and below its own (`session: str = ""` in a base,
+    // `session = "boss"` in a subclass). The compiler links the classes, not
+    // the attributes, and resolves `self.session` to the base's declaration
+    // even inside the subclass, so renaming one alone left the others
+    // behind and changed what the code reads (found against PyCharm on
+    // Agent-Reach, 2026-11-17).
+    let afam = prepare_or_die(db, """
+        WITH RECURSIVE cls(id) AS (
+            SELECT c.id FROM symbols a JOIN symbols c
+                ON c.def_file = a.def_file AND a.name_path = c.name_path || '/' || a.name AND c.kind IN ('class', 'interface')
+            WHERE a.id = ?1 AND a.kind IN ('variable', 'property', 'field')
+            UNION
+            SELECT CASE WHEN r.symbol_id = cls.id THEN r.related_id ELSE r.symbol_id END
+            FROM cls JOIN relationships r ON (r.symbol_id = cls.id OR r.related_id = cls.id) AND r.is_impl = 1
+            JOIN symbols o ON o.id = CASE WHEN r.symbol_id = cls.id THEN r.related_id ELSE r.symbol_id END
+            WHERE o.in_repo = 1 AND o.kind IN ('class', 'interface'))
+        INSERT OR IGNORE INTO temp.rename_family
+            SELECT a.id FROM cls JOIN symbols c ON c.id = cls.id JOIN symbols a
+                ON a.def_file = c.def_file AND a.name = ?2 AND a.name_path = c.name_path || '/' || ?2
+            WHERE a.in_repo = 1 AND a.kind IN ('variable', 'property', 'field')
+        """);
+    sqlite::bind_int(afam, 1, t.id);
+    sqlite::bind_text(afam, 2, old_name);
+    step_done(afam);
+    sqlite::finalize(afam);
     var also: u8[>..] = [];
     let aq = prepare_or_die(db, "SELECT s.name_path FROM temp.rename_family f JOIN symbols s ON s.id = f.id WHERE f.id != ?1 ORDER BY s.name_path");
     sqlite::bind_int(aq, 1, t.id);

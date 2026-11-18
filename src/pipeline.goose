@@ -763,6 +763,66 @@ fn add_toolchain_env(renv: u8[>..]&, name: const u8[:], sub: const u8[:]) {
     if (env(name, v) && v.len > 0) || is_dir(p) { renv.append(env_entry(name, p)); }
 }
 
+// The toolchain to index with when the repo pins one rustup does not have
+// (rust-toolchain.toml or rust-toolchain: `channel = "1.88.0"`): rustup's
+// default one, else "". Without this cargo exits "toolchain ... is not
+// installed" and the repo gets no Rust map at all; a sealed, offline run
+// cannot install it, and a map does not need the exact compiler. Found on
+// relatedb/relate, 2026-11-17.
+fn rust_toolchain_override(repo: const u8[:]) -> u8[>..] {
+    var none: u8[>..] = [];
+    var text: u8[>..] = [];
+    var channel: u8[>..] = [];
+    if read_file(str(repo, "/rust-toolchain.toml"), text) {
+        each_split(text, '\n') { l =>
+            let t = trim(l);
+            if channel.len == 0 && starts_with(t, "channel") && find(t, "\"") >= 0 {
+                let a = find(t, "\"") + 1;
+                let b = a + find(t[a..], "\"");
+                if b > a { channel.append(t[a..b]); }
+            }
+        };
+    } else if read_file(str(repo, "/rust-toolchain"), text) {
+        each_split(text, '\n') { l => if channel.len == 0 && trim(l).len > 0 && find(l, "[") < 0 && find(l, "=") < 0 { channel.append(trim(l)); } };
+    }
+    guard channel.len > 0 else { return none; }
+    // Where rustup keeps toolchains: $RUSTUP_HOME or ~/.rustup, else what
+    // rustup itself says (installed for everyone, its home is elsewhere and
+    // only its wrapper scripts know). Asked from /, never from the repo:
+    // there rustup would try to install the pinned toolchain.
+    var rh: u8[>..] = [];
+    rh.append(toolchain_home("RUSTUP_HOME", ".rustup"));
+    if !is_dir(str(rh, "/toolchains")) {
+        var a: u8[>..] = [];
+        arg(a, "rustup"); arg(a, "show"); arg(a, "home");
+        var o: u8[>..] = [];
+        var e: u8[>..] = [];
+        guard swan_run(a, "/", "", 10000, o, e) == 0 else { return none; }
+        rh.clear();
+        rh.append(trim(o));
+    }
+    var names: u8[>..] = [];
+    guard list_dir(str(rh, "/toolchains"), names) else { return none; }
+    var have = false;
+    each_split(names, '\n') { n => if n == channel || starts_with(n, str(channel, "-")) { have = true; } };
+    guard !have else { return none; }
+    var settings: u8[>..] = [];
+    var dflt: u8[>..] = [];
+    if read_file(str(rh, "/settings.toml"), settings) {
+        each_split(settings, '\n') { l =>
+            let t = trim(l);
+            if dflt.len == 0 && starts_with(t, "default_toolchain") && find(t, "\"") >= 0 {
+                let a = find(t, "\"") + 1;
+                let b = a + find(t[a..], "\"");
+                if b > a { dflt.append(t[a..b]); }
+            }
+        };
+    }
+    guard dflt.len > 0 else { return none; }
+    write_stderr(str("rust: the repo pins toolchain ", channel, ", which is not installed; indexing with ", dflt, "\n"));
+    return dflt;
+}
+
 // Run one step of the map sealed when the sandbox is on (see seal_argv).
 fn sealed_run(argv: const u8[:], repo: const u8[:], out: const u8[:], trusted: bool, env: const u8[:],
               timeout_ms: i64, o: u8[>..]&, e: u8[>..]&) -> i32 {
@@ -2436,8 +2496,10 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
         add_toolchain_env(renv, "RUSTUP_HOME", ".rustup");
         add_toolchain_env(renv, "CARGO_HOME", ".cargo");
         if !trusted { renv.append(env_entry("CARGO_NET_OFFLINE", "true")); }
+        let tc = rust_toolchain_override(repo);
+        if tc.len > 0 { renv.append(env_entry("RUSTUP_TOOLCHAIN", tc)); }
         add_lang_job("rust-analyzer scip", target, a, child_env(l, renv),
-                     lang_fingerprint(repo, [".rs"], ["Cargo.toml", "Cargo.lock"]) { f => stamp(f) });
+                     lang_fingerprint(repo, [".rs"], ["Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "rust-toolchain"]) { f => stamp(f) });
     }
 
     // scip-java indexes Java, and Kotlin built with Gradle (its compiler

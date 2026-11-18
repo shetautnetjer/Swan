@@ -808,6 +808,23 @@ pinned by sha256 in `scripts/fetch-tools.sh`.
   Square, Shape/area their two area() overrides (checked by hand).
 - Not done: the other live servers are still unsealed; Lombok.
 
+## 2026-11-17: what broke since my last edit
+
+`what_broke` (MCP) and `swan broke <map-dir> <file>...` ask the language
+server about the files just written and report only errors it did not
+report the last time that file was asked about (same severity, code and
+message; lines may move). What was seen is kept beside the map in
+`broke-seen.tsv`. `scripts/hooks/what-broke-after-edit.py` is a Claude
+Code PostToolUse hook: silent unless the edit introduced an error, then
+it tells the agent (exit 2); it never blocks an edit.
+
+- Checked on tiny-py: clean, one bad edit (reported once), asked again (not
+  new), a second bad edit (only that one), the first fixed (nothing new).
+- The CLI starts the language server each time (pyright: about a second;
+  rust-analyzer and JDT LS: several). The MCP tool uses the running one.
+- Limits: needs a live server for the language; warnings are counted, not
+  listed; breakage in callers in other files is not looked at yet.
+
 ## 2026-11-17: live Goose errors from the compiler's own server
 
 `tools/modules.json` gains "goose": `goose lsp`, sealed. `{goose_entry_files}`
