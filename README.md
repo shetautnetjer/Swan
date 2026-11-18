@@ -427,6 +427,9 @@ them Eclipse JDT LS for Java: with a trusted repo it imports Gradle and
 Maven builds; otherwise it opens the repo as plain folders (source folders
 read from the files' `package` lines) inside the eggshell seal, so live
 Java errors need no trust. A candidate marked `"sealed": true` runs that way.
+Goose is there too: the compiler's own server (`goose lsp`), sealed, told
+which files are the repo's programs (those with `fn main`) so a module is
+checked as part of its program and not alone.
 
 A question about one symbol's impact (`get_callers`, `get_callees`,
 `get_diagnostics`), asked with a name several symbols share, comes back with

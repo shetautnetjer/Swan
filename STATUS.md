@@ -824,3 +824,14 @@ it tells the agent (exit 2); it never blocks an edit.
   rust-analyzer and JDT LS: several). The MCP tool uses the running one.
 - Limits: needs a live server for the language; warnings are counted, not
   listed; breakage in callers in other files is not looked at yet.
+
+## 2026-11-17: live Goose errors from the compiler's own server
+
+`tools/modules.json` gains "goose": `goose lsp`, sealed. `{goose_entry_files}`
+names the repo's programs (files with `fn main(`) in the server's
+initialization options; without it a module checked alone reports every
+name its importer provides as unknown (src/edit.goose: 6 false errors, with
+it 0). On a copy of Swan's own source a real error in src/edit.goose comes
+back in about half a second. `fixtures/tiny-goose` and three `live` checks.
+Not done: a Goose map (definitions, references, callers); `swan check` with
+`goose check --diagnostics json`; the installed Swan ships no Goose compiler.

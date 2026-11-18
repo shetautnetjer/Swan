@@ -33,6 +33,15 @@
       {"cmd": ["{bin}/typescript-language-server", "--stdio"], "language_id": "typescript", "settle": "publish", "init": "{}"}
     ]
   },
+  "goose": {
+    "match": [".goose"],
+    "lsp": [
+      {"cmd": ["{tools}/goose/goose-v2026.3-linux-x64/goose", "lsp", "--stdio"],
+       "language_id": "goose", "settle": "publish", "sealed": true,
+       "init": "{\"entryFiles\":{goose_entry_files}}",
+       "env": ["GOOSE_HOME={tools}/goose-home"]}
+    ]
+  },
   "java": {
     "match": [".java"],
     "lsp": [
