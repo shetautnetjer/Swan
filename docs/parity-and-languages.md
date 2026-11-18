@@ -92,12 +92,19 @@ Both runs used private repos, read-only. Only the findings are recorded here.
   - scip-python sets no SCIP kind, so Swan reads `def`/`class` from the
     signature.
   - It needs `pip` to list installed packages. Without pip, `swan map` now
-    builds the same list from Python's own `importlib.metadata`, and uses the
-    repo's `.venv`/`venv` when there is one. Outside symbols then carry their
-    package and version (`requests 2.32.5` in `fixtures/tiny-py`). Some
-    standard-library members still come out labelled with the project's
-    name instead of `python-stdlib`: a scip-python quirk, harmless to
-    queries.
+    builds the same list from Python's own `importlib.metadata`. Outside
+    symbols then carry their package and version (`requests 2.32.5` in
+    `fixtures/tiny-py`).
+  - A project's own virtualenv (`.venv`, `venv`, at the top or wherever the
+    survey finds a Python project) is read and not run, so it needs no
+    trust: its packages are listed from their dist-info folders, found
+    through a stand-in interpreter, and the code is read as the Python the
+    virtualenv holds. At the top of a trusted repo it is run as before.
+  - scip-python named what it found under the folder it runs in as the
+    project, a virtualenv's packages included, and a class a package hands
+    on from one of its modules (`requests.Response`, `unittest.TestCase`)
+    as the project wherever the package was. Swan's second fix to its copy
+    (src/pypatch.goose) names both by their package.
   - Rechecked on 2026-10-25 with the new pipeline: the same 10 functions,
     the same result (110 of rg's 122 lines, every one real). `swan map` took
     159 s, 139 s of it scip-python. `swan check` (pyright) took 56 s.

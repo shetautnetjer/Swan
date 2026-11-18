@@ -107,9 +107,12 @@ would run and with what settings, and runs nothing.
 
 **Don't ask for trust; work with what the seal covers.** Rust maps sealed
 and offline for any repo, against the crates already in Cargo's cache: a
-crate that isn't cached leaves its uses unresolved, so say so. Gradle,
-Maven and MSBuild indexers, `swan check`'s Cargo checks and a repo `.venv`
-still wait for trust and appear under `skipped`; report them as not run.
+crate that isn't cached leaves its uses unresolved, so say so. A Python
+project's own `.venv` is read for the map without trust (its packages are
+named by package and version; the map's report says which virtualenv);
+nothing in it is run. Gradle, Maven and MSBuild indexers, `swan check`'s
+Cargo checks and anything that would run a repo's `.venv` still wait for
+trust and appear under `skipped`; report them as not run.
 Run `<swan-binary> trust <exact-repo>` only when the person has asked for it
 for that repo. Even then the repo runs sealed: trust adds the network and
 write access to the repo and its build caches, nothing else. Never set

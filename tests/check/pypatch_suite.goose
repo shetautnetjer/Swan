@@ -81,6 +81,30 @@ fn pypatch_suite() {
     read_file(str(tmp, "/other.js"), other);
     check("a file it does not fit is left alone", bad != 0 && other == "function v(){}\n", bad_o);
 
+    // The second fix, on scip-python.js: package names and the Python
+    // version. On a copy of that one file, so the two packages compared
+    // below stay alike in everything but the memo.
+    mkdir_p(str(tmp, "/names"));
+    let names2 = str(tmp, "/names/scip-python.js");
+    guard sh(argv(["cp", str(pkg, "/dist/scip-python.js"), names2]), "", o) else { rm_rf(tmp); return; }
+    var shipped: u8[>..] = [];
+    var s1: u8[>..] = [];
+    run(argv(["bin/swan", "scip-python-patch", names2, "--revert"]), "", s1, e);
+    read_file(names2, shipped);
+    var s2: u8[>..] = [];
+    run(argv(["bin/swan", "scip-python-patch", names2]), "", s2, e);
+    var fixed: u8[>..] = [];
+    read_file(names2, fixed);
+    var s3: u8[>..] = [];
+    run(argv(["bin/swan", "scip-python-patch", names2]), "", s3, e);
+    var s4: u8[>..] = [];
+    run(argv(["bin/swan", "scip-python-patch", names2, "--revert"]), "", s4, e);
+    var back: u8[>..] = [];
+    read_file(names2, back);
+    check("Swan's second scip-python fix goes on a copy of scip-python.js, once, and comes off leaving the file as it shipped",
+          trim(s2) == "patched" && find(fixed, "__swanSite") >= 0 && find(fixed, "SWAN_PY_VERSION") >= 0 && trim(s3) == "already" &&
+          trim(s4) == "reverted" && back == shipped && find(shipped, "__swanSite") < 0, str(s1, s2, s3, s4));
+
     // Same output, patched and unpatched: a fixture, and the worst-case shape.
     let fx = str(here, "/fixtures/tiny-py");
     let a1 = pp_index(patched, fx, str(tmp, "/fx-patched.scip"));

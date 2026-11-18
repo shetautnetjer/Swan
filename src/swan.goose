@@ -164,8 +164,10 @@ fn main() {
         if a.len == 4 { let v, ok = parse_int(a[3]); guard ok && v > 0 else { usage(); } k = v; }
         write_stdout(plan_python(abs_path(a[2]), k));
     } else if a[1] == "scip-python-patch" && (a.len == 3 || (a.len == 4 && a[3] == "--revert")) {
-        // Applies (or undoes) the reachability memo on one pyright-internal.js.
-        let r = pypatch_file(a[2], a.len == 4);
+        // Applies (or undoes) Swan's fixes on one file of scip-python: the
+        // reachability memo on pyright-internal.js, the package names and
+        // Python version on scip-python.js.
+        let r = if ends_with(a[2], "scip-python.js") { pysite_file(a[2], a.len == 4) } else { pypatch_file(a[2], a.len == 4) };
         print(r);
         if r == "no match" { exit(1); }
     } else if a[1] == "scip-typescript-patch" && (a.len == 3 || (a.len == 4 && a[3] == "--revert")) {

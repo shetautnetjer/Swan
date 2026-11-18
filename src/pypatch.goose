@@ -131,6 +131,85 @@ fn pypatch_file(path: const u8[:], revert: bool) -> const u8[:] {
     return sites_patch_file(path, PYPATCH_SITES, PYPATCH_MARK, revert);
 }
 
+// A second fix, to dist/scip-python.js: a package installed inside the repo
+// is still a package from outside.
+//
+// What was wrong. To name the package a definition belongs to, scip-python
+// asks in three places whether the file is under the folder it runs in, and
+// if so answers "this project" without looking at the environment. A
+// virtualenv usually sits inside the project (.venv), so what a file took
+// from an installed package with `import x` or `from x import y` was named
+// as the repo itself, at the repo's version (`repo 0 fakepkg.tools/
+// shout().`), while `x.y(...)` reached through the module was named right
+// (`requests 2.32.5 requests.api/get().`). Seen 2026-11-18 on a project
+// with a hand-made virtualenv; with the same folder copied outside the
+// project every name was the package's.
+//
+// The fix. A file under a site-packages folder is not the project's own:
+// the three shortcuts skip it, and the environment names its package.
+//
+// A fourth place had the same effect whatever folder a package was in. A
+// class reached through a module (`requests.Response`, `unittest.TestCase`,
+// `nx.Graph`) was named by the file it was used in, so always as the repo:
+// `repo 0 unittest.case/TestCase#`. It is now named by its own file first,
+// the way its methods already were.
+//
+// And the Python version. scip-python never asks its interpreter which
+// Python it is: every project was read as 3.11, the newest it calls
+// stable, so `if sys.version_info >= (3, 10):` took the same branch in a
+// project on 3.9, and the standard library was named `python-stdlib 3.11`
+// everywhere. Swan passes the version of the project's virtualenv in
+// $SWAN_PY_VERSION (src/pipeline.goose) and the fifth site makes it the
+// default. A version the project sets for pyright itself still wins.
+let PYSITE_MARK = "__swanSite";
+let PYSITE_SITES = [
+    // 1. A definition's own package (getPackageInfo): functions, variables.
+    "return(0,R.assertNeverNormalized)(s),s.startsWith(this.cwd)?this.projectPackage:this.config.pythonEnvironment.getPackageForModule(t)}",
+    "return(0,R.assertNeverNormalized)(s),s.startsWith(this.cwd)&&s.indexOf(\"/site-packages/\")<0?this.projectPackage:this.config.pythonEnvironment.getPackageForModule(t)}",
+    // 2. `import x` (visitImportAs): the module's symbol.
+    "\"visitImportAs.resolvedPath\"),e.startsWith(this.cwd)||e.startsWith(",
+    "\"visitImportAs.resolvedPath\"),e.indexOf(\"/site-packages/\")>=0?!1:e.startsWith(this.cwd)||e.startsWith(",
+    // 3. A module named in an import (guessPackage).
+    "if(e.startsWith(\".\"))return this.projectPackage;if(t&&0!==t.length){const e=a.resolve(t);",
+    "if(e.startsWith(\".\"))return this.projectPackage;if(t&&0!==t.length&&t.indexOf(\"/site-packages/\")<0/*__swanSite*/){const e=a.resolve(t);",
+    // 4. A class reached through a module (typeToSymbol): by the class's
+    //    own file, as its methods already are, and only then by the file
+    //    it is used in.
+    "if(_.isClass(i)){const t=this.getPackageInfo(e,i.details.moduleName);return p.makeClass(t,i.details.moduleName,e.value)}",
+    "if(_.isClass(i)){const t=this.guessPackage(i.details.moduleName,i.details.filePath)||this.getPackageInfo(e,i.details.moduleName);return p.makeClass(t,i.details.moduleName,e.value)}",
+    // 5. Which Python the code is read as: $SWAN_PY_VERSION ("3.9.18"),
+    //    3.0 to 3.12, the newest this pyright knows; a later one counts as
+    //    3.12. Only when the project's own pyright settings name none.
+    "a.defaultPythonPlatform=t.pythonPlatform,a.defaultPythonVersion=t.pythonVersion,",
+    "a.defaultPythonPlatform=t.pythonPlatform,a.defaultPythonVersion=t.pythonVersion||(e=>{const t=(e||\"\").split(\".\"),n=256*+t[0]+ +t[1];if(n>=768)return n>780?780:n})(process.env.SWAN_PY_VERSION),",
+];
+
+// scip-python's scip-python.js, with that fix or (revert) without.
+fn pysite_file(path: const u8[:], revert: bool) -> const u8[:] {
+    return sites_patch_file(path, PYSITE_SITES, PYSITE_MARK, revert);
+}
+
+// Before a map runs scip-python: make sure Swan's copy has the second fix.
+// `size` is the size of dist/scip-python.js now (0 if it is not there).
+fn ensure_scip_python_site_patch(home: const u8[:], size: i64, report: u8[>..]&) {
+    guard size > 0;
+    var off: u8[>..] = [];
+    if env("SWAN_SCIP_PYTHON_PATCH", off) && off == "0" { return; }
+    let dist = str(home, "/tools/node_modules/@sourcegraph/scip-python/dist");
+    let marker = str(dist, "/.swan-site-patch");
+    var seen: u8[>..] = [];
+    if read_file(marker, seen) && trim(seen) == str(size) { return; }
+    let path = str(dist, "/scip-python.js");
+    let r = pysite_file(path, false);
+    if r == "patched" {
+        report.append("scip-python: a package in a virtualenv inside the repo is now named as that package, not as the repo (src/pypatch.goose)\n");
+    } else if r == "no match" {
+        report.append("scip-python: Swan's fix for packages in a virtualenv inside the repo does not fit this scip-python; their classes are named as the repo\n");
+    }
+    var now: u8[>..] = [];
+    if read_file(path, now) { write_file(marker, str(now.len)); }
+}
+
 // Before a map runs scip-python: make sure Swan's copy has the memo. `size`
 // is the bundle's size now (0 if it is not there). A line goes in the
 // report only when something was done or could not be.

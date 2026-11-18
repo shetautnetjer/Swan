@@ -49,6 +49,8 @@ a repo's build scripts, so they stay sealed, and they are heavy).
   (relatedb/relate: 50 s to 6.5 s, the same rows).
 - `spread-wings compiler` takes Swan's answer for every call site the map
   covers, whatever rule had tied it.
+- A Python project's own virtualenv, where the survey finds it: read, not
+  run, for the packages it holds and the Python it was made with.
 - One-file updates (`spread-wings update`) and the watcher (`spread-wings
   watch`), 2026-11-18: the graph from the files that changed, in a third of
   a second on a 7,784-file repo where building it takes 17 s, and one line
@@ -65,8 +67,11 @@ One-file updates and the watcher came first, as the owner asked on
    agent what changed; its exact tools still say stale for a file changed
    outside Swan until `swan map` runs. Whether `swan serve` should keep
    `spread-wings watch` running for this is to be measured, not assumed.
-2. More of Swan read from the survey in place of its own guesses: a Python
-   project's own virtualenv and version, the package manager and folder
+2. More of Swan read from the survey in place of its own guesses. Done:
+   a Python project's own virtualenv and version, for the map. Left: the
+   same for `swan check` and live answers (pyright still cannot find a
+   project's packages in a repo that is not trusted), one run per project
+   where a repo holds several virtualenvs, the package manager and folder
    `run_tests` uses, the checkers and live servers of projects below the
    top.
 3. More languages in Spread-Wings (Java, Kotlin, C, C++, C#, PHP, Lua), each

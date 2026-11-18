@@ -326,9 +326,10 @@ fn dotnet_env(home: const u8[:]) -> u8[>..] {
 
 // The environment children get: a repo virtualenv first on PATH, and room
 // for scip-python and pyright on big repos.
-fn child_env(l: const Langs&, extra: const u8[:]) -> u8[>..] {
+fn child_env(l: const Langs&, extra: const u8[:], first: const u8[:] = "") -> u8[>..] {
     var vars: u8[>..] = [];
     var path: u8[>..] = [];
+    if first.len > 0 { format(path, first, ":"); }
     if l.venv.len > 0 { format(path, l.venv, "/bin:"); }
     // Package-local Node/Bun, when installed. Trust-gated virtualenvs retain
     // their existing precedence; the runtime directory belongs to Swan.
@@ -457,6 +458,77 @@ fn python_src_roots(repo: const u8[:]) -> u8[>..] {
 // by package and version. Without pip the same list comes from Python's own
 // importlib.metadata, written where --environment can read it.
 let PY_ENV_SNIPPET = "import json, importlib.metadata as m\nseen = set()\nout = []\nfor d in m.distributions():\n    n = d.metadata['Name']\n    if not n or n.lower() in seen: continue\n    seen.add(n.lower())\n    out.append({'name': n, 'version': d.version, 'files': [str(f) for f in (d.files or []) if str(f).endswith(('.py', '.pyi'))]})\nprint(json.dumps(out))\n";
+
+// The same list for virtualenvs that are read and not run: each argument is
+// a site-packages folder, and importlib.metadata reads the *.dist-info
+// folders there (METADATA and RECORD). No package is imported.
+let PY_VENV_SNIPPET = "import json, sys, importlib.metadata as m\nseen = set()\nout = []\nfor d in m.distributions(path=sys.argv[1:]):\n    n = d.metadata['Name']\n    if not n or n.lower() in seen: continue\n    seen.add(n.lower())\n    out.append({'name': n, 'version': d.version, 'files': [str(f) for f in (d.files or []) if str(f).endswith(('.py', '.pyi'))]})\nprint(json.dumps(out))\n";
+
+// A stand-in for the Python interpreter, first on PATH for scip-python when
+// a project's own virtualenv is used. scip-python's pyright asks `python3
+// -c <script>` two things: where packages are (sys.path) and which Python
+// this is (sys.version_info). The virtualenv's own interpreter is the
+// repo's to run, not Swan's, and inside the seal it is usually not even
+// there (bin/python is a link out of the repo). The stand-in runs the
+// script in the machine's python3 with those two answers set from the
+// virtualenv: $SWAN_PY_SITE, its site-packages folders, and
+// $SWAN_PY_VERSION, the Python its pyvenv.cfg names. So the packages the
+// project installed are found and nothing in the virtualenv is run.
+// $PYTHONPATH is passed on as python3 itself would (Swan sets it for src
+// layouts). scip-python 0.6.8 asks only the first question; the version
+// reaches it through Swan's fix in src/pypatch.goose.
+let PY_STANDIN_SH = "#!/bin/sh\n# Swan's stand-in for python3 (src/pipeline.goose): the next python3 on PATH runs standin.py.\n# PATH goes on without this folder: a version manager's shim looks python3 up again.\nself=${SWAN_PY_STANDIN:-$(dirname \"$0\")}\nrest=\nIFS=:\nfor d in $PATH; do\n    [ \"$d\" = \"$self\" ] || rest=${rest:+$rest:}$d\ndone\nPATH=$rest\nexec python3 -I \"$self/standin.py\" \"$@\"\n";
+let PY_STANDIN_PY = "# Swan's stand-in for the Python interpreter (src/pipeline.goose).\n# Runs the script it is given with sys.path and sys.version_info set from a\n# virtualenv that is read and not run. Answers nothing but `-c <script>`.\nimport os, sys\nargs = sys.argv[1:]\nwhile args and args[0].startswith('-') and args[0] not in ('-c', '-m'):\n    args.pop(0)\nif len(args) < 2 or args[0] != '-c':\n    sys.exit(2)\nfolders = lambda name: [p for p in os.environ.get(name, '').split(os.pathsep) if p]\nown = [p for p in sys.path if p and 'site-packages' not in p and 'dist-packages' not in p]\nsys.path[:] = folders('PYTHONPATH') + own + folders('SWAN_PY_SITE')\nn = [int(x) for x in os.environ.get('SWAN_PY_VERSION', '').split('.')[:3] if x.isdigit()]\nif len(n) >= 2:\n    sys.version_info = (n[0], n[1], n[2] if len(n) > 2 else 0, 'final', 0)\nsys.argv = ['-c'] + args[2:]\nexec(compile(args[1], '<string>', 'exec'), {'__name__': '__main__'})\n";
+
+// Writes text to path, unless the file already holds it.
+fn write_unless_same(path: const u8[:], text: const u8[:]) {
+    var have: u8[>..] = [];
+    if !read_file(path, have) || have != text { write_file(path, text); }
+}
+
+// Writes the stand-in into <out>/py-standin (python3, python, standin.py)
+// and returns that folder, or "" when it could not be made runnable.
+fn py_standin_dir(out: const u8[:]) -> u8[>..] {
+    var dir: u8[>..] = [];
+    let d = str(out, "/py-standin");
+    make_dir(d);
+    write_unless_same(str(d, "/python3"), PY_STANDIN_SH);
+    write_unless_same(str(d, "/python"), PY_STANDIN_SH);
+    write_unless_same(str(d, "/standin.py"), PY_STANDIN_PY);
+    var a: u8[>..] = [];
+    arg(a, "chmod"); arg(a, "755"); arg(a, str(d, "/python3")); arg(a, str(d, "/python"));
+    var o: u8[>..] = [];
+    var e: u8[>..] = [];
+    if swan_run(a, d, "", 10000, o, e) == 0 { dir.append(d); }
+    return dir;
+}
+
+// The Python a virtualenv was made with, as its pyvenv.cfg says ("version"
+// or "version_info"); "" when it says neither.
+fn pyvenv_version(venv: const u8[:]) -> u8[>..] {
+    var v: u8[>..] = [];
+    var cfg: u8[>..] = [];
+    guard read_file(str(venv, "/pyvenv.cfg"), cfg) else { return v; }
+    each_split(cfg, '\n') { l =>
+        let eq = find(l, "=");
+        if v.len == 0 && eq > 0 && (trim(l[..eq]) == "version" || trim(l[..eq]) == "version_info") { v.append(trim(l[eq + 1..])); }
+    };
+    return v;
+}
+
+// The site-packages folders of a virtualenv (<venv>/lib/python*/site-packages),
+// appended to dirs with ':' between.
+fn py_site_dirs(venv: const u8[:], dirs: u8[>..]&) {
+    var names: u8[>..] = [];
+    guard list_dir(str(venv, "/lib"), names) else { return; }
+    each_split(names, '\n') { nm =>
+        let d = str(venv, "/lib/", nm, "/site-packages");
+        if starts_with(nm, "python") && is_dir(d) {
+            if dirs.len > 0 { dirs.push(':'); }
+            dirs.append(d);
+        }
+    };
+}
 
 extern fn swan_spawn(argv: const u8[:], cwd: const u8[:], env: const u8[:], log: const u8[:]) -> i64;
 extern fn swan_wait_any(code: i32&) -> i64;
@@ -812,8 +884,10 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
     walk_ignore_refresh(repo, out, trusted, ignored_said);
     var l = detect(repo);
     // A virtualenv inside the repo is the repo's own code (its python, its pip, its PATH):
-    // use it only once the repo is trusted, like any other build-running step.
-    if !trusted { l.venv.clear(); }
+    // run it only once the repo is trusted, like any other build-running step.
+    // Until then it is read and not run (the Python step below).
+    var venv_read: u8[>..] = [];
+    if !trusted { venv_read.append(l.venv); l.venv.clear(); }
     var skipped: u8[>..] = [];     // indexers that wait for `swan trust`
     // The projects the repo holds (src/survey.goose): read by Spread-Wings,
     // nothing of the repo run.
@@ -1669,8 +1743,50 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
         // (src/pypatch.goose): without it one long script of try/except
         // blocks can hold a map for minutes.
         ensure_scip_python_patch(home, swan_file_size(str(home, "/tools/node_modules/@sourcegraph/scip-python/dist/pyright-internal.js")), report);
+        ensure_scip_python_site_patch(home, swan_file_size(str(home, "/tools/node_modules/@sourcegraph/scip-python/dist/scip-python.js")), report);
         let python = python_of(l);
         var env_args: u8[>..] = [];
+        // The Python projects' own virtualenvs, where the survey found them
+        // (not only at the top of the repo): read, not run. Their packages
+        // are listed from their dist-info folders and found through a
+        // stand-in interpreter (PY_STANDIN_SH), so this needs no trust. A
+        // virtualenv at the top of a trusted repo is run as before (l.venv).
+        var py_site: u8[>..] = [];          // site-packages folders, ':' between
+        var py_version: u8[>..] = [];       // the first virtualenv's Python
+        var py_venvs: u8[>..] = [];         // the virtualenvs read, for the report
+        var py_standin: u8[>..] = [];
+        var py_listing: u8[>..] = [];
+        if l.venv.len == 0 {
+            // The one at the top that detect() found (a repo of scripts has
+            // no manifest, so the survey names no project there), then the
+            // survey's: "<virtualenv, relative to the repo>\t<its Python>".
+            var found: u8[>..] = [];
+            if venv_read.len > repo.len + 1 {
+                let rel = venv_read[repo.len + 1..];
+                format(found, rel, "\t", pyvenv_version(venv_read), "\n");
+            }
+            let surveyed = survey_python_envs(survey, survey_skip);
+            each_split(surveyed, '\n') { line =>
+                let f = split(line, '\t');
+                if f.len == 3 && find(found, str(f[1], "\t")) != 0 && find(found, str("\n", f[1], "\t")) < 0 { format(found, f[1], "\t", f[2], "\n"); }
+            };
+            each_split(found, '\n') { line =>
+                let f = split(line, '\t');
+                if f.len == 2 {
+                    let had = py_site.len;
+                    py_site_dirs(str(repo, "/", f[0]), py_site);
+                    if py_site.len > had {
+                        if py_venvs.len > 0 { py_venvs.append(", "); }
+                        py_venvs.append(f[0]);
+                        if py_version.len == 0 { py_version.append(f[1]); }
+                    }
+                }
+            };
+        }
+        if py_site.len > 0 { py_standin = py_standin_dir(out); }
+        // Otherwise, as before: is there a pip to ask? Sealed: run with the
+        // repo as working directory, `python -m pip` and `python -c` would
+        // import a repo file named pip.py or json.py.
         var probe: u8[>..] = [];
         arg(probe, python);
         arg(probe, "-m");
@@ -1678,9 +1794,32 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
         arg(probe, "--version");
         var o: u8[>..] = [];
         var e: u8[>..] = [];
-        // Sealed: run with the repo as working directory, `python -m pip`
-        // and `python -c` would import a repo file named pip.py or json.py.
-        if sealed_run(probe, repo, out, trusted, child_env(l, ""), 30000, o, e) != 0 {
+        if py_standin.len > 0 {
+            var p: u8[>..] = [];
+            arg(p, "python3");
+            arg(p, "-I");
+            arg(p, "-c");
+            arg(p, PY_VENV_SNIPPET);
+            each_split(py_site, ':') { d => arg(p, d); };
+            let env_file = str(out, "/python-env.json");
+            if sealed_step("python packages (read from the virtualenv)", p, repo, out, trusted, child_env(l, ""), 60000, py_listing) != 0 {
+                py_listing.clear();
+                py_listing.append("[]");
+            }
+            write_file(env_file, py_listing);
+            arg(env_args, "--environment");
+            arg(env_args, env_file);
+            let held = pypatch_count(py_listing, "{\"name\": ");
+            format(report, "python: ", held, if held == 1 { " package" } else { " packages" });
+            if find(py_venvs, ", ") < 0 {
+                format(report, " read from the project's own virtualenv (", py_venvs, if py_version.len > 0 { str(", Python ", py_version) } else { str("") },
+                       "); nothing in it was run\n");
+            } else {
+                // One environment for the whole repo: see STATUS.md, 2026-11-18.
+                format(report, " read from the projects' own virtualenvs (", py_venvs, "), a package two of them hold from the first",
+                       if py_version.len > 0 { str("; read as the first one's Python ", py_version) } else { str("") }, "; nothing in them was run\n");
+            }
+        } else if sealed_run(probe, repo, out, trusted, child_env(l, ""), 30000, o, e) != 0 {
             var p: u8[>..] = [];
             arg(p, python);
             arg(p, "-c");
@@ -1704,7 +1843,19 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
         // PYTHONPATH lets scip-python find it, and names the package's
         // modules as their importers do (`click.core`, not `src.click.core`).
         let py_path = python_src_roots(repo);
-        let py_env: u8[>..] = if py_path.len > 0 { env_entry("PYTHONPATH", py_path) } else { str("") };
+        var py_env: u8[>..] = [];
+        if py_path.len > 0 { py_env.append(env_entry("PYTHONPATH", py_path)); }
+        if py_standin.len > 0 {
+            py_env.append(env_entry("SWAN_PY_SITE", py_site));
+            py_env.append(env_entry("SWAN_PY_STANDIN", py_standin));
+        }
+        // The Python the code is read as: the virtualenv's, run or read.
+        if l.venv.len > 0 { py_version = pyvenv_version(l.venv); }
+        if py_version.len > 0 { py_env.append(env_entry("SWAN_PY_VERSION", py_version)); }
+        // What is installed, and which Python, change symbol names and
+        // what resolves: both are part of each piece's key.
+        let env_key: u8[>..] = if py_standin.len > 0 { str("-", hash(str(py_site, "|", py_version, "|", hash(py_listing)))) }
+                               else if py_version.len > 0 { str("-", hash(py_version)) } else { str("") };
         fn add_python_job(piece: const u8[:], target: const u8[:]) {
             var a: u8[>..] = [];
             arg(a, str(bin, "scip-python"));
@@ -1720,7 +1871,7 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
             if piece.len > 0 { arg(a, "--target-only"); arg(a, piece_target(piece)); }
             a.append(env_args);
             let label: u8[>..] = if piece.len > 0 { str("scip-python ", piece) } else { str("scip-python") };
-            add_job(label, target, a, child_env(l, py_env), piece);
+            add_job(label, target, a, child_env(l, py_env, py_standin), piece);
         }
 
         // Reuse: a piece whose files are unchanged since the last map, and
@@ -1737,8 +1888,12 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
         var reused = 0;
         each_split(pieces[..pieces.len - 1], '\n') { piece =>
             // The search path changes symbol names, so it is part of the key.
-            let fp = if py_path.len > 0 { str(piece_fingerprint(stamps, piece), "-", hash(py_path)) }
-                     else { str(piece_fingerprint(stamps, piece)) };
+            let fp0 = if py_path.len > 0 { str(piece_fingerprint(stamps, piece), "-", hash(py_path)) }
+                      else { str(piece_fingerprint(stamps, piece)) };
+            // "-n2": names as Swan's second scip-python fix gives them
+            // (src/pypatch.goose). A piece kept from before it would name
+            // an outside class differently from a piece indexed now.
+            let fp = str(fp0, env_key, "-n2");
             let target = str(out, "/index-python-", hash(piece), ".scip");
             var hit = false;
             each_split(prev_manifest, '\n') { line =>
