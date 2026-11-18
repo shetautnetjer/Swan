@@ -28,6 +28,7 @@ import .change;
 import .syntax;
 import .pypatch;
 import .tspatch;
+import .tsproj;
 import .wings;
 import .broke;
 import .lspindex;

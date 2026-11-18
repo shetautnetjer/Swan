@@ -411,7 +411,7 @@ let PY_PIECE_GROUPS: i64 = 40;
 // line per chunk, files separated by tabs, and the declaration files as
 // `decls`; nothing when one run will do. k may be 1: one chunk of every
 // file, which lets a later edit be indexed as a layer over it.
-fn plan_ts(repo: const u8[:], listing: const u8[:], k: i64, decls: u8[>..]&, refs: u8[>..]&) -> u8[>..] {
+fn plan_ts(repo: const u8[:], listing: const u8[:], k_asked: i64, decls: u8[>..]&, refs: u8[>..]&, always: bool = false) -> u8[>..] {
     var files: u8[>..] = [];
     var sizes: i64[>..] = [];
     each_split(listing, '\n') { raw =>
@@ -429,7 +429,10 @@ fn plan_ts(repo: const u8[:], listing: const u8[:], k: i64, decls: u8[>..]&, ref
         }
     };
     var plan: u8[>..] = [];
-    guard k >= 1 && sizes.len >= 4 * k else { return plan; }
+    // `always`: a plan however few the files (one project of several, which
+    // cannot be left to a whole run under another project's config).
+    let k = if always { max(1, min(k_asked, sizes.len / 4)) } else { k_asked };
+    guard sizes.len > 0 && k >= 1 && (always || sizes.len >= 4 * k) else { return plan; }
     let paths = split(files[..files.len - 1], '\n');
     var order: i64[>..] = [];
     for z, i in sizes { order.push(i); }
@@ -1157,11 +1160,24 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
         // changes, so it is kept with a key of those and asked again only then.
         var names_key: u64 = 0;
         var ts_count: i64 = 0;
+        var ts_nested: u8[>..] = [];        // every tsconfig.json below the repo's root, one per line
         each_file(repo) { full, name =>
             for e in [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"] {
                 if ends_with(name, e) { names_key = hash_combine(names_key, hash(full)); ts_count++; }
             }
+            // Every other tsconfig counts too (src/tsproj.goose): which files
+            // each owns is asked again when one changes.
+            let at_root = full.len == repo.len + 1 + name.len;
+            if starts_with(name, "tsconfig") && ends_with(name, ".json") && !(at_root && name == "tsconfig.json") {
+                names_key = hash_combine(names_key, hash_combine(hash(full), stamp(full)));
+                if name == "tsconfig.json" { format(ts_nested, full, "\n"); }
+            }
         };
+        // More than one project is possible when a tsconfig.json lies below
+        // the root or the root's own references others.
+        var base_text: u8[>..] = [];
+        if l.tsconfig { read_file(base, base_text); }
+        let ts_multi = ts_stable && (ts_nested.len > 0 || find(base_text, "\"references\"") >= 0);
         // With no slots to split into, a big project still runs as one
         // chunk (all of tsc's files, the same index the whole-language run
         // makes), so that a code edit can be indexed as a layer of just the
@@ -1171,7 +1187,7 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
         var layer_min: i64 = 200;
         var lm: u8[>..] = [];
         if env("SWAN_TS_LAYER_MIN", lm) { let n, ok = parse_int(lm); if ok && n > 0 { layer_min = n; } }
-        let plan_k = if !ts_stable { 0 } else if ts_k >= 2 { ts_k } else if ts_count >= layer_min { 1 } else { 0 };
+        let plan_k = if !ts_stable { 0 } else if ts_k >= 2 { ts_k } else if ts_count >= layer_min || ts_multi { 1 } else { 0 };
         for r in ["tsconfig.json", "package.json"] {
             let pth = str(repo, "/", r);
             if file_exists(pth) { names_key = hash_combine(names_key, hash_combine(hash(pth[..]), stamp(pth[..]))); }
@@ -1225,17 +1241,107 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
                 }
             }
         }
+        // The other projects (src/tsproj.goose): "config \t file" for each
+        // file a config other than the root's owns. Kept, like tsc's list,
+        // until a file comes or goes or a tsconfig changes.
+        var others: u8[>..] = [];
+        if plan_k >= 1 && ts_multi {
+            var kept_projects: u8[>..] = [];
+            read_file(str(out, "/tsc-projects.txt"), kept_projects);
+            if starts_with(kept_projects, key_line) { others.append(kept_projects[key_line.len..]); }
+            else {
+                var note: u8[>..] = [];
+                others = ts_other_projects(repo, out, trusted, str(bin, "tsc"), child_env(l, ""), base, listing, ts_nested, note);
+                report.append(note);
+                cache_write("tsc-projects.txt", str(key_line, others));
+            }
+            if others.len > 0 {
+                // The root's own files are the ones no other config took.
+                var taken = dictionary<u64, bool> {};
+                each_split(others, '\n') { line => let tab = find(line, "\t"); if tab > 0 { taken.insert(hash(line[tab + 1..]), true); } };
+                var mine: u8[>..] = [];
+                each_split(listing, '\n') { raw =>
+                    let f = trim(raw);
+                    if f.len > 0 {
+                        var real: u8[>..] = [];
+                        if !swan_realpath(f, real) { real.append(f); }
+                        if !taken.contains(hash(real[..])) { format(mine, f, "\n"); }
+                    }
+                };
+                listing.clear();
+                listing.append(mine);
+                listed = true;
+            }
+        }
+        // The chunks, planned inside each project: no chunk holds files of
+        // two configs. `bases` is the configs that own files, the root's
+        // first; `owner_at` says which of them a file of another's is under.
         var decls: u8[>..] = [];
         var refs: u8[>..] = [];
-        var chunks: u8[>..] = if listed { plan_ts(repo, listing, plan_k, decls, refs) } else { str("") };
+        var decl_of: u8[>..] = [];          // "config \t file": each project's declaration files
+        var ref_of: u8[>..] = [];           // and its files with a /// <reference>
+        var bases: u8[>..] = [];
+        var owner_at = dictionary<u64, i64> {};
+        var chunks: u8[>..] = [];
+        let ts_projects = others.len > 0;
+        let ts_total = count_lines(listing) + count_lines(others);
+        fn plan_project(cfg: const u8[:], files: const u8[:]) {
+            guard files.len > 0;
+            var gd: u8[>..] = [];
+            var gr: u8[>..] = [];
+            let n = count_lines(files);
+            let plan = plan_ts(repo, files, if ts_projects { plan_k * n / max(ts_total, 1) } else { plan_k }, gd, gr, ts_projects);
+            let at = count_lines(bases);
+            format(bases, cfg, "\n");
+            if at > 0 { each_split(files, '\n') { f => if f.len > 0 { owner_at.insert(hash(f), at); } }; }
+            chunks.append(plan);
+            decls.append(gd);
+            refs.append(gr);
+            each_split(gd, '\n') { f => if f.len > 0 { format(decl_of, cfg, "\t", f, "\n"); } };
+            each_split(gr, '\n') { f => if f.len > 0 { format(ref_of, cfg, "\t", f, "\n"); } };
+        }
+        if listed {
+            var root_files: u8[>..] = [];
+            each_split(listing, '\n') { raw => let f = trim(raw); if f.len > 0 { format(root_files, f, "\n"); } };
+            if root_files.len > 0 || !ts_projects { plan_project(base, if ts_projects { root_files[..] } else { listing[..] }); }
+            else { format(bases, base, "\n"); }
+            var group: u8[>..] = [];
+            var group_cfg: u8[>..] = [];
+            each_split(others, '\n') { line =>
+                let tab = find(line, "\t");
+                guard tab > 0;
+                if line[..tab] != group_cfg {
+                    plan_project(group_cfg, group);
+                    group.clear();
+                    group_cfg.clear();
+                    group_cfg.append(line[..tab]);
+                }
+                format(group, line[tab + 1..], "\n");
+            };
+            plan_project(group_cfg, group);
+        }
+        let base_list = split(bases, '\n');
+        // Which config a file is under, as its place in `bases`.
+        fn owner_index(f: const u8[:]) -> i64 {
+            let at = owner_at.get(hash(f));
+            guard at else { return 0; }
+            let i: i64 = at;
+            return i;
+        }
         // Keep the last map's chunks while the set of files is the same, so
         // that an edit reruns only the chunks it touches (sizes moving files
-        // between chunks would rerun them all).
+        // between chunks would rerun them all), and while each of them is
+        // still one project's.
         var same_plan = false;
         if chunks.len > 0 {
             var prev_plan: u8[>..] = [];
             read_file(str(out, "/typescript-chunks.txt"), prev_plan);
-            if prev_plan.len > 0 && same_file_set(prev_plan, chunks) { chunks.clear(); chunks.append(prev_plan); same_plan = true; }
+            var one_project_each = true;
+            each_split(prev_plan, '\n') { chunk =>
+                var first = -1;
+                each_split(chunk, '\t') { f => if f.len > 0 { let o = owner_index(f); if first < 0 { first = o; } else if o != first { one_project_each = false; } } };
+            };
+            if prev_plan.len > 0 && one_project_each && same_file_set(prev_plan, chunks) { chunks.clear(); chunks.append(prev_plan); same_plan = true; }
             cache_write("typescript-chunks.txt", chunks);
         }
         if chunks.len == 0 {
@@ -1256,6 +1362,7 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
                 if file_exists(pth) { shared = hash_combine(shared, hash_combine(hash(r), stamp(pth[..]))); }
             }
             shared = hash_combine(hash_combine(shared, hash(base)), ts_indexer);
+            for b, i in base_list { if i > 0 && b.len > 0 { shared = hash_combine(shared, hash_combine(hash(b), stamp(b))); } }
             each_split(decls, '\n') { f =>
                 if f.len > repo.len {
                     let st = str(f[repo.len + 1..], "\t", stamp(f) as! i64);
@@ -1269,6 +1376,8 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
             // shared inputs: an edit to one reruns every chunk.
             var root_set = dictionary<const u8[:], bool> {};
             each_split(listing, '\n') { f => let t = trim(f); if t.len > 0 { root_set.insert(t, true); } };
+            // A file another config owns is a root too, of its own project.
+            each_split(others, '\n') { line => let tab = find(line, "\t"); if tab > 0 { root_set.insert(line[tab + 1..], true); } };
             each_split(program, '\n') { raw =>
                 let f = trim(raw);
                 if f.len > repo.len && starts_with(f, repo) && f[repo.len] == '/' &&
@@ -1328,24 +1437,52 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
                 let tab = find(line, "\t");
                 if tab > 0 && !file_exists(str(out, "/index-typescript-layer-", line[..tab], ".scip")) { layers_present = false; }
             };
+            // A layer for each config that owns changed files.
+            var fresh_owners: u8[>..] = [];
+            each_split(fresh, '\n') { rel =>
+                if rel.len > 0 {
+                    let o = str(owner_index(str(repo, "/", rel)));
+                    if !contains_line(fresh_owners, o) { format(fresh_owners, o, "\n"); }
+                }
+            };
             let use_delta = same_plan && same_shared && chunk_files_present && layers_present && covered.len > 0 &&
-                            count_lines(covered) * 4 <= nfiles && nlayers + (if fresh.len > 0 { 1 } else { 0 }) <= 6;
+                            count_lines(covered) * 4 <= nfiles && nlayers + count_lines(fresh_owners) <= 6;
             if use_delta {
                 var layers: u8[>..] = [];
-                if fresh.len > 0 {
-                    let dir = str(out, "/tsproject-layer");
+                var layer_id = next_id;
+                each_split(fresh_owners, '\n') { os =>
+                    guard os.len > 0;
+                    let oi, o_ok = parse_int(os);
+                    let cfg_path = base_list[oi];
+                    let dir = str(out, "/tsproject-layer-", layer_id);
                     make_dir(dir);
                     var cfg: u8[>..] = [];
                     cfg.append("{\"extends\":");
-                    json::format_string(cfg, base);
+                    json::format_string(cfg, cfg_path);
                     cfg.append(",\"include\":[],\"files\":[");
                     var first = true;
-                    each_split(fresh, '\n') { f => if f.len > 0 { if !first { cfg.push(','); } json::format_string(cfg, str(repo, "/", f)); first = false; } };
-                    each_split(decls, '\n') { f => if f.len > 0 { cfg.push(','); json::format_string(cfg, f); } };
-                    each_split(refs, '\n') { f => if f.len > 0 && !contains_line(fresh, f[repo.len + 1..]) { cfg.push(','); json::format_string(cfg, f); } };
+                    var mine: u8[>..] = [];
+                    var mine_n = 0;
+                    each_split(fresh, '\n') { f =>
+                        if f.len > 0 && owner_index(str(repo, "/", f)) == oi {
+                            if !first { cfg.push(','); mine.push(','); }
+                            json::format_string(cfg, str(repo, "/", f));
+                            mine.append(f);
+                            mine_n++;
+                            first = false;
+                        }
+                    };
+                    each_split(decl_of, '\n') { line =>
+                        let tab = find(line, "\t");
+                        if tab > 0 && line[..tab] == cfg_path { cfg.push(','); json::format_string(cfg, line[tab + 1..]); }
+                    };
+                    each_split(ref_of, '\n') { line =>
+                        let tab = find(line, "\t");
+                        if tab > 0 && line[..tab] == cfg_path && !contains_line(fresh, line[tab + 1 + repo.len + 1..]) { cfg.push(','); json::format_string(cfg, line[tab + 1..]); }
+                    };
                     cfg.append("]}\n");
                     write_file(str(dir, "/tsconfig.json"), cfg);
-                    let t = str(out, "/index-typescript-layer-", next_id, ".scip");
+                    let t = str(out, "/index-typescript-layer-", layer_id, ".scip");
                     var da: u8[>..] = [];
                     arg(da, str(bin, "scip-typescript"));
                     arg(da, "index");
@@ -1354,12 +1491,10 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
                     arg(da, "--cwd");
                     arg(da, repo);
                     arg(da, dir);
-                    add_job(str("scip-typescript changed files (", count_lines(fresh), ")"), t, da, child_env(l, ""), "");
-                    format(layers, next_id, "\t");
-                    var firstf = true;
-                    each_split(fresh, '\n') { f => if f.len > 0 { if !firstf { layers.push(','); } layers.append(f); firstf = false; } };
-                    layers.push('\n');
-                }
+                    add_job(str("scip-typescript changed files (", mine_n, ")"), t, da, child_env(l, ""), "");
+                    format(layers, layer_id, "\t", mine, "\n");
+                    layer_id++;
+                };
                 each_split(prev_layers, '\n') { line =>
                     let tab = find(line, "\t");
                     if tab > 0 {
@@ -1376,15 +1511,24 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
                 let dir = str(out, "/tsproject-", n);
                 make_dir(dir);
                 var cfg: u8[>..] = [];
+                // Under its own project's config.
+                let tab0 = find(chunk, "\t");
+                let cfg_path = base_list[owner_index(if tab0 > 0 { chunk[..tab0] } else { chunk })];
                 cfg.append("{\"extends\":");
-                json::format_string(cfg, base);
+                json::format_string(cfg, cfg_path);
                 // "files" overrides the base's include: exactly this chunk, plus
                 // the project's own declaration files.
                 cfg.append(",\"include\":[],\"files\":[");
                 var first = true;
                 each_split(chunk, '\t') { f => if !first { cfg.push(','); } json::format_string(cfg, f); first = false; };
-                each_split(decls, '\n') { f => if f.len > 0 { cfg.push(','); json::format_string(cfg, f); } };
-                each_split(refs, '\n') { f => if f.len > 0 && find(chunk, f) < 0 { cfg.push(','); json::format_string(cfg, f); } };
+                each_split(decl_of, '\n') { line =>
+                    let tab = find(line, "\t");
+                    if tab > 0 && line[..tab] == cfg_path { cfg.push(','); json::format_string(cfg, line[tab + 1..]); }
+                };
+                each_split(ref_of, '\n') { line =>
+                    let tab = find(line, "\t");
+                    if tab > 0 && line[..tab] == cfg_path && find(chunk, line[tab + 1..]) < 0 { cfg.push(','); json::format_string(cfg, line[tab + 1..]); }
+                };
                 cfg.append("]}\n");
                 write_file(str(dir, "/tsconfig.json"), cfg);
                 let t = str(out, "/index-typescript-", n, ".scip");
