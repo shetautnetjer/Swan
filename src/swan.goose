@@ -29,6 +29,7 @@ import .syntax;
 import .pypatch;
 import .wings;
 import .broke;
+import .lspindex;
 import treesitter from "shetautnetjer/goose-treesitter@59313e9da0b9f1cce8df83cabe53ed73fa92345c";   // tree-sitter and its grammars, built once and cached
 import sqlite from "shetautnetjer/goose-sqlite@c759de735ae936dcbc197bb9aae40e13565ef21c";   // open_existing never creates a missing map
 
@@ -40,6 +41,8 @@ fn usage() {
                swan broke <out-dir> <file>...   errors new in these files since last asked (exit 1 if any)
                swan trust <repo>                let map, check and live answers run the repo's build files
                swan gradle-tasks <repo>         the Gradle tasks map would give scip-java (runs nothing)
+               swan lsp-index <repo> <out-dir> <lang> <target.scip>   a SCIP index from the language's server (what swan map runs)
+               swan lsp-ask <repo> <out-dir> <file> <method> [line col] [more]   one question to the file's language server
                swan format <repo> <out-dir> <file>...
                swan test <repo> <out-dir> <name_path|file> [relative_path]
                swan index <flattened-dir> <db> [repo-root]
@@ -193,6 +196,18 @@ fn main() {
         close_db(db);
         print(report);
         if n > 0 { exit(1); }
+    } else if a[1] == "lsp-index" && a.len == 6 {
+        if !lsp_index_main(abs_path(a[2]), abs_path(a[3]), a[4], a[5]) { exit(1); }
+    } else if a[1] == "lsp-ask" && a.len >= 6 {
+        // swan lsp-ask <repo> <out-dir> <file> <method> [line col] [more]: one question to the file's language server.
+        var ans: u8[>..] = [];
+        let ln, l_ok = parse_int(if a.len >= 8 { a[6] } else { "0" });
+        let cn, c_ok = parse_int(if a.len >= 8 { a[7] } else { "0" });
+        let more = if a.len == 9 { a[8] } else if a.len == 7 { a[6] } else { "" };
+        let ok = live_request(abs_path(a[2]), abs_path(a[3]), a[4], a[5], if l_ok { ln } else { 0 }, if c_ok { cn } else { 0 }, more, ans);
+        live_stop();
+        print(ans);
+        if !ok { exit(1); }
     } else if a[1] == "format" && a.len >= 5 {
         var files: u8[>..] = [];
         for k in 4..a.len { files.append(a[k]); files.push('\n'); }

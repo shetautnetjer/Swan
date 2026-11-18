@@ -49,7 +49,9 @@ fi
 GOOSE_TAG=v2026.3
 GOOSE_SHA256=06ac30284338269d3996d457412bf4f2b47c1f9a5601de65b6317187fe78d5c9
 dir=.tools/goose/goose-$GOOSE_TAG-linux-x64
-if [ -z "$runtime_only" ] && [ ! -x "$dir/goose" ]; then
+# Installs fetch it too (28 MB): its language server is what maps Goose
+# repos and reports their errors live.
+if [ ! -x "$dir/goose" ]; then
   mkdir -p .tools/dl .tools/goose
   tgz=.tools/dl/goose-$GOOSE_TAG-linux-x64.tar.gz
   curl -fsSL -o "$tgz" "https://github.com/aardappel/goose/releases/download/$GOOSE_TAG/goose-$GOOSE_TAG-linux-x64.tar.gz"

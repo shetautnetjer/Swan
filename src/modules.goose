@@ -51,6 +51,35 @@ fn expand(s: const u8[:], c: const ModCtx&, into: u8[>..]&) {
     }
 }
 
+// Whether a language's first language server (its entry `m` in
+// tools/modules.json) is installed under this Swan: its program is there.
+fn lsp_server_present(m: json::Node?, home: const u8[:]) -> bool {
+    var found = false;
+    var first = true;
+    let list = json::member(m, "lsp");
+    if list {
+        json::each(list) { cand =>
+            if first {
+                first = false;
+                var k = 0;
+                let cmd = json::member(cand, "cmd");
+                if cmd {
+                    json::each(cmd) { part =>
+                        let s, s_ok = json::as_string(part);
+                        if k == 0 && s_ok {
+                            var p: u8[>..] = [];
+                            format_replaced(p, s, "{tools}", str(home, "/.tools"));
+                            found = file_exists(p);
+                        }
+                        k++;
+                    };
+                }
+            }
+        };
+    }
+    return found;
+}
+
 // The repo's Goose programs as a JSON array of absolute paths: the .goose
 // files that define `fn main(` at the start of a line. Goose's server checks
 // each open file as a program of its own unless told which programs there

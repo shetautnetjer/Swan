@@ -20,6 +20,7 @@ fn lang_suite() {
     lang_java_batch();
     lang_batch_touches();
     lang_what_broke();
+    lang_goose_map();
     lang_py_attr_family();
     lang_gradle();
     lang_cuda();
@@ -241,6 +242,38 @@ fn lang_py_attr_family() {
     check("python: renaming a subclass's class attribute renames the base's and every use with it",
           r == 1 && find(text, "session") < 0 && find(text, "login: str = \"\"") >= 0 && find(text, "login = \"boss\"") >= 0 &&
           find(text, "return c.login + Boss().login") >= 0, str(t, "\n", text));
+}
+
+// A Goose map, made by asking Goose's own language server (swan lsp-index):
+// references the compiler resolved, callers, a rename across files, and no
+// walk into hidden folders.
+fn lang_goose_map() {
+    let w = "data/goose-map";
+    rm_rf(w);
+    mkdir_p(w);
+    var o: u8[>..] = [];
+    guard sh(argv(["cp", "-r", "fixtures/tiny-goose", str(w, "/repo")]), "", o) else { return; }
+    mkdir_p(str(w, "/repo/.cache"));
+    write_file(str(w, "/repo/.cache/junk.goose"), "fn hidden_fn() { }\n");
+    guard sh(argv(["bin/swan", "map", str(w, "/repo"), str(w, "/map")]), "", o) else { return; }
+    let db = str(w, "/map/swan.db");
+    var t: u8[>..] = [];
+    lg_db_query(db, "refs", "UNIT", "", t);
+    check("goose: UNIT in main.goose is used in shapes.goose, inside area (resolved by the compiler, across files)",
+          find(t, "\"kind\":\"variable\"") >= 0 && find(t, "\"relative_path\":\"shapes.goose\",\"line\":5") >= 0 &&
+          find(t, "\"in_symbol\":\"area\"") >= 0, t);
+    lg_db_query(db, "callers", "area", "", t);
+    check("goose: area is called from main", find(t, "\"name_path\":\"main\"") >= 0 && find(t, "\"relative_path\":\"main.goose\"") >= 0, t);
+    lg_db_query(db, "symbol", "hidden_fn", "", t);
+    check("goose: a hidden folder is not walked", trim(t) == "[]", t);
+    var r: u8[>..] = [];
+    let rr = serve_once(db, "rename_symbol", """{"name_path":"UNIT","relative_path":"main.goose","new_name":"SCALE","apply":true}""", r);
+    var a: u8[>..] = [];
+    var b: u8[>..] = [];
+    read_file(str(w, "/repo/main.goose"), a);
+    read_file(str(w, "/repo/shapes.goose"), b);
+    check("goose: renaming UNIT rewrites its definition and its use in the other file",
+          rr == 1 && find(a, "let SCALE = 2;") >= 0 && find(b, "side * side * SCALE;") >= 0 && find(r, "\"files_written\":2") >= 0, r);
 }
 
 fn lang_java() {

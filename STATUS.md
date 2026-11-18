@@ -848,3 +848,27 @@ suite passes unchanged.
 Still to do, largest first: `map_main_locked` (1,176 lines, one function
 with nested closures over shared locals), `syntax_index_main` (496),
 `rename_symbol` (295), `check_main` (173), `edit_batch` (169).
+
+## 2026-11-17: Swan maps Goose, and itself
+
+- `swan lsp-index` (src/lspindex.goose): a map for a language from its
+  language server, for languages with a server and no SCIP indexer. It asks
+  for each file's document symbols, then each definition's references, and
+  writes a SCIP index the flattener reads like any other. Declared as data:
+  `"map": "lsp"` on the language's entry in tools/modules.json. Goose is
+  mapped this way; its rows are what the Goose compiler resolved.
+- goose-lsp gains a general `request` op (any LSP method, the server's own
+  result) and stops re-sending unchanged files; `swan lsp-ask` exposes it.
+  Indexing Swan's Goose went from 216 s to 15 s with that.
+- The repo walk no longer enters hidden folders. Swan's own `.tools`
+  (3.7 GB of fetched compilers and SDKs) made its map run past ten minutes
+  without finishing; the whole repo now maps in 16.5 s.
+- On Swan itself: 48 Goose files, 636 definitions (functions nested in
+  functions included, as `map_main_locked/stamp`), 3,887 references.
+  `callers seal_argv` and a cross-file rename on the fixture, which the
+  Goose compiler then accepts, both work.
+- Installs fetch the Goose compiler too (28 MB).
+- Limits: uses of the standard library and of packages are not in the map
+  (only what the repo defines is asked about); symbols nested more than
+  four deep are left out; the server analyses each file as it is first
+  opened (about 0.3 s a file on Swan), with no per-file reuse yet.

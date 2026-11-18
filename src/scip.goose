@@ -201,6 +201,7 @@ fn language_of(sym: const u8[:]) -> const u8[:] {
     if scheme == "rust-analyzer" { return "rust"; }
     if scheme == "scip-clang" || scheme == "cxx" { return "c++"; }   // scip-clang writes "cxx"
     if scheme == "scip-dotnet" { return "csharp"; }
+    if starts_with(scheme, "swan-lsp-") { return scheme[9..]; }    // `swan lsp-index`: the language is in the scheme
     if starts_with(scheme, "scip-") { return scheme[5..]; }
     return scheme;
 }

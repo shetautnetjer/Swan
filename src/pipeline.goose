@@ -63,7 +63,11 @@ fn each_file<F>(repo: const u8[:]) {
             var full: u8[>..] = [];
             format(full, dir, "/", name);
             if is_dir(full) {
-                if !contains(SKIP_DIRS, name) && !swan_is_symlink(full) { dirs.append(full); dirs.push('\n'); }
+                // Hidden folders (.git, .venv, .tools, .cache, .github) hold tooling
+                // and caches, not the repo's code: Swan's own .tools is 3.7 GB of
+                // fetched compilers, and walking it made its map take over ten
+                // minutes.
+                if name[0] != '.' && !contains(SKIP_DIRS, name) && !swan_is_symlink(full) { dirs.append(full); dirs.push('\n'); }
             } else {
                 F(full[..], name);
             }
@@ -109,6 +113,13 @@ fn detect(repo: const u8[:]) -> Langs {
             l.cuda = true;
         } else if is_c_source(name) || ends_with(name, ".h") || ends_with(name, ".hpp") || ends_with(name, ".hh") {
             l.c = true;
+        } else if ends_with(name, ".goose") {
+            // No grammar and no SCIP indexer: mapped through its language
+            // server (tools/modules.json "map": "lsp").
+            if find(l.other, "goose") < 0 && l.other.len + 6 < 256 {
+                if l.other.len > 0 { l.other.push(' '); }
+                l.other.append("goose");
+            }
         } else if treesitter::language_of_path(name).len > 0 {
             // Any other language with a grammar here (Lua, the shaders,
             // GDScript, C#, PHP): no SCIP indexer runs for these (yet); they
@@ -1617,6 +1628,36 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
             if syntax_file(full, name) { fp = hash_combine(fp, hash_combine(hash(full), stamp(full))); }
         };
         add_lang_job("syntax-index", target, a, child_env(l, ""), fp);
+    }
+    // Languages with a language server and no SCIP indexer, when their entry
+    // in tools/modules.json says "map": "lsp": `swan lsp-index` (this binary,
+    // src/lspindex.goose) asks the server for every definition and its
+    // references. Left out when the server is not installed here.
+    var mods_text: u8[>..] = [];
+    if l.other.len > 0 && read_file(str(home, "/tools/modules.json"), mods_text) {
+        var mdoc: json::Node[>..] = [];
+        var mdec: u8[>..] = [];
+        let mods, merr = json::parse(mods_text, mdoc, mdec);
+        let swan_bin = str(home, "/bin/swan");
+        each_split(l.other, ' ') { lang =>
+            let m = json::member(mods, lang);
+            let how, h_ok = json::as_string(json::member(m, "map"));
+            if h_ok && how == "lsp" && lsp_server_present(m, home) {
+                let target = str(out, "/index-lsp-", lang, ".scip");
+                var a: u8[>..] = [];
+                arg(a, swan_bin);
+                arg(a, "lsp-index");
+                arg(a, repo);
+                arg(a, out);
+                arg(a, lang);
+                arg(a, target);
+                var fp: u64 = hash(str("lsp-index-1\t", lang, "\t", swan_bin, "\t", swan_file_size(swan_bin)));
+                each_file(repo) { full, name =>
+                    if lang_of_path(name) == lang { fp = hash_combine(fp, hash_combine(hash(full), stamp(full))); }
+                };
+                add_lang_job(str("lsp-index ", lang), target, a, child_env(l, ""), fp);
+            }
+        };
     }
     map_held.append(trim(skipped[..]));
     if jobs.len == 0 && (l.kt || l.other.len > 0 || skipped.len > 0) {

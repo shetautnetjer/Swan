@@ -431,6 +431,15 @@ Goose is there too: the compiler's own server (`goose lsp`), sealed, told
 which files are the repo's programs (those with `fn main`) so a module is
 checked as part of its program and not alone.
 
+A language with a server and no SCIP indexer can still get an exact map:
+`"map": "lsp"` on its entry makes `swan map` run `swan lsp-index`, which
+asks the server for every file's symbols and every definition's references
+and writes them as a SCIP index. Goose is mapped this way (Swan's own 48
+Goose files, 636 definitions and 3,887 references, in 15 s), so
+`find_symbol`, `find_referencing_symbols`, `get_callers`, `rename_symbol`
+and `edit_batch` work on Goose code. `swan lsp-ask <repo> <out-dir> <file>
+<method> [line col] [more]` puts any one LSP request to a file's server.
+
 A question about one symbol's impact (`get_callers`, `get_callees`,
 `get_diagnostics`), asked with a name several symbols share, comes back with
 the candidates rather than a merged answer.
@@ -543,6 +552,7 @@ src/seal.goose       runs children sealed (eggshell); toolchains a sealed child 
 src/pyplan.goose     splits a Python repo into pieces for scip-python
 src/stamp.goose      content stamps, computed one worker per core
 src/checkers.goose   `swan check`: compilers and linters, their output parsed into diagnostics
+src/lspindex.goose   `swan lsp-index`: a map for a language from its language server (Goose)
 src/db.goose         map helpers over the imported SQLite package
 src/swan.build       Goose sidecar: native file/process helpers and LSP bridge
 native/swan_sys.c    file/process helpers
