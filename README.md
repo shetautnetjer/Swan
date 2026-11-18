@@ -537,6 +537,12 @@ src/graph.goose      callers and callees
 src/scip.goose       SCIP symbol grammar: name, kind, name path
 src/query.goose      the tool queries, as JSON
 src/serve.goose      MCP JSON-RPC over stdio
+src/pipeline.goose   `swan map`: detects languages, runs the indexers, flattens, indexes
+src/gradle.goose     reads a Gradle build without running it (modules, Android, scip-java tasks)
+src/seal.goose       runs children sealed (eggshell); toolchains a sealed child is told about
+src/pyplan.goose     splits a Python repo into pieces for scip-python
+src/stamp.goose      content stamps, computed one worker per core
+src/checkers.goose   `swan check`: compilers and linters, their output parsed into diagnostics
 src/db.goose         map helpers over the imported SQLite package
 src/swan.build       Goose sidecar: native file/process helpers and LSP bridge
 native/swan_sys.c    file/process helpers

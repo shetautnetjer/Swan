@@ -36,7 +36,7 @@ answer.
 - Exact and fast: compiler-made maps, answers in milliseconds, symbol edits,
   live diagnostics. After today's fixes it scored 0.91 against Graphify's 0.70
   on the cold test's 14 questions.
-- Not modular at its edges: `src/pipeline.goose` (about 2,100 lines) hard-codes
+- Not modular at its edges: `src/pipeline.goose` (about 1,900 lines after the 2026-11-17 split; its `map_main_locked` is still one 1,176-line function) hard-codes
   every language's detection, tool paths, environment and reuse rules. The
   Go/shell fallback added today needed edits in four places of it.
 - Setup is all or nothing: `fetch-tools.sh` fetches 3.7 GB for every language.
