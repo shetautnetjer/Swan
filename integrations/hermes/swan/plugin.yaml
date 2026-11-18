@@ -1,0 +1,20 @@
+name: swan
+label: Swan
+kind: standalone
+version: 0.1.0
+manifest_version: 2
+api_version: 1
+license: MIT
+author: shetautnetjer
+homepage: https://github.com/shetautnetjer/Swan
+description: >
+  Swan for Hermes: after the agent writes or patches a file, the errors that
+  edit introduced are added to the tool's result, so a break is heard about
+  when it is made. Also bundles the swan-code-check skill. Swan's own tools
+  (symbols, references, callers, renames, diagnostics) come from its MCP
+  server, registered beside this plugin by `swan-up`. Needs Swan installed
+  (~/.local/share/swan/current).
+tags: [code-intelligence, lsp, mcp]
+provides_tools: []
+provides_hooks:
+  - transform_tool_result

@@ -6,11 +6,12 @@
 #       worktree, write a build receipt and export a package folder
 #       (archive, install.py, package_support.py, checksums, receipt, swan-up).
 #   swan-up install --dist DIR [--root DIR] [--maps DIR] [--profile P]
-#                   [--agents claude,pi] [--pi-dir DIR] [--trust-from FILE]
+#                   [--agents claude,pi,hermes] [--pi-dir DIR] [--trust-from FILE]
 #       On any Linux x86-64 box: install that package into a NEW versioned
 #       prefix ROOT/versions/<rev>, carry over trust decisions, switch
 #       ROOT/current to it, link ~/.local/bin/swan, register the Swan MCP for
 #       the chosen agents, copy the swan-code-check skill, then prove it works.
+#       For Hermes, every profile gets the Swan plugin and the MCP server.
 #   swan-up update  [--repo DIR] [--ref REF] [--root DIR] [--maps DIR]
 #                   [--keep N] [--dry-run]
 #       From a checkout: fetch, and if REF (default origin/main) is newer than
@@ -178,6 +179,43 @@ e and json.dump(e,open(sys.argv[1],"w"))' "$old" 2>/dev/null || true
   install_skill "$PREFIX/skills/swan-code-check" "$HOME/.claude/skills"
 }
 
+# Hermes (NousResearch/hermes-agent): every profile is an agent of its own,
+# with its own plugins and MCP servers. Each gets the Swan plugin
+# (integrations/hermes/swan: what an edit broke, in the edit's result, and
+# the skill) and Swan's MCP server. The plugin is copied, since a profile
+# keeps its own; the MCP entry names the `current` link, so it is added once
+# and a later update needs no change to it (nor resets a tool selection the
+# user made with `hermes mcp configure`).
+connect_hermes() {  # connect_hermes <binary> <maps> <root>
+  local hermes; hermes="$(command -v hermes || true)"
+  [ -n "$hermes" ] || { say "hermes not found on PATH; skipped Hermes"; return 0; }
+  local plugin="$PREFIX/integrations/hermes/swan"
+  [ -f "$plugin/plugin.yaml" ] || { say "this Swan has no Hermes plugin; skipped Hermes"; return 0; }
+  local home="${SWAN_HERMES_HOME:-$HOME/.hermes}" name dir d done_any=""
+  [ -f "$home/config.yaml" ] || { say "no Hermes home at $home; skipped Hermes"; return 0; }
+  for d in "$home" "$home"/profiles/*/; do
+    d="${d%/}"; [ -f "$d/config.yaml" ] || continue
+    if [ "$d" = "$home" ]; then name="default"; else name="$(basename "$d")"; fi
+    mkdir -p "$d/plugins"
+    rm -rf "$d/plugins/swan.new"; cp -a "$plugin" "$d/plugins/swan.new"
+    rm -rf "$d/plugins/swan.new/__pycache__"
+    [ "$3" = "$ROOT_DEFAULT" ] || echo "$3/current" > "$d/plugins/swan.new/swan-root"
+    rm -rf "$d/plugins/swan"; mv "$d/plugins/swan.new" "$d/plugins/swan"
+    if ! HERMES_HOME="$d" "$hermes" plugins enable swan </dev/null >/dev/null 2>&1; then
+      say "WARNING: Hermes ($name): could not enable the swan plugin; run: hermes -p $name plugins enable swan"; SWAN_UP_WARN=1; continue
+    fi
+    if HERMES_HOME="$d" "$hermes" mcp list 2>/dev/null | grep -q '^ *swan '; then
+      say "Hermes ($name): plugin swan updated; its MCP server was already registered"
+    elif printf 'Y\n' | HERMES_HOME="$d" "$hermes" mcp add swan --command "$1" --args serve --maps "$2" >/dev/null 2>&1; then
+      say "Hermes ($name): plugin swan enabled; MCP server swan launches: $1 serve --maps $2"
+    else
+      say "WARNING: Hermes ($name): plugin enabled, but the MCP server was not registered; run: hermes -p $name mcp add swan --command $1 --args serve --maps $2"; SWAN_UP_WARN=1
+    fi
+    done_any=1
+  done
+  [ -z "$done_any" ] || say "Hermes: a running gateway loads the plugin when it next starts (hermes gateway restart); the tools appear in a new session or after /reload-mcp"
+}
+
 connect_pi() {      # connect_pi <binary> <maps> <pi-dir>
   local dir="$3"; mkdir -p "$dir"
   if [ -f "$dir/mcp.json" ]; then local b; b="$(backup_dir)"; mkdir -p "$b"; cp "$dir/mcp.json" "$b/pi-mcp.json"; fi
@@ -230,7 +268,7 @@ PY
 }
 
 cmd_install() {
-  local dist="" root="$ROOT_DEFAULT" maps="" profile="python-typescript" agents="claude,pi"
+  local dist="" root="$ROOT_DEFAULT" maps="" profile="python-typescript" agents="claude,pi,hermes"
   local pidir="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}" trust_from="" langs="${SWAN_LANGS:-c,java,rust,go}"
   while [ $# -gt 0 ]; do case "$1" in
     --dist) dist="$2"; shift 2;; --root) root="$2"; shift 2;; --maps) maps="$2"; shift 2;;
@@ -290,6 +328,7 @@ cmd_install() {
   say "active: ${rev:0:12} (swan on PATH -> $bin); maps in $maps"
   case ",$agents," in *,claude,*) connect_claude "$bin" "$maps";; esac
   case ",$agents," in *,pi,*) connect_pi "$bin" "$maps" "$pidir";; esac
+  case ",$agents," in *,hermes,*) connect_hermes "$bin" "$maps" "$root";; esac
   cmd_status --root "$root"
   [ -z "${SWAN_UP_WARN:-}" ] || { say "finished with warnings (see above)"; exit 3; }
 }

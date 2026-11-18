@@ -54,12 +54,32 @@ scripts/swan-up update                          # from a checkout: fetch, build 
 `install` puts each version in a new prefix `~/.local/share/swan/versions/<rev>`
 (the installer's no-overwrite rule still holds), carries the saved trust list
 forward without adding to it, switches `~/.local/share/swan/current` to the new
-version and links `~/.local/bin/swan` to it. With `--agents claude,pi` (the
-default) it registers the Swan MCP for Claude Code at user scope and in pi's
+version and links `~/.local/bin/swan` to it. With `--agents claude,pi,hermes`
+(the default; an agent that is not installed is skipped) it registers the Swan
+MCP for Claude Code at user scope and in pi's
 `mcp.json` (`$PI_CODING_AGENT_DIR` or `--pi-dir`), pointing at
 `~/.local/share/swan/current/bin/swan serve --maps <maps>`, and copies the
 `swan-code-check` skill into both agents' skill folders. Replaced settings and
-skills are kept under `~/.local/share/swan/backups/`. It then runs `doctor`,
+skills are kept under `~/.local/share/swan/backups/`.
+
+**Hermes** (NousResearch/hermes-agent). Every Hermes profile is an agent of
+its own, so each one (the default and every `~/.hermes/profiles/<name>`) gets:
+
+- the Swan plugin, `integrations/hermes/swan`, copied into the profile's
+  `plugins/` and enabled. After the agent's `write_file` or `patch`, the
+  errors that edit introduced are added to the tool's result (`"swan": ...`),
+  as Swan's hook does for Claude Code; nothing is added when the edit broke
+  nothing or no map covers the file. It also offers the skill as
+  `swan:swan-code-check`. The plugin holds no logic of its own: it runs the
+  installed Swan's `scripts/hooks/what-broke-after-edit.py`.
+- Swan's MCP server, as `swan`, added once (`hermes mcp add`); it names the
+  `current` link, so updates do not touch it or a tool selection made later
+  with `hermes mcp configure`.
+
+A running gateway loads the plugin when it next starts
+(`hermes gateway restart`); the tools appear in a new session or after
+`/reload-mcp`. To take Swan out of a profile:
+`hermes -p <name> plugins disable swan` and `hermes -p <name> mcp remove swan`. It then runs `doctor`,
 an MCP start-up check and the skill self-test. Maps default to
 `~/.local/share/swan/maps`, outside every repository.
 

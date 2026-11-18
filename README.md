@@ -566,6 +566,7 @@ src/lspindex.goose   `swan lsp-index`: a map for a language from its language se
 src/rustproj.goose   the cargo projects of a repo: which folders rust-analyzer runs in, and its settings
 src/tspatch.goose    Swan's fix to its copy of scip-typescript: one name for one object key in every process
 src/tsproj.goose     the tsconfig projects of a repo: which config owns each file
+integrations/hermes/ the Swan plugin for Hermes agents: what an edit broke, in the edit's result
 tools/solidlsp/      the SolidLSP bridge, and Swan's stand-ins for the two helpers SolidLSP imports from Serena
 src/db.goose         map helpers over the imported SQLite package
 src/swan.build       Goose sidecar: native file/process helpers and LSP bridge
