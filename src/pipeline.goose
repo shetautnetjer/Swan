@@ -772,7 +772,7 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
         else { write_file(str(out, "/", name), contents); }
     }
     if clean {
-        for name in ["index-manifest.tsv", "tsc-files.txt", "tsc-program.txt", "typescript-chunks.txt",
+        for name in ["index-manifest.tsv", "tsc-files.txt", "tsc-program.txt", "tsc-projects.txt", "typescript-chunks.txt",
                      "typescript-shared.txt", "typescript-files.tsv", "typescript-layers.txt",
                      "python-files.tsv", "python-pieces.tsv"] {
             let path = str(out, "/", name);
