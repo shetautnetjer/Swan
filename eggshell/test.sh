@@ -86,6 +86,10 @@ else
   [ "$rc" = 2 ] && ok "--rw of the whole home refused" || bad "--rw of the whole home allowed (exit $rc)"
   rm -rf "$rwdir"
 
+  # The cache folder is the scratch one, whatever the session's XDG_CACHE_HOME says.
+  got=$(XDG_CACHE_HOME="$HOME/.cache" "$EGG" fixtures/benign-map "$OUT" -- sh -c 'mkdir -p "$XDG_CACHE_HOME/probe" && echo "$XDG_CACHE_HOME"' 2>&1)
+  [ "$got" = /dev/shm/home/.cache ] && ok "XDG_CACHE_HOME is the scratch home's, and writable" || bad "XDG_CACHE_HOME inside the seal: $got"
+
   # A repo under /run would disappear with it: refuse rather than guess.
   "$EGG" /run "$OUT" -- true >/dev/null 2>&1; rc=$?
   [ "$rc" = 3 ] && ok "repo under /run refused" || bad "repo under /run not refused (exit $rc)"

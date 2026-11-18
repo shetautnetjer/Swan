@@ -188,6 +188,50 @@ if want java && [ ! -x ".tools/jdtls/jre/jdk-${JDTLS_JRE/_/+}-jre/bin/java" ]; t
   tar -xzf "$tgz" -C .tools/jdtls/jre
   rm "$tgz"
 fi
+# Go, through SolidLSP: Serena's language-server layer (MIT) knows how to
+# start, configure and wait for each language's server, and tools/solidlsp/
+# bridge.py puts it behind Swan's own client. Only src/solidlsp and its
+# licence are taken from the Serena repository: the two helpers it imports
+# from the GPL application are Swan's own (tools/solidlsp/shim). Go comes
+# with its own toolchain and gopls, so a Go repo is mapped whether or not
+# Go is installed. About 400 MB unpacked.
+SOLIDLSP_COMMIT=0cef825f802d5323f8cb4bda3a5af52bf704770f
+SOLIDLSP_SHA256=7516525421621cfe459d05dd8bc9f885bf9dfaa79e07a64a42ce77861fde466a
+GO_VERSION=1.27.4
+GO_SHA256=7226736c2339719cda28fbf3a54d71aa63bcefe376e98cef00034268dab24840
+GOPLS_VERSION=v0.24.0
+if want go && [ ! -d .tools/solidlsp/src/solidlsp ]; then
+  mkdir -p .tools/solidlsp .tools/dl
+  tgz=.tools/dl/serena-$SOLIDLSP_COMMIT.tar.gz
+  curl -fsSL -o "$tgz" "https://github.com/oraios/serena/archive/$SOLIDLSP_COMMIT.tar.gz"
+  echo "$SOLIDLSP_SHA256  $tgz" | sha256sum -c -
+  tar -xzf "$tgz" -C .tools/solidlsp --strip-components=1 \
+    "serena-$SOLIDLSP_COMMIT/src/solidlsp" "serena-$SOLIDLSP_COMMIT/LICENSE" "serena-$SOLIDLSP_COMMIT/LICENSES/MIT.txt"
+  rm "$tgz"
+fi
+if want go && [ ! -x .tools/solidlsp/venv/bin/python ]; then
+  uv venv -q --python 3.12 .tools/solidlsp/venv
+  uv pip install -q --python .tools/solidlsp/venv/bin/python overrides==7.7.0 sensai-utils==1.5.0 psutil==7.0.0 \
+    requests==2.33.0 urllib3==2.8.0 pathspec==0.12.1 typing-extensions==4.16.0 ruamel.yaml==0.18.14 filelock==3.25.2 \
+    oslex==2.0.0 pygls==2.1.1 lsprotocol==2025.0.0 beautifulsoup4==4.14.2 joblib==1.5.1 pyyaml==6.0.2 charset-normalizer==3.4.6
+fi
+if want go && [ ! -x .tools/go/bin/go ]; then
+  mkdir -p .tools/dl
+  tgz=.tools/dl/go$GO_VERSION.linux-amd64.tar.gz
+  curl -fsSL -o "$tgz" "https://go.dev/dl/go$GO_VERSION.linux-amd64.tar.gz"
+  echo "$GO_SHA256  $tgz" | sha256sum -c -
+  tar -xzf "$tgz" -C .tools
+  rm "$tgz"
+fi
+if want go && [ ! -x .tools/gopls/gopls ]; then
+  # Built by Swan's own Go; the module and its dependencies are verified by Go's checksum database.
+  mkdir -p .tools/gopls
+  gp="$PWD/.tools/dl/gopath"
+  GOBIN="$PWD/.tools/gopls" GOPATH="$gp" GOCACHE="$PWD/.tools/dl/go-build" GOTOOLCHAIN=local GOFLAGS=-mod=mod \
+    .tools/go/bin/go install "golang.org/x/tools/gopls@$GOPLS_VERSION"
+  GOPATH="$gp" .tools/go/bin/go clean -modcache
+  rm -rf "$gp" .tools/dl/go-build
+fi
 # Gradle, as the Kotlin server and Kotlin maps run it, keeps its home here;
 # its daemons quit after 10 idle minutes and keep to 2 GB.
 mkdir -p .tools/gradle-home

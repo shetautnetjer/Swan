@@ -84,7 +84,9 @@ fn agnostic_suite() {
     let r7, e7 = json::parse(t, d7, x7);
     check("Make: the build target needs deps", direct_sites(r7) == "Makefile:1", t);
 
-    t = swan_query(db, "refs", "helper", "");
+    // greet is a shell function: shell has no compiler here, so its uses are by name.
+    // (Go's are not: gopls resolves them when it is installed.)
+    t = swan_query(db, "refs", "greet", "");
     var d8: json::Node[>..] = []; var x8: u8[>..] = [];
     let r8, e8 = json::parse(t, d8, x8);
     let refs = json::member(nth(r8, 0), "references");

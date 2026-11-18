@@ -176,6 +176,11 @@ exec unshare --user --map-root-user --mount $NET_FLAG --pid --fork --kill-child 
     mount -t tmpfs none /dev/shm 2>/dev/null || refuse "cannot mount scratch on /dev/shm"
     mkdir -p /dev/shm/home /dev/shm/tmp
     export HOME=/dev/shm/home TMPDIR=/dev/shm/tmp
+    # A desktop session sets XDG_CACHE_HOME to .cache in the real home, which
+    # is read-only in here: a tool that honours it (gopls keeps its index
+    # there) died at start. Caches go to the scratch home like everything else.
+    # (No apostrophes in these comments: this text sits inside a quoted script.)
+    export XDG_CACHE_HOME=/dev/shm/home/.cache
 
     # A private, empty /tmp: tools that ignore TMPDIR (the JVM writes to
     # /tmp) still work, and nothing reaches the host /tmp. Skipped when the

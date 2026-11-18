@@ -38,6 +38,10 @@ fn expand(s: const u8[:], c: const ModCtx&, into: u8[>..]&) {
     format_replaced(b, a, "{bin}", str(c.home, "/tools/node_modules/.bin"));
     a.clear();
     format_replaced(a, b, "{compdb}", c.compdb);
+    b.clear();
+    format_replaced(b, a, "{swan}", c.home);
+    a.clear();
+    a.append(b);
     if find(a, "{goose_entry_files}") >= 0 {
         b.clear();
         format_replaced(b, a, "{python}", c.python);
@@ -302,6 +306,7 @@ fn lang_of_path(p: const u8[:]) -> const u8[:] {
     if ends_with(p, ".kt") || ends_with(p, ".kts") { return "kotlin"; }
     if ends_with(p, ".java") { return "java"; }
     if ends_with(p, ".goose") { return "goose"; }
+    if ends_with(p, ".go") { return "go"; }
     if ends_with(p, ".c") || ends_with(p, ".cc") || ends_with(p, ".cpp") || ends_with(p, ".cxx") || ends_with(p, ".h") ||
        ends_with(p, ".hpp") || ends_with(p, ".hh") || ends_with(p, ".hxx") || ends_with(p, ".cu") || ends_with(p, ".cuh") { return "cpp"; }
     if ends_with(p, ".cs") { return "csharp"; }

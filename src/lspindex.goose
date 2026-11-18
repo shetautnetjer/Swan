@@ -112,6 +112,9 @@ fn lsp_index_main(repo: const u8[:], out: const u8[:], lang: const u8[:], target
     var d_file: i64[>..] = []; var d_kind: i64[>..] = [];
     var d_line: i64[>..] = []; var d_col: i64[>..] = []; var d_ecol: i64[>..] = [];
     var d_rl: i64[>..] = []; var d_rc: i64[>..] = []; var d_el: i64[>..] = []; var d_ec: i64[>..] = [];
+    var d_raw: i64[>..] = [];                    // the LSP SymbolKind as sent
+    var d_parent: i64[>..] = [];                 // the definition this one is nested in, or -1
+    var def_at = dictionary<u64, i64> {};        // "file:line:col" of a name -> definition number + 1
     var f_first: i64[>..] = [];
     var overloads = dictionary<u64, i64> {};     // a callable's path -> how many have it so far
     var file_ns: u8[>..] = [];
@@ -133,9 +136,16 @@ fn lsp_index_main(repo: const u8[:], out: const u8[:], lang: const u8[:], target
         let el, f_ok = json::as_i64(json::member(json::member(rng, "end"), "line"));
         let ec, g_ok = json::as_i64(json::member(json::member(rng, "end"), "character"));
         guard n_ok && k_ok && a_ok && b_ok && c_ok && d_ok && e_ok && f_ok && g_ok && name.len > 0 else { return -1; }
+        // "(Greeter).Greet" at the top of a file (a Go method, named so by the
+        // bridge) is Greet nested under the type Greeter.
+        let close = find(name, ").");
+        let has_recv = parent < 0 && name.len > 3 && name[0] == '(' && close > 1 && close + 2 < name.len;
+        let recv = if has_recv { name[1..close] } else { name[..0] };
+        let short = if has_recv { name[close + 2..] } else { name };
         var desc: u8[>..] = [];
         if parent >= 0 { desc.append(descs[d_doff[parent]..d_doff[parent] + d_dlen[parent]]); } else { desc.append(file_ns); }
-        sx_ident(name, desc);
+        if has_recv { sx_ident(recv, desc); desc.push('#'); }
+        sx_ident(short, desc);
         let suf = lx_suffix(kind);
         if suf == 'm' {
             // A second callable on the same path (an overload): SCIP's disambiguator.
@@ -149,11 +159,13 @@ fn lsp_index_main(repo: const u8[:], out: const u8[:], lang: const u8[:], target
             desc.push(suf);
         }
         let d = d_kind.len;
-        d_noff.push(names.len); d_nlen.push(name.len); names.append(name);
+        d_noff.push(names.len); d_nlen.push(short.len); names.append(short);
         d_doff.push(descs.len); d_dlen.push(desc.len); descs.append(desc);
         let sig = sx_cut(trim(lx_line(text, sl)), 200);
         d_goff.push(sigs.len); d_glen.push(sig.len); sigs.append(sig);
         d_file.push(cur_file); d_kind.push(lx_scip_kind(kind));
+        d_raw.push(kind); d_parent.push(parent);
+        def_at.insert(hash(str(cur_file, ":", sl, ":", sc)), d + 1);
         d_line.push(sl); d_col.push(sc); d_ecol.push(se);
         d_rl.push(rl); d_rc.push(rc); d_el.push(el); d_ec.push(ec);
         return d;
@@ -243,6 +255,44 @@ fn lsp_index_main(repo: const u8[:], out: const u8[:], lang: const u8[:], target
             };
         }
     }
+    // What implements each interface or class, and each of their methods:
+    // SCIP keeps that on the implementing symbol, as a relationship.
+    var r_from: i64[>..] = [];
+    var r_to: i64[>..] = [];
+    for d in d_kind.len {
+        let own = d_raw[d] == 5 || d_raw[d] == 11;
+        let p = d_parent[d];
+        let member = p >= 0 && (d_raw[p] == 5 || d_raw[p] == 11) && (d_raw[d] == 6 || d_raw[d] == 12);
+        guard own || member else { continue; }
+        let fi = d_file[d];
+        let rel = paths[p_off[fi]..p_off[fi] + p_len[fi]];
+        var ans: u8[>..] = [];
+        guard live_request(repo, out, rel, "textDocument/implementation", d_line[d] + 1, d_col[d] + 1, "", ans) else { continue; }
+        var doc: json::Node[>..] = [];
+        var dec: u8[>..] = [];
+        let root, perr = json::parse(ans, doc, dec);
+        let res = json::member(root, "result");
+        if res {
+            json::each(res) { loc =>
+                let u, u_ok = json::as_string(json::member(loc, "uri"));
+                let r = json::member(loc, "range");
+                let l, l_ok = json::as_i64(json::member(json::member(r, "start"), "line"));
+                let c, c_ok = json::as_i64(json::member(json::member(r, "start"), "character"));
+                var rp: u8[>..] = [];
+                if u_ok && l_ok && c_ok && lx_uri_rel(u, repo, rp) {
+                    let k = by_path.get(hash(rp));
+                    if k {
+                        let f2: i64 = k;
+                        let hit = def_at.get(hash(str(f2 - 1, ":", l, ":", c)));
+                        if hit {
+                            let d2: i64 = hit;
+                            if d2 - 1 != d { r_from.push(d2 - 1); r_to.push(d); }
+                        }
+                    }
+                }
+            };
+        }
+    }
     live_stop();
 
     // The SCIP index: metadata, then one document per file.
@@ -297,6 +347,18 @@ fn lsp_index_main(repo: const u8[:], out: const u8[:], lang: const u8[:], target
             docm.clear();
             format(docm, "```", lang, "\n", sigs[d_goff[d]..d_goff[d] + d_glen[d]], "\n```");
             pb_bytes(info, 3, docm);
+            for r in r_from.len {
+                if r_from[r] == d {
+                    let t = r_to[r];
+                    var rs: u8[>..] = [];
+                    var tsym: u8[>..] = [];
+                    tsym.append(pkg);
+                    tsym.append(descs[d_doff[t]..d_doff[t] + d_dlen[t]]);
+                    pb_bytes(rs, 1, tsym);
+                    pb_int(rs, 3, 1);
+                    pb_bytes(info, 4, rs);
+                }
+            }
             pb_int(info, 5, d_kind[d]);
             pb_bytes(info, 6, names[d_noff[d]..d_noff[d] + d_nlen[d]]);
             pb_bytes(doc, 3, info);
@@ -308,6 +370,6 @@ fn lsp_index_main(repo: const u8[:], out: const u8[:], lang: const u8[:], target
         return false;
     }
     write_stderr(str("lsp-index ", lang, ": ", nfiles, " files, ", d_kind.len, " definitions, ", o_def.len,
-                     " references, ", ((clock() - t0) * 1000.0) as i64, " ms\n"));
+                     " references, ", r_from.len, " implementations, ", ((clock() - t0) * 1000.0) as i64, " ms\n"));
     return true;
 }

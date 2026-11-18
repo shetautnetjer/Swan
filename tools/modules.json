@@ -33,6 +33,24 @@
       {"cmd": ["{bin}/typescript-language-server", "--stdio"], "language_id": "typescript", "settle": "publish", "init": "{}"}
     ]
   },
+  "go": {
+    "match": [".go"],
+    "map": "lsp",
+    "lsp": [
+      {"cmd": ["{tools}/solidlsp/venv/bin/python", "{swan}/tools/solidlsp/bridge.py", "go"],
+       "language_id": "go", "settle": "pull", "sealed": true, "runs_repo_code": true,
+       "init": "{}",
+       "env": ["PYTHONPATH={tools}/solidlsp/src:{swan}/tools/solidlsp/shim", "SWAN_BRIDGE_PATH={tools}/gopls:{tools}/go/bin",
+               "SWAN_SOLIDLSP_DATA={out}/solidlsp", "GOCACHE={out}/go/build", "GOPATH={out}/go/path", "GOMODCACHE={tools}/go-mod",
+               "GOTOOLCHAIN=local", "PYTHONDONTWRITEBYTECODE=1"]},
+      {"cmd": ["{tools}/solidlsp/venv/bin/python", "{swan}/tools/solidlsp/bridge.py", "go"],
+       "language_id": "go", "settle": "pull", "sealed": true,
+       "init": "{}",
+       "env": ["PYTHONPATH={tools}/solidlsp/src:{swan}/tools/solidlsp/shim", "SWAN_BRIDGE_PATH={tools}/gopls:{tools}/go/bin",
+               "SWAN_SOLIDLSP_DATA={out}/solidlsp", "GOCACHE={out}/go/build", "GOPATH={out}/go/path", "GOMODCACHE={tools}/go-mod",
+               "GOTOOLCHAIN=local", "GOPROXY=off", "PYTHONDONTWRITEBYTECODE=1"]}
+    ]
+  },
   "goose": {
     "match": [".goose"],
     "map": "lsp",

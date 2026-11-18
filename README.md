@@ -431,6 +431,15 @@ Goose is there too: the compiler's own server (`goose lsp`), sealed, told
 which files are the repo's programs (those with `fn main`) so a module is
 checked as part of its program and not alone.
 
+Go is mapped through [SolidLSP](https://github.com/oraios/serena), Serena's
+language-server layer (MIT), which knows how to start, configure and wait for
+each language's server: `tools/solidlsp/bridge.py` puts it behind Swan's own
+client, sealed like everything else, with Swan's own Go toolchain and gopls
+(`SWAN_LANGS=go scripts/fetch-tools.sh`). On spf13/cobra: 36 files, 789
+definitions, 5,920 references and what implements each interface, in 7 s.
+A Go repo with outside dependencies needs them in Swan's module cache: they
+are fetched when the repo is trusted, and used offline after that.
+
 A language with a server and no SCIP indexer can still get an exact map:
 `"map": "lsp"` on its entry makes `swan map` run `swan lsp-index`, which
 asks the server for every file's symbols and every definition's references
@@ -552,7 +561,8 @@ src/seal.goose       runs children sealed (eggshell); toolchains a sealed child 
 src/pyplan.goose     splits a Python repo into pieces for scip-python
 src/stamp.goose      content stamps, computed one worker per core
 src/checkers.goose   `swan check`: compilers and linters, their output parsed into diagnostics
-src/lspindex.goose   `swan lsp-index`: a map for a language from its language server (Goose)
+src/lspindex.goose   `swan lsp-index`: a map for a language from its language server (Goose, Go)
+tools/solidlsp/      the SolidLSP bridge, and Swan's stand-ins for the two helpers SolidLSP imports from Serena
 src/db.goose         map helpers over the imported SQLite package
 src/swan.build       Goose sidecar: native file/process helpers and LSP bridge
 native/swan_sys.c    file/process helpers
@@ -572,7 +582,8 @@ MIT (`LICENSE`). The vendored SQLite is public domain; see `NOTICE`.
 
 - Tool names, arguments and name-path matching follow
   [Serena](https://github.com/oraios/serena) by Oraios AI. No Serena code or
-  text is copied. Serena's tools live in its GPL-3.0-or-later application
+  text is copied. SolidLSP, Serena's MIT-licensed language-server library,
+  is fetched as an installed tool for Go and run behind `tools/solidlsp/bridge.py`. Serena's tools live in its GPL-3.0-or-later application
   (only its SolidLSP library is MIT), so Swan follows the interface only. See
   `NOTICE`.
 - [SQLite](https://sqlite.org) is in the public domain.
