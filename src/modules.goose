@@ -50,6 +50,16 @@ fn expand(s: const u8[:], c: const ModCtx&, into: u8[>..]&) {
         b.clear();
         format_replaced(b, a, "{python}", c.python);
         format_replaced(into, b, "{java_source_paths}", java_source_paths(c.repo));
+    } else if find(a, "{rust_std_source}") >= 0 {
+        // The live rust-analyzer reads the same standard library the map's
+        // run did (rust_std_source, src/seal.goose): given an older pinned
+        // toolchain's own, it reports `unresolved macro vec!` on sound code.
+        b.clear();
+        format_replaced(b, a, "{python}", c.python);
+        var src: u8[>..] = [];
+        let at = rust_std_source(c.repo);
+        if at.len > 0 { json::format_string(src, at); } else { src.append("null"); }
+        format_replaced(into, b, "{rust_std_source}", src);
     } else {
         format_replaced(into, a, "{python}", c.python);
     }

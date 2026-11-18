@@ -68,17 +68,12 @@ fn add_toolchain_env(renv: u8[>..]&, name: const u8[:], sub: const u8[:]) {
     if (env(name, v) && v.len > 0) || is_dir(p) { renv.append(env_entry(name, p)); }
 }
 
-// The toolchain to index with when the repo pins one rustup does not have
-// (rust-toolchain.toml or rust-toolchain: `channel = "1.88.0"`): rustup's
-// default one, else "". Without this cargo exits "toolchain ... is not
-// installed" and the repo gets no Rust map at all; a sealed, offline run
-// cannot install it, and a map does not need the exact compiler. Found on
-// relatedb/relate, 2026-11-17.
-fn rust_toolchain_override(repo: const u8[:]) -> u8[>..] {
-    var none: u8[>..] = [];
+// The channel a folder's rust-toolchain.toml or rust-toolchain pins
+// (`channel = "1.88.0"`), else "".
+fn rust_pinned_channel(dir: const u8[:]) -> u8[>..] {
     var text: u8[>..] = [];
     var channel: u8[>..] = [];
-    if read_file(str(repo, "/rust-toolchain.toml"), text) {
+    if read_file(str(dir, "/rust-toolchain.toml"), text) {
         each_split(text, '\n') { l =>
             let t = trim(l);
             if channel.len == 0 && starts_with(t, "channel") && find(t, "\"") >= 0 {
@@ -87,14 +82,17 @@ fn rust_toolchain_override(repo: const u8[:]) -> u8[>..] {
                 if b > a { channel.append(t[a..b]); }
             }
         };
-    } else if read_file(str(repo, "/rust-toolchain"), text) {
+    } else if read_file(str(dir, "/rust-toolchain"), text) {
         each_split(text, '\n') { l => if channel.len == 0 && trim(l).len > 0 && find(l, "[") < 0 && find(l, "=") < 0 { channel.append(trim(l)); } };
     }
-    guard channel.len > 0 else { return none; }
-    // Where rustup keeps toolchains: $RUSTUP_HOME or ~/.rustup, else what
-    // rustup itself says (installed for everyone, its home is elsewhere and
-    // only its wrapper scripts know). Asked from /, never from the repo:
-    // there rustup would try to install the pinned toolchain.
+    return channel;
+}
+
+// Where rustup keeps toolchains: $RUSTUP_HOME or ~/.rustup, else what
+// rustup itself says (installed for everyone, its home is elsewhere and
+// only its wrapper scripts know). Asked from /, never from the repo:
+// there rustup would try to install the pinned toolchain. "" when unknown.
+fn rustup_home_dir() -> u8[>..] {
     var rh: u8[>..] = [];
     rh.append(toolchain_home("RUSTUP_HOME", ".rustup"));
     if !is_dir(str(rh, "/toolchains")) {
@@ -102,15 +100,23 @@ fn rust_toolchain_override(repo: const u8[:]) -> u8[>..] {
         arg(a, "rustup"); arg(a, "show"); arg(a, "home");
         var o: u8[>..] = [];
         var e: u8[>..] = [];
-        guard swan_run(a, "/", "", 10000, o, e) == 0 else { return none; }
         rh.clear();
-        rh.append(trim(o));
+        if swan_run(a, "/", "", 10000, o, e) == 0 { rh.append(trim(o)); }
     }
+    return rh;
+}
+
+// Whether rustup (home `rh`) has the toolchain a channel names.
+fn rustup_has(rh: const u8[:], channel: const u8[:]) -> bool {
     var names: u8[>..] = [];
-    guard list_dir(str(rh, "/toolchains"), names) else { return none; }
+    guard list_dir(str(rh, "/toolchains"), names) else { return false; }
     var have = false;
     each_split(names, '\n') { n => if n == channel || starts_with(n, str(channel, "-")) { have = true; } };
-    guard !have else { return none; }
+    return have;
+}
+
+// rustup's default toolchain, else "".
+fn rustup_default(rh: const u8[:]) -> u8[>..] {
     var settings: u8[>..] = [];
     var dflt: u8[>..] = [];
     if read_file(str(rh, "/settings.toml"), settings) {
@@ -123,9 +129,74 @@ fn rust_toolchain_override(repo: const u8[:]) -> u8[>..] {
             }
         };
     }
+    return dflt;
+}
+
+// The N of a Rust version "1.N..." at the start of `text`, else -1.
+fn rust_minor(text: const u8[:]) -> i64 {
+    guard starts_with(text, "1.") else { return -1; }
+    var e = 2;
+    while e < text.len && text[e] >= '0' && text[e] <= '9' { e++; }
+    let n, ok = parse_int(if e > 2 { text[2..e] } else { "x" });
+    return if ok { n } else { -1 };
+}
+
+// The N of the Rust 1.N a toolchain of rustup's holds: from its name
+// ("1.88.0-x86_64-...") or, for a named channel (stable), from the
+// manifest rustup keeps beside it. -1 when neither says.
+fn rustup_minor(rh: const u8[:], toolchain: const u8[:]) -> i64 {
+    let by_name = rust_minor(toolchain);
+    guard by_name < 0 else { return by_name; }
+    var manifest: u8[>..] = [];
+    guard read_file(str(rh, "/toolchains/", toolchain, "/lib/rustlib/multirust-channel-manifest.toml"), manifest) else { return -1; }
+    let at = find(manifest, "[pkg.rustc]");
+    guard at >= 0 else { return -1; }
+    let v = find(manifest[at..], "version = \"");
+    guard v >= 0 else { return -1; }
+    return rust_minor(manifest[at + v + 11..]);
+}
+
+// The toolchain to index with when the repo pins one rustup does not have
+// (rust-toolchain.toml or rust-toolchain: `channel = "1.88.0"`): rustup's
+// default one, else "". Without this cargo exits "toolchain ... is not
+// installed" and the repo gets no Rust map at all; a sealed, offline run
+// cannot install it, and a map does not need the exact compiler. Found on
+// relatedb/relate, 2026-11-17.
+fn rust_toolchain_override(repo: const u8[:]) -> u8[>..] {
+    var none: u8[>..] = [];
+    let channel = rust_pinned_channel(repo);
+    guard channel.len > 0 else { return none; }
+    let rh = rustup_home_dir();
+    guard rh.len > 0 && is_dir(str(rh, "/toolchains")) && !rustup_has(rh, channel) else { return none; }
+    let dflt = rustup_default(rh);
     guard dflt.len > 0 else { return none; }
     write_stderr(str("rust: the repo pins toolchain ", channel, ", which is not installed; indexing with ", dflt, "\n"));
     return dflt;
+}
+
+// The standard library source rust-analyzer should read (its
+// cargo.sysrootSrc) when the repo pins an installed Rust 1.N older than
+// rustup's default toolchain: the default one's, else "". Swan's
+// rust-analyzer is a recent build and follows the current library; given
+// Rust 1.88's own (relate, 2026-11-17) it loaded core but resolved no
+// macro_rules macro of it (matches!, vec!, assert_eq!) and nothing from the
+// prelude (Some, slice methods), so every use inside those macros was by
+// name at best. Cargo, build scripts and proc macros still run with the
+// pinned toolchain.
+fn rust_std_source(repo: const u8[:]) -> u8[>..] {
+    var none: u8[>..] = [];
+    let channel = rust_pinned_channel(repo);
+    let pinned = rust_minor(channel);
+    guard pinned >= 0 else { return none; }
+    let rh = rustup_home_dir();
+    guard rh.len > 0 && rustup_has(rh, channel) else { return none; }
+    let dflt = rustup_default(rh);
+    guard dflt.len > 0 && rustup_minor(rh, dflt) > pinned else { return none; }
+    let src = str(rh, "/toolchains/", dflt, "/lib/rustlib/src/rust/library");
+    guard file_exists(str(src, "/core/src/lib.rs")) else { return none; }
+    write_stderr(str("rust: the repo pins toolchain ", channel, "; its standard library is read from ", dflt,
+                     ", which Swan's rust-analyzer follows (cargo and build scripts still run with ", channel, ")\n"));
+    return src;
 }
 
 // Run one step of the map sealed when the sandbox is on (see seal_argv).

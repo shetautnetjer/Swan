@@ -905,3 +905,66 @@ with nested closures over shared locals), `syntax_index_main` (496),
 - Limits: a Go method is named without its receiver type (`Area`, not
   `Square/Area`); an untrusted Go repo whose modules were never fetched
   gets definitions only; only Go is wired through the bridge so far.
+
+## 2026-11-17: Rust: every cargo project, every feature, a library it can read
+
+- `swan map` runs rust-analyzer once for each cargo project in the repo, not
+  only for the workspace at its root (src/rustproj.goose). A folder with a
+  Cargo.toml is a project of its own when nothing above it has one, when it
+  has a `[workspace]` table (what `cargo fuzz` writes), when the workspace
+  above excludes it, or when no workspace is above it and no other crate
+  depends on it by path. This is read from the Cargo.toml files; cargo is
+  not run to decide it. Each project's index is reused on its own, and the
+  projects link to each other by crate name: a use of the root crate's
+  `Tile::new` in `fuzz/src/main.rs` is a reference to the root's definition.
+  Twelve projects at most in one map; the rest are named.
+- A project inside another one that fails does not fail the map: its line
+  says "not mapped, the map goes on without it" with cargo's reason. Every
+  map that indexed Rust ends by naming the crates it has no rows for.
+- Every cargo feature is on (`cargo.features = "all"`, given to
+  `rust-analyzer scip --config-path`), as RustRover has it, so code behind
+  `#[cfg(feature = "...")]` is resolved rather than matched by name.
+- A repo that pins an installed Rust 1.N older than rustup's default
+  toolchain: cargo, build scripts and proc macros still run with the pinned
+  one, and rust-analyzer reads the default one's standard library
+  (`cargo.sysrootSrc`). Swan's rust-analyzer (0.3.3089) given Rust 1.88's own
+  library loaded core but resolved no `macro_rules` macro of it and nothing
+  from the prelude: `vec!`, `matches!`, `assert_eq!`, `Some`. The map lost
+  every use inside those macros, and rust-analyzer's own diagnostics
+  reported `unresolved macro vec!` on sound code. The live server gets the
+  same setting (`{rust_std_source}` in tools/modules.json).
+- The Rust fingerprint now covers every Cargo.toml, Cargo.lock and
+  rust-toolchain file in the repo, not only the root's: a dependency added
+  to a member crate used to leave the old index in place.
+- `swan cargo-projects <repo>` prints the plan (projects, settings,
+  toolchain) and runs nothing.
+- Measured on relatedb/relate 2e47f55 (44 crates, pins Rust 1.88.0, with a
+  fuzz crate cut off from the workspace), against the map made earlier the
+  same day:
+
+  | | before | after |
+  |---|---|---|
+  | Rust files in the map | 1,721 | 1,890 |
+  | definitions | 38,821 | 43,222 |
+  | references to the repo's own definitions | 204,080 | 313,716 |
+  | references matched by name only | 2,345 | 406 |
+  | rows in surfaces/relate-ffi/fuzz | 0 | 306 |
+
+  With every feature on but Rust 1.88's own library, 11,169 references were
+  by name. rust-analyzer took 31 s for the workspace and 16 s for the fuzz
+  crate, side by side. RustRover agrees on 2,973 of 3,000 sampled
+  references (26 it has no answer for, 1 it resolves into the standard
+  library); before it was 2,924, with two disagreements from features and
+  one wrong link of Swan's (a local `args` in feature-gated code linked to
+  the function `args`), all three gone.
+- Checked in the suite: a repo with four projects (root with a feature and
+  a path dependency, a `[workspace]` fuzz crate, a crate that stands alone,
+  one cargo cannot read), and the toolchain choice against a made-up rustup
+  folder. Not in the suite: the effect of the library swap itself, since the
+  test machine has one toolchain; that is the relate measurement above.
+- Limits: `swan check` and the live server still work from the repo root's
+  workspace only; a crate in a workspace whose `members` globs do not match
+  it is taken for a member, so it is named at the end of the map rather
+  than mapped; with every feature on, code under `#[cfg(not(feature =
+  "..."))]` is the part left to names.
+
