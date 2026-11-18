@@ -63,6 +63,12 @@ fn agnostic_ignored() {
     check("git repo: the map says which folder git ignores, and runs no cargo project inside it",
           code == 0 && find(report, "not mapped, git ignores this folder: scratch") >= 0 && find(report, "rust") < 0, str(report, "\n", e));
     check("git repo: what is outside the ignored folder is mapped (kept, Kept)", found(db, "kept") && found(db, "Kept"), report);
+    // The survey reads no .gitignore and lists scratch/rs; the map does not
+    // count it, and repo_projects says it is left out.
+    var pj: u8[>..] = [];
+    let pr = serve_once(db, "repo_projects", "{}", pj);
+    check("git repo: a project in the ignored folder is not counted among the repo's, and repo_projects says the map leaves it out",
+          find(report, "projects:") < 0 && pr == 1 && find(pj, "\"in_folders_git_ignores\":[\"scratch/rs\"]") >= 0, str(report, "\n", pj));
     check("git repo: nothing inside it is, not even what an indexer found by itself (dropped, Old, lost)",
           !found(db, "dropped") && !found(db, "Old") && !found(db, "lost"), report);
 

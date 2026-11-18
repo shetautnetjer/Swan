@@ -16,6 +16,7 @@ extern fn golsp_ask(question: const u8[:], out: u8[>..]&);
 extern fn golsp_stop();
 
 var live_lang: u8[..64];        // the language whose server is running; empty when none
+var live_within: u8[..4096];    // a folder of the repo to start the server in (`swan lsp-index --within`); empty: the repo itself
 var live_settle: u8[..16];      // its "settle" from modules.json: check or publish
 var live_quiet: i64 = 0;        // its "quiet_ms": silence that means a file has nothing to report
 
@@ -79,8 +80,13 @@ fn live_start_at(root: const u8[:], dir: const u8[:], lang: const u8[:], why: u8
                 var env_all: u8[>..] = [];
                 env_all.append(base);
                 env_all.append(extra);
-                let log = str(dir, "/lsp-", lang, ".log");
-                started = golsp_start(root, log, init, argv, env_all, if l_ok { lid } else { lang });
+                // The server's own folder is the repo, or one project of it
+                // (a Go module); the seal, the trust and the tools above are
+                // the repo's either way. Each folder has its own log.
+                let ws: u8[>..] = if live_within.len > 0 { str(root, "/", live_within) } else { str(root) };
+                let log: u8[>..] = if live_within.len > 0 { str(dir, "/lsp-", lang, "-", hash(live_within[..]) % 100000, ".log") }
+                                   else { str(dir, "/lsp-", lang, ".log") };
+                started = golsp_start(ws, log, init, argv, env_all, if l_ok { lid } else { lang });
                 if !started { format(why, "the ", lang, " language server did not start; see ", log); }
                 let st, st_ok = json::as_string(json::member(cand, "settle"));
                 live_settle.clear();

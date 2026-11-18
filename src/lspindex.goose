@@ -73,18 +73,30 @@ fn lx_line(text: const u8[:], n: i64) -> const u8[:] {
     return if nl < 0 { text[at..] } else { text[at..at + nl] };
 }
 
-fn lsp_index_main(repo: const u8[:], out: const u8[:], lang: const u8[:], target: const u8[:]) -> bool {
+// `within`: a folder of the repo ("" for all of it). Only its files are
+// asked about and the server is started in it, the way an editor opens a Go
+// module; the paths written stay relative to the repo, so the rows are the
+// ones a run over the whole repo would give.
+fn lsp_index_main(repo: const u8[:], out: const u8[:], lang: const u8[:], target: const u8[:], within: const u8[:] = "") -> bool {
     let t0 = clock();
     walk_ignore_load(repo, out);
     var why: u8[>..] = [];
+    live_within.clear();
+    if within.len > 0 && within != "." { live_within.append(within); }
     guard live_start_at(repo, out, lang, why) else {
         write_stderr(str("lsp-index: ", why, "\n"));
         return false;
     }
+    // What the server is asked about a file by: its path from the server's
+    // own folder.
+    let cut = if live_within.len > 0 { live_within.len + 1 } else { 0 };
     // The language's files, in the order the repo is walked.
     var paths: u8[>..] = [];
     each_file(repo) { full, name =>
-        if lang_of_path(name) == lang && full.len > repo.len + 1 { format(paths, full[repo.len + 1..], "\n"); }
+        if lang_of_path(name) == lang && full.len > repo.len + 1 {
+            let rel = full[repo.len + 1..];
+            if cut == 0 || (rel.len > cut && starts_with(rel, live_within[..]) && rel[cut - 1] == '/') { format(paths, rel, "\n"); }
+        }
     };
     var p_off: i64[>..] = [];
     var p_len: i64[>..] = [];
@@ -184,7 +196,7 @@ fn lsp_index_main(repo: const u8[:], out: const u8[:], lang: const u8[:], target
         text.clear();
         read_file(str(repo, "/", rel), text);
         var ans: u8[>..] = [];
-        guard live_request(repo, out, rel, "textDocument/documentSymbol", 0, 0, "", ans) else {
+        guard live_request(repo, out, rel[cut..], "textDocument/documentSymbol", 0, 0, "", ans) else {
             asked_failed++;
             write_stderr(str("lsp-index: no symbols for ", rel, ": ", ans[..min(ans.len, 200)], "\n"));
             continue;
@@ -227,7 +239,7 @@ fn lsp_index_main(repo: const u8[:], out: const u8[:], lang: const u8[:], target
         let fi = d_file[d];
         let rel = paths[p_off[fi]..p_off[fi] + p_len[fi]];
         var ans: u8[>..] = [];
-        guard live_request(repo, out, rel, "textDocument/references", d_line[d] + 1, d_col[d] + 1,
+        guard live_request(repo, out, rel[cut..], "textDocument/references", d_line[d] + 1, d_col[d] + 1,
                            "\"context\":{\"includeDeclaration\":false}", ans) else { continue; }
         var doc: json::Node[>..] = [];
         var dec: u8[>..] = [];
@@ -268,7 +280,7 @@ fn lsp_index_main(repo: const u8[:], out: const u8[:], lang: const u8[:], target
         let fi = d_file[d];
         let rel = paths[p_off[fi]..p_off[fi] + p_len[fi]];
         var ans: u8[>..] = [];
-        guard live_request(repo, out, rel, "textDocument/implementation", d_line[d] + 1, d_col[d] + 1, "", ans) else { continue; }
+        guard live_request(repo, out, rel[cut..], "textDocument/implementation", d_line[d] + 1, d_col[d] + 1, "", ans) else { continue; }
         var doc: json::Node[>..] = [];
         var dec: u8[>..] = [];
         let root, perr = json::parse(ans, doc, dec);

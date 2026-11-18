@@ -1142,3 +1142,46 @@ Limits:
   libcurl on the machine it runs on (for its optional `decide` step).
 - An installed Swan from before this change has no `bin/spread-wings`:
   `swan-up update` brings it.
+
+## 2026-11-18: the map surveys the repo first; Go from each module's folder
+
+Swan assumed one project at the top of a repo wherever a language's step
+had not been taught otherwise. For Go that meant gopls started at the top
+of relatedb/relate, whose three go.mod files are further down: 50 s for 38
+files.
+
+- `wings/` moves to 7beddf2: `spread-wings survey` (the projects a repo
+  holds, read from manifest, lock and version files) and `compiler` taking
+  Swan's answer for every call site.
+- Every map runs the survey first, sealed (src/survey.goose), keeps it as
+  `survey.json` in the map folder and says in the report what the repo
+  holds and which node projects have no dependencies installed. Without
+  Spread-Wings, or when the survey fails, the map goes on as before and
+  says so.
+- Go: with go.mod files below the top (and no go.mod or go.work at the
+  top), one `swan lsp-index go --within <module>` per module, the server
+  started in the module's folder; paths stay relative to the repo, so the
+  rows are the ones a run over the whole repo gives. Go files outside every
+  module are counted in the report as not mapped.
+- `repo_projects`: the survey through the server, read fresh each time.
+- Checked in the microVM: fixtures/go-modules (two modules below the top,
+  a Go file outside both, a package.json) and 9 checks in the lang suite,
+  one more in agnostic (a project in an ignored folder). On the Swan
+  installed before this, the same map has no projects line, no
+  survey.json, one `lsp-index go` run, and `repo_projects` is unknown.
+
+| relate, Go | Before | After |
+|---|---|---|
+| Step | one run, 50.0 s | three runs side by side: 6.5 s, 4.6 s, 4.4 s |
+| Rows | 38 files, 924 definitions, 3,027 references, 87 implementations | the same rows, byte for byte |
+
+Limits:
+- Only Go uses the survey to decide where a tool starts. Python
+  environments, `run_tests`, `swan check` and live servers still work from
+  the top of the repo.
+- A Go file outside every module is not mapped at all in such a repo
+  (before, gopls at the top answered for it, slowly).
+- The survey does not read .gitignore. Swan leaves a project inside a
+  folder git ignores out of its count and of where tools start, and
+  `repo_projects` names such projects under `in_folders_git_ignores`;
+  `survey.json` itself still lists them.

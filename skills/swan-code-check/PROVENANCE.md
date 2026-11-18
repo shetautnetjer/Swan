@@ -89,3 +89,5 @@ On 2026-11-18, with Spread-Wings shipped inside Swan, a "Find your way
 first" section and a "Broad map" evidence kind were added for the three
 tools that answer from it (`repo_overview`, `what_touches`,
 `file_neighbors`). Guidance is conditional on the server listing them.
+Later that day `repo_projects` (the survey of a repo's projects) joined
+that section.

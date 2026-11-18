@@ -22,6 +22,7 @@ fn lang_suite() {
     lang_what_broke();
     lang_goose_map();
     lang_go_map();
+    lang_go_modules();
     lang_py_attr_family();
     lang_gradle();
     lang_cuda();
@@ -339,6 +340,66 @@ fn lang_go_map() {
     read_file(str(w, "/repo/shapes/shapes.go"), b);
     check("go: renaming TotalArea rewrites its definition and the call in the other package",
           rr == 1 && find(a, "shapes.SumArea(") >= 0 && find(b, "func SumArea(") >= 0 && find(r, "\"files_written\":2") >= 0, r);
+}
+
+// A repo whose Go modules sit below its top (fixtures/go-modules: svc/ and
+// tools/gen/, each with its own go.mod, and a Go file outside both). The
+// map surveys the repo first (Spread-Wings reads the manifests), says what it
+// holds, and starts gopls in each module's own folder; the rows keep paths
+// from the top of the repo.
+fn lang_go_modules() {
+    guard file_exists(".tools/solidlsp/venv/bin/python") && file_exists(".tools/gopls/gopls") else {
+        write_stderr("skip: go modules: SolidLSP and gopls are not fetched (SWAN_LANGS=go scripts/fetch-tools.sh)\n");
+        return;
+    }
+    let w = "data/go-modules";
+    rm_rf(w);
+    mkdir_p(w);
+    var o: u8[>..] = [];
+    guard sh(argv(["cp", "-r", "fixtures/go-modules", str(w, "/repo")]), "", o) else { return; }
+    var said: u8[>..] = [];
+    guard sh(argv(["bin/swan", "map", str(w, "/repo"), str(w, "/map")]), "", said) else { return; }
+    check("survey: the map says what the repo holds, read by Spread-Wings: one node project, two Go modules",
+          find(said, "projects: 1 node, 2 go (survey.json, read by Spread-Wings; nothing of the repo was run)") >= 0 &&
+          file_exists(str(w, "/map/survey.json")), said);
+    check("survey: it says the node project's dependencies are not installed",
+          find(said, "node: dependencies are not installed in 1 of 1 projects (no node_modules)") >= 0, said);
+    check("go modules: each is mapped from its own folder, and the Go file outside both is said not to be",
+          find(said, "go: 2 modules below the top of the repo, each mapped from its own folder; 1 go files outside every module are not mapped") >= 0 &&
+          find(said, "lsp-index go svc:") >= 0 && find(said, "lsp-index go tools/gen:") >= 0, said);
+    let db = str(w, "/map/swan.db");
+    var t: u8[>..] = [];
+    lg_db_query(db, "refs", "TotalArea", "", t);
+    check("go modules: TotalArea in svc/shapes is used from svc/main.go, by its path from the top of the repo",
+          find(t, "\"relative_path\":\"svc/main.go\",\"line\":10") >= 0 && find(t, "\"in_symbol\":\"main\"") >= 0 &&
+          find(t, "\"relative_path\":\"svc/shapes/shapes.go\"") >= 0, t);
+    lg_db_query(db, "refs", "Emit", "", t);
+    check("go modules: Emit in the second module is used from its own main", find(t, "\"relative_path\":\"tools/gen/main.go\",\"line\":11") >= 0, t);
+    lg_db_query(db, "impls", "Shape", "", t);
+    check("go modules: Square implements Shape inside its module", find(t, "\"implementations\":[{\"name_path\":\"Square\"") >= 0, t);
+
+    var again: u8[>..] = [];
+    guard sh(argv(["bin/swan", "map", str(w, "/repo"), str(w, "/map")]), "", again) else { return; }
+    check("go modules: a second map reuses both modules' answers",
+          find(again, "lsp-index go svc: reused (no changes)") >= 0 && find(again, "lsp-index go tools/gen: reused (no changes)") >= 0, again);
+
+    var pj: u8[>..] = [];
+    var r: i64 = -1;
+    if mcp_open(argv(["bin/swan", "serve", db]), "") { r = mcp_call("repo_projects", "{}", pj); mcp_close(); }
+    check("repo_projects: the survey through the server: each project's folder, kind and name, said to come from Spread-Wings",
+          r == 1 && find(pj, "\"source\":\"spread-wings\"") >= 0 &&
+          find(pj, "\"path\":\"svc\",\"kind\":\"go\",\"name\":\"example.com/svc\"") >= 0 &&
+          find(pj, "\"path\":\"tools/gen\",\"kind\":\"go\",\"name\":\"example.com/gen\"") >= 0 &&
+          find(pj, "\"go\":{\"version\":\"1.22\",\"from\":\"svc/go.mod\"}") >= 0, pj);
+    if mcp_open(argv(["bin/swan", "serve", db]), argv(["SWAN_SPREAD_WINGS=/nonexistent/spread-wings"])) { r = mcp_call("repo_projects", "{}", pj); mcp_close(); }
+    check("repo_projects: without spread-wings it is an error that says so", r == 0 && find(pj, "SWAN_SPREAD_WINGS is /nonexistent/spread-wings") >= 0, pj);
+
+    // Without the survey a map still works, the old way, and says so.
+    rm_rf(str(w, "/map2"));
+    var plain: u8[>..] = [];
+    guard sh(argv(["bin/swan", "map", str(w, "/repo"), str(w, "/map2")]), argv(["SWAN_SPREAD_WINGS=/nonexistent/spread-wings"]), plain) else { return; }
+    check("survey: without spread-wings the map goes on as before and says the repo was not surveyed",
+          find(plain, "projects: not surveyed (SWAN_SPREAD_WINGS is /nonexistent/spread-wings") >= 0 && find(plain, "lsp-index go:") >= 0, plain);
 }
 
 fn lang_java() {

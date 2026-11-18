@@ -815,11 +815,18 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
     // use it only once the repo is trusted, like any other build-running step.
     if !trusted { l.venv.clear(); }
     var skipped: u8[>..] = [];     // indexers that wait for `swan trust`
+    // The projects the repo holds (src/survey.goose): read by Spread-Wings,
+    // nothing of the repo run.
+    var survey_why: u8[>..] = [];
+    let survey = survey_run(repo, out, survey_why);
     format(report, "languages:", if l.ts { " typescript" } else { "" }, if l.js { " javascript" } else { "" },
            if l.java { " java" } else { "" }, if l.c { " c/c++" } else { "" }, if l.cuda { " cuda" } else { "" },
            if l.py { " python" } else { "" }, if l.rs || l.cargo { " rust" } else { "" }, if l.kt { " kotlin" } else { "" }, if l.syn { " go/shell/make/ruby/lua (syntax only)" } else { "" }, if l.other.len > 0 { str(" ", l.other) } else { str("") },
            if l.venv.len > 0 { str(" (venv ", l.venv, ")") } else { str("") }, "\n");
     report.append(ignored_said);
+    let survey_skip = survey_ignored(out);
+    if survey.len > 0 { survey_report(survey, survey_skip, report); }
+    else { format(report, "projects: not surveyed (", survey_why, "): the map assumes what it did before, one Go project at the top\n"); }
     // A map from an older Swan is rebuilt from scratch, indexers included:
     // reusing their output would skip what the new schema needs.
     let old_db = str(out, "/swan.db");
@@ -1940,19 +1947,49 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
             let m = json::member(mods, lang);
             let how, h_ok = json::as_string(json::member(m, "map"));
             if h_ok && how == "lsp" && lsp_server_present(m, home) {
-                let target = str(out, "/index-lsp-", lang, ".scip");
-                var a: u8[>..] = [];
-                arg(a, swan_bin);
-                arg(a, "lsp-index");
-                arg(a, repo);
-                arg(a, out);
-                arg(a, lang);
-                arg(a, target);
-                var fp: u64 = hash(str("lsp-index-1\t", lang, "\t", swan_bin, "\t", swan_file_size(swan_bin)));
-                each_file(repo) { full, name =>
-                    if lang_of_path(name) == lang { fp = hash_combine(fp, hash_combine(hash(full), stamp(full))); }
+                // Go modules below the top of the repo (from the survey):
+                // one run per module, the server started in the module's
+                // own folder, as an editor opens it. With a go.mod or a
+                // go.work at the top, or no survey, one run over the repo.
+                var folders: u8[>..] = [];
+                if lang == "go" {
+                    let mods_at = survey_paths(survey, "go", survey_skip);
+                    if mods_at.len > 0 && !contains_line(mods_at, ".") && !file_exists(str(repo, "/go.work")) { folders.append(mods_at); }
+                }
+                if folders.len == 0 { folders.append(".\n"); }
+                let per_folder = folders != ".\n";
+                var covered = 0;
+                var all_files = 0;
+                each_split(folders, '\n') { within =>
+                    guard within.len > 0;
+                    let whole = within == ".";
+                    let target: u8[>..] = if whole { str(out, "/index-lsp-", lang, ".scip") }
+                                          else { str(out, "/index-lsp-", lang, "-", hash(within) % 1000000, ".scip") };
+                    var a: u8[>..] = [];
+                    arg(a, swan_bin);
+                    arg(a, "lsp-index");
+                    arg(a, repo);
+                    arg(a, out);
+                    arg(a, lang);
+                    arg(a, target);
+                    if !whole { arg(a, "--within"); arg(a, within); }
+                    var fp: u64 = hash(str("lsp-index-2\t", lang, "\t", within, "\t", swan_bin, "\t", swan_file_size(swan_bin)));
+                    let under = str(repo, "/", within, "/");
+                    each_file(repo) { full, name =>
+                        if lang_of_path(name) == lang && (whole || starts_with(full, under)) {
+                            fp = hash_combine(fp, hash_combine(hash(full), stamp(full)));
+                            covered++;
+                        }
+                    };
+                    let label: u8[>..] = if whole { str("lsp-index ", lang) } else { str("lsp-index ", lang, " ", within) };
+                    add_lang_job(label, target, a, child_env(l, ""), fp);
                 };
-                add_lang_job(str("lsp-index ", lang), target, a, child_env(l, ""), fp);
+                if per_folder {
+                    each_file(repo) { full, name => if lang_of_path(name) == lang { all_files++; } };
+                    format(report, lang, ": ", count_lines(folders), " modules below the top of the repo, each mapped from its own folder");
+                    if all_files > covered { format(report, "; ", all_files - covered, " ", lang, " files outside every module are not mapped"); }
+                    report.push('\n');
+                }
                 format(lsp_mapped, lang, " ");
             }
         };
