@@ -7,7 +7,27 @@ import os;
 import json;
 import .harness;
 
+// A repo that pins a toolchain rustup does not have is still mapped, with
+// the default one, and the map says so.
+fn rust_pinned_toolchain() {
+    let w = "data/rs-pinned";
+    rm_rf(w);
+    mkdir_p(w);
+    var o: u8[>..] = [];
+    guard sh(argv(["cp", "-r", "fixtures/tiny-rs", str(w, "/repo")]), "", o) else { return; }
+    write_file(str(w, "/repo/rust-toolchain.toml"), "[toolchain]\nchannel = \"1.61.0\"\n");
+    var e: u8[>..] = [];
+    let code = run(argv(["bin/swan", "map", str(w, "/repo"), str(w, "/map")]), "", o, e);
+    var t: u8[>..] = [];
+    var e2: u8[>..] = [];
+    run(argv(["bin/swan", "query", str(w, "/map/swan.db"), "impls", "Area"]), "", t, e2);
+    check("a pinned toolchain that is not installed: mapped with the default one, and said so",
+          code == 0 && find(e, "pins toolchain 1.61.0, which is not installed; indexing with") >= 0 &&
+          find(t, "Tile") >= 0 && find(t, "Disc") >= 0, str(e[..min(e.len, 600)], "\n", t));
+}
+
 fn rust_suite() {
+    rust_pinned_toolchain();
     var out: u8[>..] = [];
     guard sh(argv(["scripts/index-repo.sh", "fixtures/tiny-rs", "data/tiny-rs"]), "", out) else { return; }
 
