@@ -1,7 +1,7 @@
 // swan-flatten: Rust port of tools/scip-flatten.ts. Flattens SCIP index files
 // (protobuf) into the same TSV files, byte for byte, using every core.
 //
-//   swan-flatten [--fresh <list>] [--texts <tsv>] [--root <repo>] <index.scip[=base]> <out-dir> [more.scip[=base] ...]
+//   swan-flatten [--fresh <list>] [--texts <tsv>] [--root <repo>] [--ignored <list>] <index.scip[=base]> <out-dir> [more.scip[=base] ...]
 //
 // The protobuf reader is hand written, like the TypeScript one, so unknown
 // fields, varints and truncation behave the same. JS semantics that reach the
@@ -296,6 +296,9 @@ struct Ctx {
     abs_prefix: String,
     fresh: Option<HashSet<String>>,
     kept: HashMap<String, String>,
+    // Folders git ignores, each "dir/": a document under one is left out,
+    // whichever indexer wrote it (some find their own sources).
+    ignored: Vec<String>,
 }
 static CTX: OnceLock<Ctx> = OnceLock::new();
 fn ctx() -> &'static Ctx {
@@ -1775,6 +1778,9 @@ fn scan_file(buf: &[u8], base: &str, explicit: bool, repo_abs: &str) -> Vec<Item
         if path.is_empty() && !docbase.is_empty() {
             path = posix_normalize(&docbase);
         }
+        if ctx().ignored.iter().any(|dir| path.starts_with(dir.as_str())) {
+            return;
+        }
         items.push(Item::Doc { start: s, end: e, path });
     });
     items
@@ -1807,7 +1813,8 @@ fn main() {
     let mut abs_prefix = String::new();
     let mut fresh: Option<HashSet<String>> = None;
     let mut kept: HashMap<String, String> = HashMap::new();
-    while !argv.is_empty() && matches!(argv[0].as_str(), "--fresh" | "--texts" | "--root") {
+    let mut ignored: Vec<String> = Vec::new();
+    while !argv.is_empty() && matches!(argv[0].as_str(), "--fresh" | "--texts" | "--root" | "--ignored") {
         let flag = argv.remove(0);
         if argv.is_empty() {
             die(&format!("Error: {flag} needs a value"));
@@ -1815,6 +1822,8 @@ fn main() {
         let value = argv.remove(0);
         if flag == "--fresh" {
             fresh = Some(read_lines_file(&value).into_iter().collect());
+        } else if flag == "--ignored" {
+            ignored = read_lines_file(&value).into_iter().filter(|l| !l.is_empty()).map(|l| format!("{l}/")).collect();
         } else if flag == "--texts" {
             for l in read_lines_file(&value) {
                 if let Some(t) = l.find('\t') {
@@ -1846,7 +1855,7 @@ fn main() {
     let out_dir = argv[1].clone();
     let mut specs: Vec<String> = vec![argv[0].clone()];
     specs.extend(argv[2..].iter().cloned());
-    let _ = CTX.set(Ctx { repo_root: repo_root.clone(), abs_prefix, fresh, kept });
+    let _ = CTX.set(Ctx { repo_root: repo_root.clone(), abs_prefix, fresh, kept, ignored });
 
     let t0 = std::time::Instant::now();
     // "index.scip=dir" says its document paths are relative to dir.

@@ -142,7 +142,9 @@ fn sx_walk(repo: const u8[:], out: u8[>..]&) {
         let n = full[rfind(full, "/") + 1..];
         if swan_is_symlink(full) { continue; }
         if is_dir(full) {
-            if !contains(SX_SKIP, n) { dir.clear(); dir.append(full); have_dir = true; }
+            // Hidden folders hold tooling and caches, as in each_file: Swan's own
+            // .tools/lua-ls gave its map 29,744 Lua symbols that were not Swan's.
+            if n.len > 0 && n[0] != '.' && !contains(SX_SKIP, n) && !walk_skips(full) { dir.clear(); dir.append(full); have_dir = true; }
         } else {
             let size = swan_file_size(full);
             if size >= 0 && size <= 1000000 {
@@ -248,6 +250,9 @@ fn syntax_index_main(repo_arg: const u8[:], out_path: const u8[:]) -> bool {
     while rend > 1 && repo_arg[rend - 1] == '/' { rend--; }
     repo.clear();
     repo.append(repo_arg[..rend]);
+    // The index goes into the map folder, which says what git ignores here.
+    let cut = rfind(out_path, "/");
+    if cut > 0 { walk_ignore_load(repo, out_path[..cut]); }
     var listing: u8[>..] = [];
     sx_walk(repo, listing);
 
