@@ -28,6 +28,7 @@ RUNTIME_FILES = (
     "scripts/package_support.py", "scripts/demo-offline.py", "scripts/fetch-tools.sh", "scripts/hooks/what-broke-after-edit.py",
     "tools/solidlsp/bridge.py", "tools/solidlsp/shim/serena/__init__.py", "tools/solidlsp/shim/serena/util/__init__.py",
     "tools/solidlsp/shim/serena/util/file_system.py", "tools/solidlsp/shim/serena/util/text_utils.py",
+    "integrations/hermes/swan/plugin.yaml", "integrations/hermes/swan/__init__.py",
 )
 OPTIONAL_FILES = ("scripts/verify-live-trust.py",)
 INSTALLER = "scripts/install.py"

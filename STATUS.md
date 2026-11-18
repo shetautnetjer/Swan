@@ -1081,3 +1081,30 @@ with nested closures over shared locals), `syntax_index_main` (496),
   resolve to symbols with no definition row, like a dependency's; an
   indexer still spends its time on what it finds there.
 
+## 2026-11-18: Swan for Hermes
+
+- `integrations/hermes/swan`: a native Hermes plugin (plugin.yaml and one
+  Python file). Its `transform_tool_result` hook runs after Hermes's
+  `write_file` and `patch` tools and adds the errors that edit introduced to
+  the result the model reads, the same answer Swan's Claude Code hook gives.
+  It reads the written files from the tool's own result (`files_modified`,
+  `resolved_path`), runs the installed Swan's what-broke script, and stays
+  silent for a clean edit, a file no map covers, a refused or failed call,
+  or a machine without Swan. It registers the swan-code-check skill from
+  the installed Swan, so the skill follows Swan's version.
+- Swan's tools reach Hermes through its MCP client, like every other agent.
+- `swan-up` connects Hermes with the other agents (`--agents
+  claude,pi,hermes`, the default): every profile gets the plugin, enabled,
+  and the MCP server, added once.
+- Checked: Hermes's own `hermes plugins validate` passes it; through
+  Hermes's real tool pipeline in a throwaway Hermes home, a breaking
+  `write_file` (absolute and relative path) and `patch` carry the note and
+  the fixing write does not; the installer on a throwaway home with two
+  profiles, twice; 8 unit tests with a stand-in Swan
+  (tests/test_hermes_plugin.py).
+- Not checked: a live session with a model. A gateway that is already
+  running does not load a newly enabled plugin until it restarts.
+- Limits: only Hermes's own file tools are heard; an edit made through the
+  terminal tool is not. The first answer for a language can wait on its
+  server starting (60 s at most, then the result goes through untouched).
+
