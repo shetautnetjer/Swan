@@ -37,12 +37,21 @@ a repo's build scripts, so they stay sealed, and they are heavy).
 - `repo_overview`, `what_touches` and `file_neighbors` answer from the graph
   through Swan's server, marked `"source":"spread-wings"`.
 
+- The survey (`spread-wings survey`): every map runs it first, sealed, keeps
+  it as `survey.json`, and says in its report what the repo holds and which
+  node projects have no dependencies installed. `repo_projects` gives it to
+  agents. First use: the Go server is started in each module's own folder
+  (relatedb/relate: 50 s to 6.5 s, the same rows).
+- `spread-wings compiler` takes Swan's answer for every call site the map
+  covers, whatever rule had tied it.
+
 ## Order of what comes next
 
-1. The survey in Spread-Wings; Swan reads it in place of assuming one
-   project at the top of a repo.
-2. Swan's answer corrects any guessed link, not only the ones tied by name.
-3. One-file updates in Spread-Wings, then the watcher, which tells Swan
+1. More of Swan read from the survey in place of its own guesses: a Python
+   project's own virtualenv and version, the package manager and folder
+   `run_tests` uses, the checkers and live servers of projects below the
+   top.
+2. One-file updates in Spread-Wings, then the watcher, which tells Swan
    what to refresh (today the graph is rebuilt whole, and only when the map
    is).
 4. More languages in Spread-Wings (Java, Kotlin, C, C++, C#, PHP, Lua), each

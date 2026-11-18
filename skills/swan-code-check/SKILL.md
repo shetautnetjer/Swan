@@ -117,7 +117,7 @@ write access to the repo and its build caches, nothing else. Never set
 
 ## Find your way first
 
-When the server lists them (Swan from 2026-11-18 on), three tools answer
+When the server lists them (Swan from 2026-11-18 on), four tools answer
 from Spread-Wings, a syntax-level graph Swan builds beside the map in
 seconds:
 
@@ -128,6 +128,13 @@ seconds:
   define, call or import it, which are tests, and the groups they sit in.
 - `file_neighbors {"relative_path": ...}`: what a file imports, who imports
   it, where its calls go.
+- `repo_projects`: the projects the repo holds (each `package.json`,
+  `pyproject.toml`, `Cargo.toml`, `go.mod`), with the package manager and
+  versions each wants and whether its dependencies are installed. Read it
+  before running a project's tests or tools, so you use its own package
+  manager in its own folder (`bun test` in a bun package, not `npm test` at
+  the top), and before trusting an answer about a library call in a project
+  whose dependencies are not installed.
 
 They are broad and quick, not exact: report them as "broad map" evidence
 (below), never as the list of sites an edit must change.

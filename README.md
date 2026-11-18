@@ -156,6 +156,7 @@ only that whole path. Lines and columns in answers are 1-based.
 | `rewrite_pattern` | `pattern`, `rewrite`, `language?`, `relative_path?`, `apply?` | structural rewrite: plans by default; `apply` writes it, refused for files changed since the map |
 | `find_unused_symbols` | `relative_path?`, `include_tests?`, `max_results?` | functions, classes, methods, types and variables nothing references or implements: removal candidates, not proof |
 | `index_info` | none | repo root, build time, counts, and the files changed since the SCIP run |
+| `repo_projects` | none | the projects the repo holds, one per `package.json`, `pyproject.toml`, `Cargo.toml`, `go.mod`, Maven or Gradle build: folder, package manager, the versions it wants and the file that says so, its workspace, whether dependencies are installed, test script. Read fresh by Spread-Wings; nothing of the repo is run |
 | `repo_overview` | none | the lay of a repo: its groups of files that import and call each other, with their main files, most-called definitions and tests. From Spread-Wings, by syntax, in seconds: where to start in a repo you do not know |
 | `what_touches` | `name`, `relative_path?` | before changing a definition: the files that define it, call it or import its file, which are tests, and the groups they sit in. From Spread-Wings: broader than `find_referencing_symbols`, not compiler-checked, and it says how many call sites were matched by name only |
 | `file_neighbors` | `relative_path` | the files a file imports, is imported by, and calls into. From Spread-Wings |
@@ -570,6 +571,7 @@ src/rustproj.goose   the cargo projects of a repo: which folders rust-analyzer r
 src/tspatch.goose    Swan's fix to its copy of scip-typescript: one name for one object key in every process
 src/tsproj.goose     the tsconfig projects of a repo: which config owns each file
 src/wings.goose      Spread-Wings from Swan: its graph beside the map, what an edit plan reaches, and the three broad-map tools
+src/survey.goose     the survey of a repo's projects (from Spread-Wings): kept as survey.json, said in the report, and where the Go server starts
 integrations/hermes/ the Swan plugin for Hermes agents: what an edit broke, in the edit's result
 tools/solidlsp/      the SolidLSP bridge, and Swan's stand-ins for the two helpers SolidLSP imports from Serena
 src/db.goose         map helpers over the imported SQLite package

@@ -30,6 +30,7 @@ import .pypatch;
 import .tspatch;
 import .tsproj;
 import .wings;
+import .survey;
 import .broke;
 import .lspindex;
 import .rustproj;
@@ -45,7 +46,7 @@ fn usage() {
                swan trust <repo>                let map, check and live answers run the repo's build files
                swan gradle-tasks <repo>         the Gradle tasks map would give scip-java (runs nothing)
                swan cargo-projects <repo>       the cargo projects map would run rust-analyzer in, with its settings (runs nothing)
-               swan lsp-index <repo> <out-dir> <lang> <target.scip>   a SCIP index from the language's server (what swan map runs)
+               swan lsp-index <repo> <out-dir> <lang> <target.scip> [--within <folder>]   a SCIP index from the language's server (what swan map runs); --within: only that folder of the repo, the server started in it
                swan lsp-ask <repo> <out-dir> <file> <method> [line col] [more]   one question to the file's language server
                swan format <repo> <out-dir> <file>...
                swan test <repo> <out-dir> <name_path|file> [relative_path]
@@ -208,8 +209,8 @@ fn main() {
         close_db(db);
         print(report);
         if n > 0 { exit(1); }
-    } else if a[1] == "lsp-index" && a.len == 6 {
-        if !lsp_index_main(abs_path(a[2]), abs_path(a[3]), a[4], a[5]) { exit(1); }
+    } else if a[1] == "lsp-index" && (a.len == 6 || (a.len == 8 && a[6] == "--within")) {
+        if !lsp_index_main(abs_path(a[2]), abs_path(a[3]), a[4], a[5], if a.len == 8 { a[7] } else { "" }) { exit(1); }
     } else if a[1] == "lsp-ask" && a.len >= 6 {
         // swan lsp-ask <repo> <out-dir> <file> <method> [line col] [more]: one question to the file's language server.
         var ans: u8[>..] = [];
