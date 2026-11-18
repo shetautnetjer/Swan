@@ -539,3 +539,31 @@ the test machine) and `kotlin_live_check` fail identically on main.
 Ideas behind it: Pydantic Monty's "no ambient authority, the host grants
 named capabilities", applied to OS processes, where Monty itself defers to an
 OS layer.
+
+## 2026-11-18 13:10 PT — The broad map follows the files; Swan asks before each answer
+
+Spread-Wings' graph was rebuilt when Swan's map was newer and not
+otherwise, so it was as old as the map and as slow to renew as a whole
+index. With `spread-wings update` (the graph from the files that changed)
+the two can part: the graph follows the files, the map stays what the
+compilers last said.
+
+Decided:
+
+- **Two graphs beside the map.** `wings-rules.db` holds what the rules
+  give, and is the one kept up to date. Swan's compiler answers go into a
+  copy, `wings.db` (`compiler --into`), because an update has to redo the
+  links those answers sit on. The other way, compiler answers as a layer
+  that stays through an update, would be quicker after a change and is not
+  built.
+- **Swan asks before each answer; it keeps no watcher.** A look when
+  nothing changed is 0.06 s on relate, sealed. A watcher would save that,
+  and would be one more process for each repo, which some Swan has to
+  start and which ends with it; with several `swan serve` on one map
+  folder, which one is not obvious. To be measured before it is built.
+- **Whether the copy is current is told by the rules graph's time and
+  size** as Swan last left it (`wings.checked`), not by comparing times of
+  the two graphs: `update` writes its file even when it finds nothing.
+- **The answer says what changed** (`files_changed`), once. Swan does not
+  refresh its own map from it: that runs the language tools, which is the
+  agent's call (`swan map`).

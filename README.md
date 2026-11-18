@@ -165,6 +165,13 @@ only that whole path. Lines and columns in answers are 1-based.
 Every answer about a file that changed after the SCIP run carries
 `"stale": true`, so an agent knows to reread it or refresh the map.
 
+The Spread-Wings answers (`repo_overview`, `what_touches`,
+`file_neighbors`, and `touches` in a planned `edit_batch`) follow the files
+instead: before each one Spread-Wings looks at every file's time and size
+and reads the ones that changed. When some had, the answer says so under
+`files_changed`: the files changed, added and gone, the files that import
+or call into them, and the tests among them.
+
 Every tool also takes an optional `repo` (a path): it switches to that
 repo's map before answering, as `use_repo` would, and the choice persists.
 Tools accepting `repo` also advertise optional boolean `build`: pass

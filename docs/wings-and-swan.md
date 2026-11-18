@@ -29,9 +29,14 @@ a repo's build scripts, so they stay sealed, and they are heavy).
 
 ## Built so far
 
-- Swan finds Spread-Wings beside itself (`src/wings.goose`), keeps its graph
-  as `wings.db` beside the map, rebuilt when the map is newer, with Swan's
-  answers applied (`compiler`).
+- Swan finds Spread-Wings beside itself (`src/wings.goose`) and keeps its
+  graph beside the map. The graph follows the files: before each answer
+  `spread-wings update` brings `wings-rules.db` up to date from the files
+  that changed since it last looked, and Swan's answers go into a copy,
+  `wings.db` (`compiler --into`), made again when the graph changed or the
+  map was written since.
+- When files had changed, the answer says so under `files_changed`: which
+  files, the files that import or call into them, and the tests among them.
 - A planned `edit_batch` lists what the change reaches beyond its own edits
   and the tests to run.
 - `repo_overview`, `what_touches` and `file_neighbors` answer from the graph
@@ -44,15 +49,25 @@ a repo's build scripts, so they stay sealed, and they are heavy).
   (relatedb/relate: 50 s to 6.5 s, the same rows).
 - `spread-wings compiler` takes Swan's answer for every call site the map
   covers, whatever rule had tied it.
+- One-file updates (`spread-wings update`) and the watcher (`spread-wings
+  watch`), 2026-11-18: the graph from the files that changed, in a third of
+  a second on a 7,784-file repo where building it takes 17 s, and one line
+  per change saying what it reaches.
 
 ## Order of what comes next
 
-1. More of Swan read from the survey in place of its own guesses: a Python
+One-file updates and the watcher came first, as the owner asked on
+2026-11-18 (this list had the survey work first until then). What is left:
+
+1. The rest of the watcher's job: Swan's own map refreshed for what a
+   change reaches. Today Swan asks Spread-Wings to look before each answer
+   (0.06 s more an answer on relate when nothing changed) and tells the
+   agent what changed; its exact tools still say stale for a file changed
+   outside Swan until `swan map` runs. Whether `swan serve` should keep
+   `spread-wings watch` running for this is to be measured, not assumed.
+2. More of Swan read from the survey in place of its own guesses: a Python
    project's own virtualenv and version, the package manager and folder
    `run_tests` uses, the checkers and live servers of projects below the
    top.
-2. One-file updates in Spread-Wings, then the watcher, which tells Swan
-   what to refresh (today the graph is rebuilt whole, and only when the map
-   is).
-4. More languages in Spread-Wings (Java, Kotlin, C, C++, C#, PHP, Lua), each
+3. More languages in Spread-Wings (Java, Kotlin, C, C++, C#, PHP, Lua), each
    graded with `spread-wings score` against Swan's map.
