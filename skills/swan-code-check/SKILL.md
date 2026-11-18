@@ -128,6 +128,11 @@ seconds:
   define, call or import it, which are tests, and the groups they sit in.
 - `file_neighbors {"relative_path": ...}`: what a file imports, who imports
   it, where its calls go.
+- These three, and `touches` in a planned `edit_batch`, are of the files as
+  they are now, not as they were when the map was made. When files changed
+  since the last such answer it carries `files_changed`: which files, the
+  files that import or call into them (`reaches`), and the tests among
+  them (`tests`): run those. The exact tools are not refreshed by this.
 - `repo_projects`: the projects the repo holds (each `package.json`,
   `pyproject.toml`, `Cargo.toml`, `go.mod`), with the package manager and
   versions each wants and whether its dependencies are installed. Read it

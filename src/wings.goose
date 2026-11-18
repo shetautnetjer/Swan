@@ -13,6 +13,10 @@
 // (wings_answer): the lay of a repo, what changing a name reaches, and a
 // file's neighbours. They are Spread-Wings' answers, by syntax, and say so;
 // Swan's own tools give the exact sites.
+//
+// The graph follows the files, not the map: before each answer Spread-Wings
+// brings it up to date from the files that changed since it last looked
+// (wings_graph), and the answer says which those were and what they reach.
 
 import std;
 import os;
@@ -48,35 +52,173 @@ fn wings_bin(why: u8[>..]&) -> u8[>..] {
     return found;
 }
 
-// Spread-Wings' graph of the repo: wings.db beside the map, rebuilt when the
-// map is newer than it. Indexing only parses files, and still runs sealed
-// (it reads the repo; it writes only the map folder). Swan's compiler
-// answers then settle the calls the graph could tie by name alone.
-fn wings_graph(bin: const u8[:], map_db: const u8[:], root: const u8[:], why: u8[>..]&) -> u8[>..] {
+// The time and size of a file as text, by which "this file is as it was
+// left" is told. "" when it is not there.
+fn wings_stamp(path: const u8[:]) -> u8[>..] {
+    var s: u8[>..] = [];
+    let m = swan_mtime_ns(path);
+    if m >= 0 { format(s, m, " ", swan_file_size(path)); }
+    return s;
+}
+
+// Appends "<key>":[...] with at most `cap` of the names `r` holds under
+// `key`. Returns how many it holds.
+fn wings_names(r: json::Node?, key: const u8[:], cap: i64, out: u8[>..]&) -> i64 {
+    var n: i64 = 0;
+    out.push('"');
+    out.append(key);
+    out.append("\":[");
+    let xs = json::member(r, key);
+    if xs { json::each(xs) { x =>
+        let s, ok = json::as_string(x);
+        if ok {
+            if n < cap { if n > 0 { out.push(','); } json::format_string(out, s); }
+            n++;
+        }
+    }; }
+    out.push(']');
+    return n;
+}
+
+// Reads `spread-wings update`'s answer. True when the graph changed. When
+// files changed, `since` receives what goes with the answer that follows:
+// the files changed, added and gone, the files that import or call into
+// them, and the tests among those and the changed files. Not when the graph
+// was built whole: every file is new then, which says nothing.
+fn wings_since(answer: const u8[:], since: u8[>..]&) -> bool {
+    var doc: json::Node[>..] = [];
+    var dec: u8[>..] = [];
+    let r, perr = json::parse(answer, doc, dec);
+    if !r { return true; }                          // not understood: take the graph as changed
+    let whole, w_ok = json::as_bool(json::member(r, "built_whole"));
+    if !w_ok || whole { return true; }
+    var lists: u8[>..] = [];
+    let c = wings_names(r, "changed", 200, lists);
+    lists.push(',');
+    let a = wings_names(r, "added", 200, lists);
+    lists.push(',');
+    let d = wings_names(r, "removed", 200, lists);
+    guard c + a + d > 0 else { return false; }
+    var reach: i64 = 0;
+    let n, n_ok = json::as_i64(json::member(r, "reaches_files"));
+    if n_ok { reach = n; }
+    format(since, "{\"files\":", c + a + d, ",", lists, ",\"reaches_files\":", reach, ",");
+    wings_names(r, "reaches", 200, since);
+    since.push(',');
+    wings_names(r, "tests", 200, since);
+    since.append(",\"note\":\"files changed on disk since Spread-Wings' graph was last brought up to date; it was brought up to date from them before this answer. reaches: the files that import or call into them; tests: the tests among those and the changed files. Swan's own map is not refreshed by this: its exact tools say stale for a file changed outside Swan, until swan map runs.\"}");
+    return true;
+}
+
+// Copies a run that was cut short left behind (wings.db.new*), once they
+// are ten minutes older than `now`.
+fn wings_sweep(dir: const u8[:], now: i64) {
+    var names: u8[>..] = [];
+    guard list_dir(dir, names) else { return; }
+    each_split(names, '\n') { nm =>
+        if starts_with(nm, "wings.db.new") {
+            let f = str(dir, "/", nm);
+            let m = swan_mtime_ns(f);
+            if m >= 0 && now - m > 600000000000 { delete_file(f); }
+        }
+    };
+}
+
+// Spread-Wings' graph of the repo, for answers. Three files beside the map:
+//
+//   wings-rules.db  the graph by Spread-Wings' rules alone. Before every
+//                   answer `spread-wings update` brings it up to date: it
+//                   looks at every file's time and size, reads the ones
+//                   that changed, and builds the graph when none is there.
+//   wings.db        a copy of it with Swan's compiler answers settled on
+//                   top (`compiler --into`), made again when the rules
+//                   graph changed or the map was written since.
+//   wings.checked   the time and size of wings-rules.db when Swan last saw
+//                   wings.db in line with it. A rules graph that is not as
+//                   Swan left it was written by something else (a run cut
+//                   short before its copy, a watcher), and the copy is
+//                   made again.
+//
+// Each step only reads the repo and writes the map folder, and still runs
+// sealed. The compiler step is optional: when no copy can be made the
+// answers come from the rules graph. `since` receives what the update found
+// changed (wings_since); it stays empty when nothing did.
+fn wings_graph(bin: const u8[:], map_db: const u8[:], root: const u8[:], why: u8[>..]&, since: u8[>..]&) -> u8[>..] {
     var g: u8[>..] = [];
     // Absolute: the sealed run starts in the repo, not where Swan was started.
     var dir: u8[>..] = [];
     guard swan_realpath(map_db[..rfind(map_db, "/")], dir) else { format(why, "cannot find the map folder of ", map_db); return g; }
+    let rules = str(dir, "/wings-rules.db");
     let path = str(dir, "/wings.db");
-    let gm = swan_mtime_ns(path);
-    if gm >= 0 && gm >= swan_mtime_ns(map_db) { g.append(path); return g; }
-    let tmp = str(dir, "/wings.db.new");
-    if file_exists(tmp) { delete_file(tmp); }
+    let mark = str(dir, "/wings.checked");
+    var left: u8[>..] = [];
+    read_file(mark, left);
+    let before = wings_stamp(rules);
+    let others = before.len == 0 || before != left;
+
     var a: u8[>..] = [];
-    arg(a, bin); arg(a, "index"); arg(a, root); arg(a, tmp);
+    arg(a, bin); arg(a, "update"); arg(a, root); arg(a, rules);
     var o: u8[>..] = [];
     var e: u8[>..] = [];
     let code = sealed_run(a, root, dir, false, "", 300000, o, e);
-    guard code == 0 && file_exists(tmp) else {
-        let tail = if e.len > 300 { e[e.len - 300..] } else { e[..] };
-        format(why, "spread-wings index failed (exit ", code, "): ", trim(tail));
+    guard code == 0 else {
+        // A spread-wings from before `update` takes the word for something
+        // else and fails in its own way: its usage tells the two apart.
+        var ua: u8[>..] = [];
+        arg(ua, bin);
+        var uo: u8[>..] = [];
+        var ue: u8[>..] = [];
+        sealed_run(ua, root, dir, false, "", 10000, uo, ue);
+        if find(uo, "spread-wings update <repo>") < 0 && find(ue, "spread-wings update <repo>") < 0 {
+            format(why, "this spread-wings (", bin, ") has no update command: use the one that ships with Swan (unset SWAN_SPREAD_WINGS), or one from 049fe53 or later");
+        } else {
+            let said = if e.len > 0 { e[..] } else { o[..] };
+            let tail = if said.len > 300 { said[said.len - 300..] } else { said[..] };
+            format(why, "spread-wings update failed (exit ", code, "): ", trim(tail));
+        }
         return g;
     }
-    a.clear(); o.clear(); e.clear();
-    arg(a, bin); arg(a, "compiler"); arg(a, tmp); arg(a, str(dir, "/", map_db[rfind(map_db, "/") + 1..]));
-    sealed_run(a, root, dir, false, "", 300000, o, e);      // optional: the graph is usable without it
-    guard rename_file(tmp, path) else { format(why, "cannot write ", path); return g; }
-    g.append(path);
+    let changed = wings_since(trim(o), since);
+    // update writes its file even when it found nothing: this is the rules
+    // graph as this answer leaves it.
+    var from = wings_stamp(rules);
+    let made_at = swan_mtime_ns(path);
+    if !others && !changed && made_at >= 0 && made_at >= swan_mtime_ns(map_db) {
+        write_file(mark, from);
+        g.append(path);
+        return g;
+    }
+
+    wings_sweep(dir, swan_mtime_ns(rules));
+    var made = false;
+    var tries = 0;
+    while tries < 3 && !made {
+        tries++;
+        // A name of its own: two Swans may be making the copy at once.
+        let tmp = str(dir, "/wings.db.new.", (random_seed() % 1000000000000) as i64);
+        a.clear(); o.clear(); e.clear();
+        arg(a, bin); arg(a, "compiler"); arg(a, rules); arg(a, str(dir, "/", map_db[rfind(map_db, "/") + 1..]));
+        arg(a, "--into"); arg(a, tmp);
+        sealed_run(a, root, dir, false, "", 300000, o, e);
+        guard file_exists(tmp) else { break; }
+        let now = wings_stamp(rules);
+        if now == from {
+            guard rename_file(tmp, path) else { delete_file(tmp); format(why, "cannot write ", path); return g; }
+            made = true;
+        } else {
+            // Another update wrote the rules graph while the copy was being
+            // made, and the copy may be of either: again, from what is there now.
+            delete_file(tmp);
+            from.clear();
+            from.append(now);
+        }
+    }
+    if made {
+        write_file(mark, from);
+        g.append(path);
+    } else {
+        g.append(rules);
+    }
     return g;
 }
 
@@ -105,7 +247,8 @@ fn wings_report(db: i64, map_db: const u8[:], root: const u8[:], asks: const u8[
     }
     let bin = wings_bin(why);
     guard bin.len > 0 else { unavailable(); return; }
-    let g = wings_graph(bin, map_db, root, why);
+    var since: u8[>..] = [];
+    let g = wings_graph(bin, map_db, root, why, since);
     guard g.len > 0 else { unavailable(); return; }
 
     exec_or_die(db, """
@@ -210,7 +353,9 @@ fn wings_report(db: i64, map_db: const u8[:], root: const u8[:], asks: const u8[
     sqlite::finalize(ins);
 
     var err: u8[>..] = [];
-    out.append("{\"available\":true,\"per_edit\":[");
+    out.append("{\"available\":true,");
+    if since.len > 0 { format(out, "\"files_changed\":", since, ","); }
+    out.append("\"per_edit\":[");
     out.append(per);
     out.append("],\"reached_not_edited\":[");
     let st = prepare_or_die(db, """
@@ -273,16 +418,18 @@ let WINGS_EVIDENCE = "from Spread-Wings, by syntax: links are matched by import,
 
 // One Spread-Wings query about the selected repo, through the server:
 // `cmd` is overview, touches or neighbors; a and b its arguments ("" for
-// none). Builds or refreshes wings.db beside the map first. The answer is
-// Spread-Wings' own JSON under "result". False with the reason in `out`
-// when Spread-Wings is missing or the query fails.
+// none). Brings the graph beside the map up to date first (wings_graph);
+// when files had changed, "files_changed" says which and what they reach.
+// The answer is Spread-Wings' own JSON under "result". False with the
+// reason in `out` when Spread-Wings is missing or the query fails.
 fn wings_answer(db: i64, map_db: const u8[:], cmd: const u8[:], a: const u8[:], b: const u8[:], out: u8[>..]&) -> bool {
     var root: u8[>..] = [];
     meta_value(db, "root", root);
     var why: u8[>..] = [];
     let bin = wings_bin(why);
     guard bin.len > 0 else { out.append(why); return false; }
-    let g = wings_graph(bin, map_db, root, why);
+    var since: u8[>..] = [];
+    let g = wings_graph(bin, map_db, root, why, since);
     guard g.len > 0 else { out.append(why); return false; }
     var argv: u8[>..] = [];
     arg(argv, bin); arg(argv, cmd); arg(argv, g);
@@ -300,6 +447,7 @@ fn wings_answer(db: i64, map_db: const u8[:], cmd: const u8[:], a: const u8[:], 
     }
     out.append("{\"source\":\"spread-wings\",\"evidence\":");
     json::format_string(out, WINGS_EVIDENCE);
+    if since.len > 0 { format(out, ",\"files_changed\":", since); }
     out.append(",\"result\":");
     out.append(answer);
     out.push('}');

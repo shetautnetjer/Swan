@@ -19,6 +19,7 @@ fn lang_suite() {
     lang_java();
     lang_java_batch();
     lang_batch_touches();
+    lang_wings_follows_files();
     lang_what_broke();
     lang_goose_map();
     lang_go_map();
@@ -218,6 +219,98 @@ fn lang_batch_touches() {
     if mcp_open(argv(["bin/swan", "serve", db]), argv(["SWAN_SPREAD_WINGS=/nonexistent/spread-wings"])) { r1 = mcp_call("repo_overview", "{}", ov); mcp_close(); }
     check("repo_overview: without spread-wings it is an error that says where it was looked for",
           r1 == 0 && find(ov, "SWAN_SPREAD_WINGS is /nonexistent/spread-wings") >= 0, ov);
+}
+
+// Appends `text` to a file, as an editor outside Swan would.
+fn append_to(path: const u8[:], text: const u8[:]) -> bool {
+    var now: u8[>..] = [];
+    guard read_file(path, now) else { return false; }
+    now.append(text);
+    return write_file(path, now);
+}
+
+// The broad map follows the files, not the map. Before each answer
+// Spread-Wings brings its graph (wings-rules.db beside the map) up to date
+// from the files that changed since it last looked, and the answer says
+// which they were and what they reach. Swan's compiler answers sit in a copy
+// (wings.db), made again when the graph moved. Each question here goes to a
+// fresh `swan serve`, as it would from another agent.
+fn lang_wings_follows_files() {
+    let w = "data/py-follows";
+    rm_rf(w);
+    mkdir_p(w);
+    var o: u8[>..] = [];
+    guard sh(argv(["cp", "-r", "fixtures/tiny-py", str(w, "/repo")]), "", o) else { return; }
+    guard sh(argv(["bin/swan", "map", str(w, "/repo"), str(w, "/map")]), "", o) else { return; }
+    let db = str(w, "/map/swan.db");
+    let ask = "{\"name\":\"total_area\"}";
+    let client = "{\"path\":\"client.py\",\"why\":[\"calls it\"]";
+    var t0: u8[>..] = [];
+    var t1: u8[>..] = [];
+    var t2: u8[>..] = [];
+    let r0 = serve_once(db, "what_touches", ask, t0);
+    // A caller written by an editor outside Swan, after the map was made.
+    let wrote = append_to(str(w, "/repo/client.py"), "\n\ndef billed(shapes):\n    return total_area(shapes) * 2\n");
+    let r1 = serve_once(db, "what_touches", ask, t1);
+    let r2 = serve_once(db, "what_touches", ask, t2);
+    check("what_touches: a file changed after the map was made is in the next answer, which says what changed",
+          wrote && r0 == 1 && find(t0, "client.py") < 0 && find(t0, "files_changed") < 0 && r1 == 1 && find(t1, client) >= 0 &&
+          find(t1, "\"files_changed\":{\"files\":1,\"changed\":[\"client.py\"],\"added\":[],\"removed\":[],\"reaches_files\":0,") >= 0, t1);
+    check("what_touches: asked again, the new caller is still there and nothing is said to have changed",
+          r2 == 1 && find(t2, client) >= 0 && find(t2, "files_changed") < 0, t2);
+
+    // A second caller; then a planned batch that rewrites the function both call.
+    let wrote2 = append_to(str(w, "/repo/client.py"), "\n\ndef billed_twice(shapes):\n    return total_area(shapes) * 4\n");
+    let body = """{"edits":[{"op":"replace_symbol_body","name_path":"total_area","relative_path":"shapes/__init__.py","body":"def total_area(shapes):\n    return 0"}]}""";
+    var t3: u8[>..] = [];
+    let r3 = serve_once(db, "edit_batch", body, t3);
+    check("batch touches: the plan reaches the caller written since the map was made, and says which file changed",
+          wrote2 && r3 == 1 && find(t3, "\"touches\":{\"available\":true,\"files_changed\":{\"files\":1,\"changed\":[\"client.py\"]") >= 0 &&
+          find(t3, "\"reached_not_edited\":[{\"path\":\"client.py\",\"why\":[\"calls it\"],\"is_test\":false") >= 0, t3);
+
+    // The answers come from the copy with the compiler's answers; a file
+    // changed since the map was made is not answered from the map.
+    var cc: u8[>..] = [];
+    var cr: u8[>..] = [];
+    let c1 = sh(argv(["bin/spread-wings", "callers", str(w, "/map/wings.db"), "total_area"]), "", cc);
+    let c2 = sh(argv(["bin/spread-wings", "callers", str(w, "/map/wings-rules.db"), "total_area"]), "", cr);
+    check("wings.db: a copy with the compiler's answers; the graph kept up to date beside it holds none",
+          c1 && c2 && find(cc, "{\"path\":\"main.py\",\"line\":5,\"in\":\"report\",\"resolution\":\"compiler\"") >= 0 &&
+          find(cc, "{\"path\":\"client.py\",\"line\":12,\"in\":\"billed\",\"resolution\":\"by_name\"") >= 0 &&
+          find(cr, "{\"path\":\"main.py\",\"line\":5,\"in\":\"report\",\"resolution\":\"imported_name\"") >= 0 &&
+          find(cr, "\"resolution\":\"compiler\"") < 0, str(cc, "\n", cr));
+
+    // The graph brought up to date by something else (a Swan cut short
+    // before its copy, a watcher): Swan's own look then finds nothing
+    // changed, and the copy is still made again.
+    let wrote3 = write_file(str(w, "/repo/extra.py"), "from shapes import total_area\n\n\ndef more(shapes):\n    return total_area(shapes) + 1\n");
+    var up: u8[>..] = [];
+    let u = sh(argv(["bin/spread-wings", "update", str(w, "/repo"), str(w, "/map/wings-rules.db")]), "", up);
+    var t4: u8[>..] = [];
+    let r4 = serve_once(db, "what_touches", ask, t4);
+    check("what_touches: a graph something else brought up to date has its copy made again",
+          wrote3 && u && find(up, "\"added\":[\"extra.py\"]") >= 0 && r4 == 1 &&
+          find(t4, "{\"path\":\"extra.py\",\"why\":[\"calls it\",\"imports its file\"]") >= 0 && find(t4, "files_changed") < 0, str(up, "\n", t4));
+
+    // A change to the file the others import: what it reaches, and the tests.
+    let wrote4 = append_to(str(w, "/repo/shapes/__init__.py"), "\n# a note\n");
+    var t5: u8[>..] = [];
+    let r5 = serve_once(db, "what_touches", ask, t5);
+    check("what_touches: a changed file comes with the files that import or call into it, and the tests to run",
+          wrote4 && r5 == 1 && find(t5, "\"files_changed\":{\"files\":1,\"changed\":[\"shapes/__init__.py\"],\"added\":[],\"removed\":[],\"reaches_files\":4,\"reaches\":[\"client.py\",\"extra.py\",\"main.py\",\"test_shapes.py\"],\"tests\":[\"test_shapes.py\"],") >= 0, t5);
+
+    // A spread-wings from before `update` (here a stand-in with the old
+    // usage, which fails whatever it is asked): the answer says what to do.
+    var here: u8[>..] = [];
+    sh(argv(["pwd"]), "", here);
+    let old_wings = str(trim(here), "/", w, "/map/old-spread-wings");
+    let stood = write_file(old_wings, "#!/bin/sh\necho 'spread-wings 0.1.0: a broad code graph from syntax alone'\necho '  spread-wings index <repo> <graph.db> [--resolution N]'\necho 'cannot open that' >&2\nexit 1\n") &&
+                sh(argv(["chmod", "+x", old_wings]), "", o);
+    var t6: u8[>..] = [];
+    var r6: i64 = -1;
+    if mcp_open(argv(["bin/swan", "serve", db]), envv("SWAN_SPREAD_WINGS", old_wings)) { r6 = mcp_call("what_touches", ask, t6); mcp_close(); }
+    check("what_touches: a spread-wings with no update command is named as that, with what to use instead",
+          stood && r6 == 0 && find(t6, "has no update command: use the one that ships with Swan") >= 0, t6);
 }
 
 // what_broke / `swan broke`: only the errors an edit introduced.

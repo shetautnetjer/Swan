@@ -90,4 +90,5 @@ first" section and a "Broad map" evidence kind were added for the three
 tools that answer from it (`repo_overview`, `what_touches`,
 `file_neighbors`). Guidance is conditional on the server listing them.
 Later that day `repo_projects` (the survey of a repo's projects) joined
-that section.
+that section, and a line on `files_changed`: the broad-map answers follow
+the files, and say which changed and what they reach.

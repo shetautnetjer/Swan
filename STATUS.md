@@ -1185,3 +1185,81 @@ Limits:
   folder git ignores out of its count and of where tools start, and
   `repo_projects` names such projects under `in_folders_git_ignores`;
   `survey.json` itself still lists them.
+
+## 2026-11-18: the broad map follows the files
+
+Spread-Wings' graph beside a map was built when the map was newer than it,
+and not otherwise. A file changed after the map was made stayed out of
+`repo_overview`, `what_touches`, `file_neighbors` and a planned batch's
+`touches` until `swan map` ran again, and then the whole graph was built
+again (6 s on relate) though one file had changed.
+
+- `wings/` moves to 049fe53: `spread-wings update` (the graph from the
+  files that changed), `watch`, and `compiler --into` (Swan's answers into
+  a copy).
+- Before each broad-map answer Swan has Spread-Wings bring its graph up to
+  date, sealed as before (src/wings.goose `wings_graph`). Three files
+  beside the map: `wings-rules.db`, the graph by the rules alone, which
+  `update` keeps; `wings.db`, a copy with Swan's compiler answers, made
+  again when the graph changed or the map was written since; and
+  `wings.checked`, the time and size of the rules graph when Swan last saw
+  the copy in line with it. A rules graph that is not as Swan left it (a
+  run cut short before its copy, another program) has its copy made again.
+- When files had changed, the answer says so under `files_changed`: the
+  files changed, added and gone, the files that import or call into them
+  (`reaches`), and the tests among those and the changed files (`tests`).
+  It is said once, in the first answer after the change.
+- A call in a file changed since the map was made is tied by the rules
+  alone (the compiler's answer for that line may be of other code), as
+  `compiler` already did.
+- When no copy can be made the answers come from the rules graph. A
+  spread-wings from before `update` (set by `SWAN_SPREAD_WINGS`, or on
+  PATH) is named as that, with what to use instead.
+
+| A copy of relate (2,261 mapped files) and of its map, `what_touches` | Before (fdc02e6) | After |
+|---|---|---|
+| First question, nothing built | 6.3 s | 6.1 s |
+| The same question again | 0.05 s | 0.11 s |
+| A file changed outside Swan, then the question | 0.05 s, and the new caller is not in the answer | 1.4 s, and it is |
+| The map written since, then the question | 6.2 s | 1.3 s |
+
+Checked:
+- 7 new checks in the lang suite, on a copy of fixtures/tiny-py with each
+  question put to a fresh `swan serve`: a caller written after the map was
+  made is in the next answer, with what changed; asked again, it is still
+  there and nothing is said to have changed; a planned batch reaches it and
+  says which file changed; `wings.db` holds the compiler's answers and
+  `wings-rules.db` none, and the changed file's call stays tied by name; a
+  graph brought up to date by `spread-wings update` run by hand has its
+  copy made again; a change to the file the others import names the four
+  files it reaches and the test; a stand-in spread-wings with the old
+  usage is named as having no `update`.
+- Seen failing in the microVM: with src/wings.goose as on main (what the
+  installed Swan does) all 7 fail. With three faults put in (the "not as
+  Swan left it" rule off, the batch not passing on what changed, the copy
+  made against a map path that is not there) the three checks for those
+  fail and the other new ones pass.
+- By hand, the Spread-Wings of the installed Swan (7beddf2) set through
+  `SWAN_SPREAD_WINGS`: the answer names it and says to use the one that
+  ships with Swan.
+
+Limits:
+- Swan's own map is not refreshed by this. Its exact tools still say
+  `"stale": true` for a file changed outside Swan until `swan map` runs;
+  `files_changed` tells the agent which files those are and which tests to
+  run, and nothing more happens by itself.
+- Every broad-map answer costs one sealed look more: 0.06 s on relate when
+  nothing changed.
+- After a change the copy is made whole (1.3 s on relate). Not timed on a
+  larger repo through Swan: this machine holds no Swan map of rea.
+- `files_changed` goes to whoever asks first. Two agents share one map
+  folder, and the second is not told.
+- Two Swans asking at the same moment may each make the copy.
+- When something other than Swan keeps the rules graph (a watcher), Swan
+  makes the copy again and cannot say what changed. `update` also writes
+  its file when it found nothing, so a watcher's idle looks would have the
+  copy made again each time: Spread-Wings has to say whether the graph
+  changed (a number that moves only then) before Swan runs one.
+- Swan does not start `spread-wings watch`.
+- `repo_overview` takes 3.2 s on relate, before and after: its "most
+  called" list, in Spread-Wings.
