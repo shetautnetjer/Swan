@@ -19,6 +19,7 @@ fn lang_suite() {
     lang_java();
     lang_java_batch();
     lang_batch_touches();
+    lang_what_broke();
     lang_py_attr_family();
     lang_gradle();
     lang_cuda();
@@ -191,6 +192,35 @@ fn lang_batch_touches() {
     let unchanged = run(argv(["diff", "-r", "fixtures/tiny-py", str(w, "/repo")]), "", same, e0) == 0;
     check("batch touches: without spread-wings the plan still works and says why", r == 1 &&
           find(t, "\"available\":false,\"why\":\"SWAN_SPREAD_WINGS is /nonexistent/spread-wings") >= 0 && unchanged, t);
+}
+
+// what_broke / `swan broke`: only the errors an edit introduced.
+fn lang_what_broke() {
+    let w = "data/py-broke";
+    rm_rf(w);
+    mkdir_p(w);
+    var o: u8[>..] = [];
+    guard sh(argv(["cp", "-r", "fixtures/tiny-py", str(w, "/repo")]), "", o) else { return; }
+    guard sh(argv(["bin/swan", "map", str(w, "/repo"), str(w, "/map")]), "", o) else { return; }
+    let f = str(w, "/repo/shapes/__init__.py");
+    var orig: u8[>..] = [];
+    read_file(f, orig);
+    var e: u8[>..] = [];
+    var t: u8[>..] = [];
+    let c1 = run(argv(["bin/swan", "broke", str(w, "/map"), "shapes/__init__.py"]), "", t, e);
+    check("broke: a clean file has nothing new (exit 0)", c1 == 0 && find(t, "\"new_errors\":0,") >= 0, t);
+    write_file(f, str(orig, "\n\ndef broken() -> int:\n    return \"text\"\n"));
+    let c2 = run(argv(["bin/swan", "broke", str(w, "/map"), "shapes/__init__.py"]), "", t, e);
+    check("broke: the error an edit introduced is reported once, with its line (exit 1)",
+          c2 == 1 && find(t, "\"new_errors\":1,") >= 0 && find(t, "\"line\":33") >= 0, t);
+    let c3 = run(argv(["bin/swan", "broke", str(w, "/map"), "shapes/__init__.py"]), "", t, e);
+    check("broke: asked again, it is already there, not new (exit 0)",
+          c3 == 0 && find(t, "\"new_errors\":0,") >= 0 && find(t, "\"errors_already_there\":1") >= 0, t);
+    write_file(f, str(orig, "\n\ndef broken() -> int:\n    return \"text\"\n\n\ndef worse() -> str:\n    return 5\n"));
+    var m: u8[>..] = [];
+    let r4 = serve_once(str(w, "/map/swan.db"), "what_broke", """{"files":["shapes/__init__.py"]}""", m);
+    check("broke: the what_broke tool reports only the second edit's error",
+          r4 == 1 && find(m, "\"new_errors\":1,") >= 0 && find(m, "\"line\":37") >= 0 && find(m, "\"errors_already_there\":1") >= 0, m);
 }
 
 // A class attribute a subclass overrides is renamed as one family: the

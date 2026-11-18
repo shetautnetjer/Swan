@@ -23,6 +23,7 @@ import .change;
 import .syntax;
 import .pypatch;
 import .wings;
+import .broke;
 import treesitter from "shetautnetjer/goose-treesitter@59313e9da0b9f1cce8df83cabe53ed73fa92345c";   // tree-sitter and its grammars, built once and cached
 import sqlite from "shetautnetjer/goose-sqlite@c759de735ae936dcbc197bb9aae40e13565ef21c";   // open_existing never creates a missing map
 
@@ -31,6 +32,7 @@ fn usage() {
         usage: swan map <repo> <out-dir> [--clean]  index or refresh; --clean bypasses all cached output
                swan doctor [--profile core|python-typescript] [--json]
                swan check <repo> <out-dir>      run compilers and linters into the map
+               swan broke <out-dir> <file>...   errors new in these files since last asked (exit 1 if any)
                swan trust <repo>                let map, check and live answers run the repo's build files
                swan gradle-tasks <repo>         the Gradle tasks map would give scip-java (runs nothing)
                swan format <repo> <out-dir> <file>...
@@ -168,6 +170,24 @@ fn main() {
         let ok = check_main(a[2], a[3], report);
         print(report);
         if !ok { exit(1); }
+    } else if a[1] == "broke" && a.len >= 4 {
+        // swan broke <map-dir> <file>...: files relative to the repo, or absolute inside it.
+        let db = open_db(str(a[2], "/swan.db"));
+        exec_or_die(db, "COMMIT;");
+        var root: u8[>..] = [];
+        meta_value(db, "root", root);
+        var files: u8[>..] = [];
+        for k in 3..a.len {
+            // Relative: to the repo. Absolute: inside it, else not this map's.
+            if a[k].len > 0 && a[k][0] != '/' { format(files, a[k], "\n"); }
+            else if starts_with(a[k], str(root, "/")) { format(files, a[k][root.len + 1..], "\n"); }
+        }
+        var report: u8[>..] = [];
+        let n = what_broke(db, a[2], files, report);
+        live_stop();
+        close_db(db);
+        print(report);
+        if n > 0 { exit(1); }
     } else if a[1] == "format" && a.len >= 5 {
         var files: u8[>..] = [];
         for k in 4..a.len { files.append(a[k]); files.push('\n'); }
