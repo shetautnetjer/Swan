@@ -78,11 +78,11 @@ build and the Rust build of the same commit.
 |---|---|---|---|---|
 | 0 | Skeleton: commands, usage text, exit codes, the compare script | `swan.goose` | 248 | usage and exit code for every wrong call |
 | 1 | The store: reading flattened SCIP into a map, refresh, questions | `swan_sys.c`, `db`, `scip`, `index`, `fresh`, `graph`, `query`, `writer` | 2,110 | `index`, `refresh`: table hashes. `query`: bytes, 13 of the 14 kinds (`pattern` reads source with tree-sitter: stage 3). Done 2026-11-20: `scripts/port-store.sh` |
-| 2 | Planning that runs nothing | `modules`, `survey`, `rustproj`, `tsproj`, `gradle`, `pyplan`, `stamp` | 2,007 | `cargo-projects`, `gradle-tasks`, `plan-python`, `stamp-bench`: bytes |
-| 3 | Syntax | `syntax`, `structural` | 1,080 | `syntax-index` rows; `query pattern` bytes |
-| 4 | The map | `seal`, `run`, `pipeline`, `pypatch`, `tspatch`, `scip`, `wings` | 3,681 | `swan map`: table hashes, the report, "reused" on the second run |
+| 2 | Planning that runs nothing | `rustproj`, `gradle`, `pyplan` (and the toolchain helpers of `seal` that `rustproj` uses) | 934 | `cargo-projects`, `gradle-tasks`, `plan-python`: bytes. Done 2026-11-20: `scripts/port-plan.sh`. `stamp`, `tsproj`, `survey` and `modules` moved to the stage of their first user (2026-11-20, "Found while porting") |
+| 3 | Syntax | `syntax`, `structural`, `stamp` and the code stamps of `change` (`cosmetic_lang`, `code_hash`) | 1,080 + 237 + some of 280 | `syntax-index` rows; `query pattern` bytes; `stamp-bench`'s stamps.tsv and `stamp-worker` |
+| 4 | The map | `seal`, `run`, `pipeline`, `pypatch`, `tspatch`, `scip`, `wings`, `tsproj`, `survey` | 3,681 + 387 | `swan map`: table hashes, the report, "reused" on the second run |
 | 5 | Language servers | `golsp.goose`, `proc.c`, `glue.c`, `lspindex`, `live` | 1,815 | `lsp-index` SCIP output; `lsp-ask` answers |
-| 6 | Checking and editing | `checkers`, `diag`, `broke`, `change`, `edit` | 1,549 | `check`, `broke`, `format`, `test`, `diagnostics`: reports and rows |
+| 6 | Checking and editing | `checkers`, `diag`, `broke`, `change`, `edit`, `modules` | 1,549 + 449 | `check`, `broke`, `format`, `test`, `diagnostics`: reports and rows |
 | 7 | The server | `serve` | 890 | every MCP tool's answer; the `mcp` suite |
 | 8 | Build and suite | `scripts/build.sh`, `space-test.sh`, `swan-flatten` into the workspace | | the full suite in the microVM; the cost table |
 
@@ -240,6 +240,62 @@ indexes; rename's list of the family in name order has the `callers` shape
 Not looked at: the statements behind checking and the server's own tools
 (stages 6 and 7), and the rest of editing.
 
+## Held for after the port
+
+The port carries Swan over as it is; a better design is its own change once
+the port passes, with its own measurement (rules above). These are written
+down so they are not lost.
+
+### serena-rs, a Rust rewrite of Serena (noted 2026-11-20T16:33Z)
+
+[flobsx/serena-rs](https://github.com/flobsx/serena-rs), published as the
+crate `serena-rs` (0.1.7, 2026-10; young: no stars, 32 downloads when
+noted). Serena's tools in one Rust binary, answered by asking a live
+language server each time: definition, references, rename, hover,
+completion, code actions, diagnostics, formatting. Its README names
+`tower-lsp` for the client and `rmcp` for the MCP server. Smaller trials of
+the same name: GeorgePearse/serena-rs (2025), cp-yu/serena-rs-cli.
+
+How it differs from Swan: Swan answers from a map built ahead of time by
+compiler-grade indexers and stored in SQLite (milliseconds, and the
+questions a map makes cheap: callers, impact, tests, unused code,
+implementations, pattern search), uses live servers only for errors now,
+and seals a repo so its code does not run unasked. Its README says nothing
+about sealing.
+
+Use: a reference at stage 5, when the language-server client
+(`lsp/golsp.goose`) is carried, to see which Rust libraries it uses and how.
+Its license is to be read before anything is borrowed.
+
+### The owner's direction for after the port (noted 2026-11-20T16:33Z)
+
+In the owner's words, shortened: adopt serena-rs's methods where they make
+Swan behave better, so the code base "literally talks to you" and can be
+searched; Spread-Wings incorporated into Swan; a file watcher such as the
+`notify` crate, so Spread-Wings keeps up the way Graphify does; index
+everything except hidden files and what git ignores, to keep people's
+information private; and spell out the areas left untouched because of
+Swan's own rules, unless the owner trusts the repo to run.
+
+What is already there, so the change starts from facts:
+- The walk leaves out hidden folders and the folders git ignores
+  (`rust/src/walk.rs`, from `src/pipeline.goose`). Hidden files are not
+  left out today: only folders are checked for a leading dot, so a `.env`
+  at the top of a repo is walked (whether anything reads it then depends
+  on its language).
+- Spread-Wings ships inside Swan (`wings/`, pinned) and has `watch`
+  (inotify, one watch a folder, a look every 30 s as well;
+  `wings/docs/DESIGN.md`). It is Linux only; without events it looks every
+  two seconds. `notify` would bring macOS and Windows events.
+- Some areas left out are named already: Rust projects past the limit
+  ("not mapped"), crates with no rows (`rust_unmapped`), a repo's build
+  code not run until `swan trust` (sealing).
+
+What would be new: one report of every area left out and why (hidden,
+git-ignored, sealed and untrusted, past a limit, no indexer), the watcher
+keeping Swan's own map current, and hidden files left out as hidden
+folders are.
+
 ## Log
 
 | When (UTC) | What |
@@ -251,6 +307,11 @@ Not looked at: the statements behind checking and the server's own tools
 | 2026-11-20T07:33Z | Cost (STATUS.md has the table): `index` 947 ms against the Goose program's 1,054 on relate and 3,264 against 3,830 on rea, with less memory in both; an unchanged `refresh` 156 ms against 240; questions the same to the millisecond. |
 | 2026-11-20T08:00Z | The judge times every question (`PORT_SLOW`). On Understand-Anything, relate and rea it found two kinds over 300 ms (`uses`, `diag`), and the plans three more that read every symbol (`callers`, `impls` and `hierarchy`, and the folder and path kinds). Rewrites for the first four were run beside the old statements: the same rows in the same order. Section above. |
 | 2026-11-20T09:43Z | Stages 0 and 1 go into main on the owner's word (asked which merge he meant, he chose "Rust branch into main"). The full suite ran in the microVM on the commit that merges; its counts are in the pull request. |
+| 2026-11-20T16:20Z | Stage 2 begun, one command at a time. `cargo-projects` carried: `rust/src/rustproj.rs` (src/rustproj.goose, with the five toolchain helpers it uses from src/seal.goose), and in `sys.rs` `env`, `write_stderr`, `realpath` and `run_capture` (only `rustup show home`; the full `swan_run` is stage 4). The Goose program judged is `bin/swan` built from main `8d3417a` in a cloud container (no trial repos there). `scripts/port-plan.sh`: 93 of 93 the same, on the 20 fixtures, four made-up repos, a missing repo, and relate, tokio, ripgrep, cargo (660 manifests, 366 lines out), bevy and cobra, each with RUSTUP_HOME unset, made up and missing. `--wrong-calls` 47 of 47. |
+| 2026-11-20T16:20Z | The judge seen failing: `scripts/port-prove-plan.py`, 11 of 11 breaks caught. The first judge caught 4 of 11; the made-up repos were widened until every break was caught (below). |
+| 2026-11-20T16:41Z | `gradle-tasks` carried: `rust/src/gradle.rs` (src/gradle.goose), sharing `scip::is_ident`. `scripts/port-plan.sh` now judges it on every repo, each case of fixtures/gradle-android and 31 made-up Gradle repos: 181 of 181 the same, with relate, tokio, ripgrep, cargo, bevy, cobra, nowinandroid, architecture-samples, okhttp and RxJava. `scripts/port-prove-plan.py`: 36 of 36 breaks caught (the first run 36 of 37; the one missed cannot change any answer, below). |
+| 2026-11-20T19:40Z | Fix, not the port's: Android through convention plugins (Now in Android). In `src/gradle.goose` first, then `rust/src/gradle.rs`; from here the Goose program judged is the fixed one. `scripts/port-plan.sh` 201 of 201 with 14 more made-up repos; `scripts/port-prove-plan.py` 56 of 56 (two breaks of before re-anchored, their text now in two places). |
+| 2026-11-20T20:19Z | Stage 2 done. `plan-python` carried: `rust/src/pyplan.rs` (src/pyplan.goose). `scripts/port-plan.sh` with 21 made-up Python repos, each at six values of k: 577 of 577 the same, with the 14 public repos (requests, flask, pytest and django among them; django 2,943 .py files, 239 pieces, 22 to 28 ms in both). `scripts/port-prove-plan.py`: 76 of 76. `stamp`, `tsproj`, `survey` and `modules` moved to stages 3, 4 and 6 (stage table). |
 
 ## Found while porting
 
@@ -297,15 +358,85 @@ Not looked at: the statements behind checking and the server's own tools
   program on relate (243 MB against 151), found by the cost table and not
   by any comparison: the rows file was read into one buffer and copied into
   another. Read straight into its place now: 146 MB.
+- Stage 2: the first judge for `cargo-projects`, the fixtures and three
+  made-up repos, passed 7 of 11 breaks. None of its repos had a crate named
+  inside another word (`mypath = "..."`), a `..` that leaves the repo
+  before coming back in, a crate under an excluded folder, a pinned
+  toolchain newer than the default, a library path that needs JSON escapes,
+  a quoted folder name in a comment, or a repo that does not exist. Each
+  is a case in `scripts/port-plan.sh` now.
+- Stage 2: `rustup show home`, asked when $RUSTUP_HOME and ~/.rustup hold
+  no toolchains, is run by `run_capture`, which inherits the environment
+  and waits 10 s as `swan_run` does. The rest of `swan_run` (environment
+  entries, standard error, sealing) is carried with the map at stage 4.
+
+- Stage 2: `is_ident` is one function for the whole Goose program
+  (`src/scip.goose`), and it counts `+`, `-` and `$` as name characters.
+  `src/gradle.goose` uses it too: Goose files share one namespace. The
+  Rust side shares `scip::is_ident` rather than writing a plain letters
+  and digits test, which would read a Groovy slash after `x-` or `$` as
+  the start of a string where the Goose program reads division, and the
+  reverse.
+- Stage 2: one rule of `src/gradle.goose` has no effect any input can
+  show: the version catalog's commented lines are skipped
+  (`!starts_with(line, "#")`), but a commented key would keep its `#` in
+  the alias it makes (`libs.plugins.#android.app`), and a build file
+  cannot name such an alias (`#` is not a name character). Carried as it
+  is. The break that drops it passed the judge (36 of 37 caught on the
+  first run) and was taken out of `scripts/port-prove-plan.py`, since no
+  judge could catch it.
+- Stage 2, not the port's: Now in Android (android/nowinandroid) applies
+  Android through convention plugins of its own (`alias(libs.plugins.
+  nowinandroid.android.application)`; the Kotlin in its `build-logic`
+  applies `com.android.application`). Swan read build files only, so both
+  programs called it a plain JVM build and named `scipPrintDependencies`,
+  which the comment in `src/gradle.goose` says dies on an Android build.
+  Fixed on the owner's word the same day (DECISIONS.md), in the Goose
+  program first and then carried: the repo's own build logic (buildSrc and
+  each `includeBuild`) is read for precompiled script plugins and
+  registered plugin classes, followed through plugins that apply other
+  such plugins. From that commit on, the Goose program the port is judged
+  against is the fixed one.
+
+- Stage 2: four of its seven files had no command of the stage to judge
+  them by, so they move to the stage of their first user (2026-11-20T19:43Z).
+  `stamp` (`stamp-bench`, `stamp-worker`) stamps a file by its code with
+  `code_hash` in `src/change.goose`, which parses with tree-sitter: a stamp
+  is the same bytes only with the same tree-sitter runtime and grammars,
+  which stage 3 pins. `tsproj` and `survey` are used only by the map (and
+  `survey` by the server: it starts Spread-Wings); `modules` only by
+  `check`, `format`, `test` and live errors. Carried without a judge, they
+  would be Rust no comparison has seen.
+
+- Stage 2: the judge had a hole of my making, found by its prover. The
+  made-up Python repos were written in loops over `g`, the name that also
+  held the made-up Gradle repos' folder, so after them no Gradle repo was
+  judged and 37 Gradle breaks passed (a run said "the same: 381 of 381").
+  The loops use another name; every count from then on is after it.
+- Stage 2: two rules of `plan-python` were seen to matter only once a case
+  was made for each: which of two equally big groups is split first (only
+  when the 40-group room runs out between them: `tie`), and an empty file
+  counting as one byte (only beside files that are not empty:
+  `empty-mix`). One rule shows nothing any input can see, so it has no
+  break: at the root, a folder of too many loose files gives "the whole
+  repo in one run" both by its own return and by falling through, since
+  nothing else is in the plan or the queue yet.
 
 ## Next
 
-Stage 2, planning that runs nothing: `modules`, `survey`, `rustproj`,
-`tsproj`, `gradle`, `pyplan` and `stamp` (2,007 lines), behind
-`cargo-projects`, `gradle-tasks`, `plan-python`, `stamp-bench` and
-`stamp-worker`. Before writing it: list what the seven files call outside
-themselves (`seal` and `run` are stage 4; the walk is carried); carry
-`stamp`'s worker processes as processes; and write the stage's judge
-beside `port-store.sh`, seen failing before it is trusted. It passes when
-the commands print the same bytes on the fixtures, the four trial repos and
-cobra.
+Stage 3, syntax: `src/syntax.goose` and `src/structural.goose` (behind
+`syntax-index` and `query pattern`), with `src/stamp.goose` and the code
+stamps of `src/change.goose` (`cosmetic_lang`, `code_hash`; behind
+`stamp-bench` and `stamp-worker`). Everything here reads trees from
+tree-sitter, so the trees must be the Goose program's: the runtime and
+grammars are those goose-treesitter builds at the commit `src/swan.goose`
+imports (`59313e9da0b9`): tree-sitter 0.25.10 (language version 15),
+TypeScript 0.23.2, JavaScript 0.25.0, Python 0.25.0, Rust 0.24.0, Java
+0.23.5, C 0.24.1, C++ 0.23.4, C# 0.23.5, Kotlin 1.1.0, Lua 0.5.0, PHP
+0.25.1, GDScript 6.1.0, WGSL 0.0.1, and CUDA, GLSL and HLSL copied in as
+sources with no version. First step: build those same C sources from that
+commit (a `build.rs` with the `cc` crate) rather than crates of the same
+version numbers, whose generated parsers can differ; and compare a tree
+dump of each grammar's test snippets before carrying any Goose. The judge
+for the stage sits beside `scripts/port-plan.sh` and is seen failing
+before it is trusted.

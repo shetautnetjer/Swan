@@ -1536,6 +1536,196 @@ Limits:
   settings plugin.
 - Its own pull request; merging needs the owner's word.
 
+## 2026-11-20T16:04Z: README says Goose still ships and Rust is the way forward
+
+Wrong: the README opened with "built in Goose" and never said the program is
+moving to Rust; the only mention was one line in the layout list. A reader
+(the owner) took it as out of date.
+
+Changed: a short paragraph under the opening says the shipped program is
+still Goose, the port to Rust has been under way since 2026-11-19, stages 0
+and 1 are merged (2026-11-20), stages 2 to 8 are not done, and nothing of
+the Rust program is built, installed or shipped yet. A line under "What a
+Goose Serena means here" says that section is today's design. Text only.
+
+Checked: the claims read against HANDOFF.md, docs/rust-port.md and the stage
+0 and 1 entries above. Fetched every branch: no Rust work newer than the
+2026-11-20 merge is on GitHub.
+
+Limits: the rest of the README still describes the Goose program, as it
+should until a stage ships. Any Rust work done on the owner's own computer
+and not pushed is not in this entry.
+
+## 2026-11-20T16:21Z: stage 2 of the port begun: `cargo-projects` in Rust
+
+What was missing: the Rust program answered `swan cargo-projects <repo>`
+with exit 70, "not carried over yet (stage 2)".
+
+Changed: `rust/src/rustproj.rs` carries src/rustproj.goose line by line,
+with the five toolchain helpers it uses from src/seal.goose (which channel
+a repo pins, where rustup lives, whether it has that toolchain, its
+default, the version of each). `sys.rs` gains `env`, `write_stderr`,
+`realpath` and `run_capture` (for `rustup show home` only). The command
+prints the same projects, settings, toolchain warnings and "not mapped"
+lines as the Goose program. Nothing ships: `scripts/build.sh` still builds
+only the Goose program.
+
+The judge: `scripts/port-plan.sh` runs each stage 2 command carried so far
+through `port-compare.sh` on the 20 fixtures, on made-up repos that hold
+the cases the fixtures do not (15 crates side by side, a workspace with a
+multi-line exclude and a cut-off fuzz crate, path dependencies that leave
+the repo or hide in another word, odd folder names, skipped folders, a
+symlink, pinned toolchains old, new, missing and broken), on a repo that
+does not exist and on any repo named, each under three rustup homes.
+
+Checked, Goose program built from main `8d3417a` against the Rust one:
+- `scripts/port-plan.sh` with relate, tokio, ripgrep, cargo, bevy and
+  cobra (shallow clones, read only; the command runs nothing in a repo):
+  93 of 93 the same. On cargo, 660 manifests: 366 lines from both, 12
+  projects and 354 "not mapped".
+- Seen failing: `scripts/port-prove-plan.py`, 11 copies of the Rust
+  program each broken in one place, 11 caught. The first judge caught 4;
+  the made-up repos were widened until all were (docs/rust-port.md).
+- `--wrong-calls` 47 of 47. `cargo test` 5 of 5. No new linter notes.
+
+Cost, one run each in the judge: cargo 71 ms Goose, 53 ms Rust; bevy 26
+against 13; relate 18 against 12.
+
+Limits:
+- Run in a cloud container, not on the owner's machine: the four trial
+  repos and their maps are not here. relate was cloned fresh (its current
+  head, not the trial copy). Understand-Anything, rea and Agent-Reach were
+  not run; they hold no Rust that the fixtures and clones do not cover, but
+  that is a reading, not a run.
+- The microVM suite was not run: it judges the Goose program, which this
+  change does not touch.
+- The rest of stage 2 is not done: `gradle-tasks`, `plan-python`,
+  `stamp-bench`, `stamp-worker`, and `modules`, `survey` and `tsproj`.
+- On the session's branch with the README entry before it, not a branch of
+  its own.
+
+## 2026-11-20T16:41Z: stage 2 of the port: `gradle-tasks` in Rust
+
+What was missing: the Rust program answered `swan gradle-tasks <repo>` with
+exit 70, "not carried over yet (stage 2)".
+
+Changed: `rust/src/gradle.rs` carries src/gradle.goose line by line: the
+Android plugin ids in quotes, the version catalog's aliases, comments taken
+out (Kotlin's nest, Groovy's do not; strings, triple-quoted strings and
+Groovy's slashy and dollar-slashy strings kept), reactions (`withId`,
+`hasPlugin`, `withPlugin`) masked, `apply false` on chained lines, and the
+modules `settings.gradle(.kts)` includes. It shares `scip::is_ident` with
+the store, as the Goose program does. Nothing ships.
+
+The judge: `scripts/port-plan.sh` runs `gradle-tasks` on every repo it
+judges, on each case of fixtures/gradle-android, and on 31 made-up Gradle
+repos, one rule each, which hide or show an Android plugin depending on
+whether the reader gets that rule right (each case's answer was looked at:
+11 Android, 20 plain).
+
+Checked, Goose program built from main `8d3417a` against the Rust one:
+- `scripts/port-plan.sh` with relate, tokio, ripgrep, cargo, bevy, cobra,
+  nowinandroid, architecture-samples, okhttp and RxJava (shallow clones,
+  read only): 181 of 181 the same.
+- Seen failing: `scripts/port-prove-plan.py`, 36 of 36 breaks caught (11
+  for `cargo-projects`, 25 for `gradle-tasks`). The first run caught 36 of
+  37; the one missed (a commented catalog line read) cannot change any
+  answer, so it was taken out (docs/rust-port.md, "Found while porting").
+  A rerun crashed when its work folder was deleted by mistake (taken for
+  the leftover of a stopped run); it was run again, whole.
+- `--wrong-calls` 47 of 47. `cargo test` 5 of 5. No linter notes on the
+  new files.
+
+Cost: 2 to 4 ms in both programs on every repo.
+
+Found, not the port's: Now in Android is read as a plain JVM build by the
+program that ships. Its modules apply Android through convention plugins
+of its own, which only its build-logic Kotlin names as
+`com.android.application`. Swan then names `scipPrintDependencies`, which
+its own comment says dies on an Android build. Not run (third-party,
+sealed; no Android SDK here). Waiting on the owner: fix on main now or
+after the port.
+
+Also recorded: serena-rs as a reference for stage 5, and the owner's
+direction for after the port (DECISIONS.md; docs/rust-port.md, "Held for
+after the port").
+
+Limits: as for `cargo-projects` above (cloud container; the trial repos and
+the microVM suite not run). Left in stage 2: `plan-python`, `stamp-bench`,
+`stamp-worker`; `modules`, `survey`, `tsproj`.
+
+## 2026-11-20T19:40Z: the convention-plugin fix carried into the port
+
+What: the fix of its own pull request (`fix/gradle-convention-plugins`:
+Android through convention plugins, Now in Android) made the same in
+`rust/src/gradle.rs`, so the port matches the fixed Goose program, which it
+is judged against from then on.
+
+Checked: `scripts/port-plan.sh` against the fixed Goose program, with 14
+more made-up repos for the new rules: 201 of 201 the same (the fixtures,
+the made-up repos and the ten public repos). `scripts/port-prove-plan.py`:
+56 of 56 breaks caught, 20 of them in the new code; two breaks of before
+were anchored again, their text now being in two places.
+
+## 2026-11-20T20:19Z: stage 2 of the port done: `plan-python` in Rust; `stamp` and three more files moved
+
+What was missing: the Rust program answered `swan plan-python <repo> [k]`
+with exit 70, "not carried over yet (stage 2)".
+
+Changed: `rust/src/pyplan.rs` carries src/pyplan.goose line by line: the
+.py files of the repo, by size (at least one byte each); folders over
+their share split into subfolders and files; a folder of more than k
+loose files kept whole unless its scripts stand alone (at most one in ten
+imports a folder or module of the repo, or imports relatively), when it is
+split by filename prefix (at most 64 files and 40 pieces). Names are kept
+by Goose's `hash`, as the Goose program keeps them. `sys::file_size`
+added. `piece_target`, which only the map uses, waits for stage 4.
+
+Moved out of stage 2 (docs/rust-port.md, the stage table): `stamp`
+(`stamp-bench`, `stamp-worker`) stamps files by their code with
+tree-sitter, so it goes to stage 3 with the pinned grammars; `tsproj` and
+`survey` go to stage 4 (only the map and the server use them); `modules`
+to stage 6 (only check, format, test and live errors). No command of stage
+2 prints what they make, so no comparison could judge them now.
+
+The judge: `scripts/port-plan.sh` runs `plan-python` on every repo it
+judges and on 21 made-up Python repos (few files; packages of different
+sizes; flat folders of scripts that stand alone, import the repo, import
+relatively, import a sibling module or name the repo second on an import
+line; exactly one in ten and one more; loose scripts at the root; names
+sharing only a dot; a folder named as the prefix; more than 40 and exactly
+40 first letters; exactly 64 scripts; splits by second and third byte with
+a space and UTF-8; a group over the byte limit; empty files, alone and beside others; a folder
+exactly at the limit beside one whose name starts the same; two equal
+groups competing for room), each with k unset and 1, 2, 3, 4 and 8.
+
+Checked, the Goose program built from this branch (with the convention
+plugin fix) against the Rust one:
+- `scripts/port-plan.sh` with relate, tokio, ripgrep, cargo, bevy, cobra,
+  nowinandroid, architecture-samples, okhttp, RxJava, requests, flask,
+  pytest and django: 577 of 577 the same.
+- Seen failing: `scripts/port-prove-plan.py`, 76 of 76 breaks caught (20 for
+  `plan-python`, 45 for `gradle-tasks`, 11 for `cargo-projects`).
+- `--wrong-calls` 47 of 47. `cargo test` 5 of 5. The linter's notes on
+  pyplan.rs are three loops over an index, kept as the Goose lines are.
+
+Cost: django, 2,943 .py files and 239 pieces: 22 to 28 ms in both
+programs; pytest 3 ms in both.
+
+My mistake, found by the prover: the made-up Python repos were written in
+loops over `g`, which is also the folder of the made-up Gradle repos, so
+after them no Gradle repo was judged: a run said "the same: 497 of 497"
+without them (and 381 without the public repos), and 37 Gradle breaks went
+uncaught. The loops now use another name; the counts above are from after
+the fix. Two prover runs then crashed on a judge's output that was not
+UTF-8 (a diff cut inside "é"); I first took the crash for its time limit
+and capped it at one judge a core, which it keeps. It now reads judges'
+output with bad bytes replaced.
+
+Limits: the cloud container, as for the commands before: not the trial
+repos, not the microVM suite. Stage 2 is on the session's branch with the
+rest of today's work; main needs the owner's word.
+
 ## 2026-11-20T21:13Z: a convention plugin's id counts only where a plugin is applied
 
 What was wrong (review of the change above, Macroscope): a convention
@@ -1555,3 +1745,48 @@ of 17. Unchanged: every other case of fixtures/gradle-android,
 nowinandroid, architecture-samples, okhttp (Android) and RxJava (plain).
 
 Limits: as the change above (the microVM suite not run here).
+
+## 2026-11-20T21:39Z: review of the port's stage 2 (#75): a deadline that holds, a prover that checks itself, #74's fix carried
+
+What was wrong, found by review (Macroscope, Graphify) and checked:
+- `sys::run_capture` (only `rustup show home`, for `cargo-projects`) kept
+  its deadline only until the program exited: a child of it holding the
+  output open made it wait for that child. A unit test with `sh -c 'sleep
+  30 & echo hi'` and 500 ms took 30 s.
+- `scripts/port-prove-plan.py` never ran the judge on the unbroken program,
+  so a judge broken for some other reason (no Goose program, say) would
+  "catch" every break and report success.
+- #74 changed under review (a convention plugin's id counts only where a
+  plugin is applied); stage 2 carries the same.
+
+Changed:
+- `run_capture` runs the program in a process group of its own, as
+  `swan_run` does (native/swan_sys.c): one deadline holds for its output
+  and its exit, the whole group is killed at it, and a failed wait kills
+  it too. Two unit tests (`sys.rs`).
+- The prover builds and judges the unbroken program first and stops (exit
+  2) when the judge does not pass it.
+- `rust/src/gradle.rs`: `gradle_applies_at` and `convention_plugin_in`
+  as #74's `src/gradle.goose`. Five more made-up Gradle repos (`apply
+  plugin:`, `apply(plugin = ...)` after the id in a string on one line,
+  `pluginManager.apply`, Groovy's `id '...'`, and a module that only names
+  the id in a string, a `println` and `apply(from = ...)`), and five breaks.
+
+Checked:
+- The deadline test failed before (30 s) and passes after (0.5 s, no
+  `sleep` left running); `cargo test` 7 of 7.
+- The prover with no Goose program: before, it would have built and
+  "caught" every break; now it stops after the unbroken program with exit
+  2 (seen).
+- `scripts/port-plan.sh` against the Goose program of #74's head (`b23c1bc`):
+  583 of 583 the same with the 14 public repos (443 of 443 without them).
+- `scripts/port-prove-plan.py`: the unbroken program passes (443 of 443),
+  then 81 of 81 breaks caught.
+
+Not changed, and why: an enormous piece count (`swan plan-python <repo>
+4611686018427387904` on a repo with no .py file) overflows `2 * k` (Graphify).
+The program that ships has the same fault: it stops with "slice bounds
+out of range" (exit 1), the Rust program panics (exit 101). The port
+carries Goose as it is; the fix (`sizes.len / 2 < k`, the same answer for
+every k that does not overflow) is a change to both programs, waiting for
+the owner.

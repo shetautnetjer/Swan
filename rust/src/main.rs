@@ -11,9 +11,12 @@
 mod db;
 mod diag;
 mod fresh;
+mod gradle;
 mod graph;
 mod index;
+mod pyplan;
 mod query;
+mod rustproj;
 mod scip;
 mod sys;
 mod util;
@@ -171,13 +174,15 @@ fn main() {
     } else if cmd == b"syntax-index" && (n == 4 || (n == 6 && is(4, "--skip"))) {
         not_carried(cmd, 3);
     } else if cmd == b"plan-python" && (n == 3 || n == 4) {
+        // The Python pieces a map would index in parallel, one per line ("" = the whole repo).
+        let mut k: i64 = 6;
         if n == 4 {
-            let ok = std::str::from_utf8(&a[3]).ok().and_then(|s| s.parse::<i64>().ok()).is_some_and(|v| v > 0);
-            if !ok {
-                usage();
+            match parse_int(&a[3]) {
+                Some(v) if v > 0 => k = v,
+                _ => usage(),
             }
         }
-        not_carried(cmd, 2);
+        write_stdout(&pyplan::plan_python(&walk::Walk::default(), &abs_path(&a[2]), k));
     } else if cmd == b"scip-python-patch" && (n == 3 || (n == 4 && is(3, "--revert"))) {
         not_carried(cmd, 4);
     } else if cmd == b"scip-typescript-patch" && (n == 3 || (n == 4 && is(3, "--revert"))) {
@@ -189,9 +194,9 @@ fn main() {
     } else if cmd == b"trust" && n == 3 {
         not_carried(cmd, 4);
     } else if cmd == b"gradle-tasks" && n == 3 {
-        not_carried(cmd, 2);
+        write_stdout(&gradle::gradle_scip_tasks(&walk::Walk::default(), &abs_path(&a[2])));
     } else if cmd == b"cargo-projects" && n == 3 {
-        not_carried(cmd, 2);
+        write_stdout(&rustproj::cargo_projects_report(&abs_path(&a[2])));
     } else if cmd == b"check" && n == 4 {
         not_carried(cmd, 6);
     } else if cmd == b"broke" && n >= 4 {
@@ -213,4 +218,21 @@ fn main() {
     } else {
         usage();
     }
+}
+
+/// The real path of a path given on the command line; it ends the run when
+/// there is none (src/pipeline.goose, abs_path).
+fn abs_path(p: &[u8]) -> Vec<u8> {
+    match sys::realpath(p) {
+        Some(o) => o,
+        None => die(&[&b"swan: no such path: "[..], p].concat()),
+    }
+}
+
+/// Goose's write_stdout: the bytes as they are, no line end added.
+fn write_stdout(text: &[u8]) {
+    let out = std::io::stdout();
+    let mut out = out.lock();
+    let _ = out.write_all(text);
+    let _ = out.flush();
 }
