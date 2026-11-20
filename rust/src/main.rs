@@ -8,9 +8,21 @@
 // stages). A command whose stage is not carried over yet says so and exits
 // with NOT_CARRIED, so a comparison can tell "not yet" from "wrong".
 
+mod db;
+mod diag;
+mod fresh;
+mod graph;
+mod index;
+mod query;
+mod scip;
+mod sys;
+mod util;
+mod walk;
+
 use std::io::Write;
-use std::os::unix::ffi::{OsStrExt, OsStringExt};
+use std::os::unix::ffi::OsStringExt;
 use std::process::exit;
+use util::{die, parse_int, print, split};
 
 const USAGE: &str = "\
 usage: swan map <repo> <out-dir> [--clean]  index or refresh; --clean bypasses all cached output
@@ -48,6 +60,32 @@ fn not_carried(command: &[u8], stage: u8) -> ! {
     exit(NOT_CARRIED);
 }
 
+// The map at path, for a job of its own: the freshness state stays with the
+// connection that answers questions.
+fn open_map(path: &[u8]) -> db::Db {
+    if !sys::file_exists(path) {
+        die(&[b"swan: no index at ", path].concat());
+    }
+    match db::Db::open_existing(path) {
+        Ok(db) => db,
+        Err(e) => die(&[b"swan: cannot open ", path, b": ", &e[..]].concat()),
+    }
+}
+
+fn open_db(path: &[u8]) -> (db::Db, fresh::Fresh) {
+    let db = open_map(path);
+    // CLI queries, like read-only MCP tools, use one database generation
+    // across freshness metadata and all statements that build their answer.
+    db.exec_or_die(b"BEGIN;");
+    let version = query::meta_value(&db, b"schema_version");
+    let reads = index::SCHEMA_VERSION.to_string().into_bytes();
+    if version != reads {
+        die(&[b"swan: index schema ", &version[..], b", this swan reads ", &reads[..], b"; rebuild the map"].concat());
+    }
+    let fr = fresh::Fresh::load(&db);
+    (db, fr)
+}
+
 fn main() {
     // Arguments are bytes: a path need not be UTF-8.
     let a: Vec<Vec<u8>> = std::env::args_os().map(|s| s.into_vec()).collect();
@@ -69,27 +107,65 @@ fn main() {
         }
         not_carried(cmd, 4);
     } else if cmd == b"index" && n >= 4 {
-        not_carried(cmd, 1);
+        let mut report: Vec<u8> = Vec::new();
+        index::index_main(&a[2], &a[3], if n > 4 { &a[4] } else { b"" }, false, &mut report);
+        print(&report);
     } else if cmd == b"refresh" && n >= 4 {
-        not_carried(cmd, 1);
+        let mut report: Vec<u8> = Vec::new();
+        index::index_main(&a[2], &a[3], if n > 4 { &a[4] } else { b"" }, true, &mut report);
+        print(&report);
     } else if cmd == b"query" && n >= 5 {
-        const KINDS: [&str; 14] = [
-            "symbol", "refs", "uses", "overview", "callers", "callees", "unused", "info", "at",
-            "diag", "diagfile", "impls", "hierarchy", "pattern",
-        ];
-        // The Goose program opens the map before it looks at the kind, so a
-        // missing map is reported before an unknown kind.
-        if !std::path::Path::new(std::ffi::OsStr::from_bytes(&a[2])).is_file() {
-            let mut msg = b"swan: no index at ".to_vec();
-            msg.extend_from_slice(&a[2]);
-            msg.push(b'\n');
-            let _ = std::io::stderr().write_all(&msg);
-            exit(1);
-        }
-        if !KINDS.iter().any(|k| is(3, k)) {
+        // The map is opened before the kind is looked at, so a missing map is
+        // reported before an unknown kind.
+        let (db, fr) = open_db(&a[2]);
+        let rel: &[u8] = if n > 5 { &a[5] } else { b"" };
+        let kind = a[3].as_slice();
+        let arg = a[4].as_slice();
+        let mut out: Vec<u8> = Vec::new();
+        if kind == b"symbol" {
+            query::find_symbol(&db, &fr, arg, rel, false, true, 50, &mut out);
+        } else if kind == b"refs" {
+            query::find_referencing_symbols(&db, &fr, arg, rel, 500, false, &mut out);
+        } else if kind == b"uses" {
+            query::find_referencing_symbols(&db, &fr, arg, rel, 2000, true, &mut out);
+        } else if kind == b"overview" {
+            query::get_symbols_overview(&db, &fr, arg, &mut out);
+        } else if kind == b"callers" {
+            graph::get_callers(&db, &fr, arg, rel, 3, 200, &mut out);
+        } else if kind == b"callees" {
+            graph::get_callees(&db, &fr, arg, rel, false, 200, &mut out);
+        } else if kind == b"unused" {
+            graph::find_unused_symbols(&db, &fr, arg, false, 200, &mut out);
+        } else if kind == b"info" {
+            query::index_info(&db, &fr, &mut out);
+        } else if kind == b"at" {
+            let p = split(arg, b':');
+            if p.len() != 3 {
+                die(b"swan query <db> at <file>:<line>:<column>");
+            }
+            // A part that is not a number counts as 0, as in the Goose program.
+            let ln = parse_int(p[1]).unwrap_or(0);
+            let cn = parse_int(p[2]).unwrap_or(0);
+            query::get_symbol_at(&db, &fr, p[0], ln, cn, &mut out);
+        } else if kind == b"diag" {
+            diag::get_diagnostics(&db, &fr, arg, rel, 2, false, 200, &mut out);
+        } else if kind == b"diagfile" {
+            diag::get_diagnostics(&db, &fr, b"", arg, 0, false, 200, &mut out);
+        } else if kind == b"impls" {
+            graph::find_implementations(&db, &fr, arg, rel, 200, &mut out);
+        } else if kind == b"hierarchy" {
+            graph::get_type_hierarchy(&db, &fr, arg, rel, 3, 200, &mut out);
+        } else if kind == b"pattern" {
+            // Structural search reads source with tree-sitter: stage 3.
+            not_carried(b"query pattern", 3);
+        } else {
             usage();
         }
-        not_carried(cmd, 1);
+        db.exec_or_die(b"COMMIT;");
+        // The freshness statement belongs to this connection, so it goes first.
+        drop(fr);
+        drop(db);
+        print(&out);
     } else if cmd == b"map" && (n == 4 || (n == 5 && is(4, "--clean"))) {
         not_carried(cmd, 4);
     } else if cmd == b"syntax-index" && (n == 4 || (n == 6 && is(4, "--skip"))) {

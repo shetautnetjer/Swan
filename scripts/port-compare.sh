@@ -8,6 +8,22 @@
 #
 # SWAN_OLD   the Goose program (default: the installed one, else bin/swan)
 # SWAN_NEW   the Rust program  (default: build/rust/release/swan)
+# PORT_EACH_IN=<dir>   run the Goose program in <dir>/old and the Rust one in
+#            <dir>/new (made if missing), so a relative path given to both is
+#            a file of each one's own. Other paths must then be absolute.
+# PORT_ERR=any   compare only whether each wrote to standard error, for an
+#            error whose wording differs by design (a row Goose's own bounds
+#            check stops on).
+# PORT_TIMES=<file>   add a line to <file>: the milliseconds the Goose program
+#            took, the milliseconds the Rust program took, and the arguments
+#            (a unit separator between them).
+#
+# Taken out before comparing, because it differs by design:
+#   - the Goose runtime's wrapper around an error: "goose runtime error: "
+#     before the message and " (src/x.goose:N)" after it. The message itself
+#     is compared.
+#   - the time a command says it took: " in N ms" at the end of a line
+#   - with PORT_EACH_IN, the name of each program's own folder
 #
 # Exit 0: the same. 1: different (a diff is printed). 3: the Rust program says
 # the command's stage is not carried over yet (its exit code 70).
@@ -21,17 +37,60 @@ fi
 new=${SWAN_NEW:-build/rust/release/swan}
 [ -x "$old" ] || { echo "port-compare: no Goose program at $old" >&2; exit 2; }
 [ -x "$new" ] || { echo "port-compare: no Rust program at $new (cargo build --release --manifest-path rust/Cargo.toml)" >&2; exit 2; }
+old=$(realpath "$old")
+new=$(realpath "$new")
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
+old_dir=.
+new_dir=.
+if [ -n "${PORT_EACH_IN:-}" ]; then
+    mkdir -p "$PORT_EACH_IN/old" "$PORT_EACH_IN/new"
+    old_dir=$(realpath "$PORT_EACH_IN/old")
+    new_dir=$(realpath "$PORT_EACH_IN/new")
+fi
+
+# tidy <file> <the program's own folder, or nothing>: the file with what
+# differs by design taken out.
+tidy() {
+    if [ -n "$2" ]; then
+        local folder
+        folder=$(printf '%s' "$2" | sed 's/[][\.*^$|+?(){}]/\\&/g')
+        sed -E -e 's/ in [0-9]+ ms$//' -e "s|$folder|<its folder>|g" "$1"
+    else
+        sed -E -e 's/ in [0-9]+ ms$//' "$1"
+    fi
+}
+
 compare() {
-    "$old" "$@" >"$work/old.out" 2>"$work/old.err" </dev/null; local old_code=$?
-    "$new" "$@" >"$work/new.out" 2>"$work/new.err" </dev/null; local new_code=$?
+    local began=${EPOCHREALTIME/./}
+    (cd "$old_dir" && "$old" "$@" >"$work/old.out" 2>"$work/old.err.raw" </dev/null); local old_code=$?
+    local between=${EPOCHREALTIME/./}
+    (cd "$new_dir" && "$new" "$@" >"$work/new.out" 2>"$work/new.err" </dev/null); local new_code=$?
+    local ended=${EPOCHREALTIME/./}
+    if [ -n "${PORT_TIMES:-}" ]; then
+        printf '%s\t%s\t%s\n' $(((between - began) / 1000)) $(((ended - between) / 1000)) "$(IFS=$'\x1f'; printf '%s' "$*")" >>"$PORT_TIMES"
+    fi
     if [ "$new_code" = 70 ] && [ "$old_code" != 70 ]; then return 3; fi
-    local same=0
-    cmp -s "$work/old.out" "$work/new.out" || { same=1; echo "standard output differs:"; diff "$work/old.out" "$work/new.out" | head -40; }
-    cmp -s "$work/old.err" "$work/new.err" || { same=1; echo "standard error differs:"; diff "$work/old.err" "$work/new.err" | head -40; }
+    # The Goose runtime's wrapper comes off its error only.
+    sed -E -e '1s/^goose runtime error: //' -e '$s/ \([^()]*\.goose:[0-9]+\)$//' "$work/old.err.raw" >"$work/old.err"
+    local each=""
+    [ -n "${PORT_EACH_IN:-}" ] && each=yes
+    local f same=0
+    for f in out err; do
+        local name="standard output"
+        [ $f = err ] && name="standard error"
+        if [ $f = err ] && [ "${PORT_ERR:-}" = any ]; then
+            if [ -s "$work/old.err" ] && [ -s "$work/new.err" ]; then continue; fi
+            if [ ! -s "$work/old.err" ] && [ ! -s "$work/new.err" ]; then continue; fi
+            same=1; echo "$name: only one program wrote to it"; head -3 "$work/old.err" "$work/new.err"
+            continue
+        fi
+        tidy "$work/old.$f" "${each:+$old_dir}" >"$work/old.$f.tidy"
+        tidy "$work/new.$f" "${each:+$new_dir}" >"$work/new.$f.tidy"
+        cmp -s "$work/old.$f.tidy" "$work/new.$f.tidy" || { same=1; echo "$name differs (Goose < > Rust):"; diff <(head -c 4000 "$work/old.$f.tidy") <(head -c 4000 "$work/new.$f.tidy") | head -40; }
+    done
     [ "$old_code" = "$new_code" ] || { same=1; echo "exit code differs: Goose $old_code, Rust $new_code"; }
     return $same
 }

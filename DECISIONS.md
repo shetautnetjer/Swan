@@ -620,3 +620,82 @@ it. The check suites stay as they are and judge the port from outside.
 **Not decided:** when Rust becomes what is built. That is the owner's call
 after stage 8, with the map hashes, the suite counts and the cost table.
 Retiring the Goose sources is a change of its own.
+
+## 2026-11-20T07:15Z — Speed in the Rust port: faster row scanning now; threads measured, and held until the port passes
+
+**Decision (the agent's, inside the port's method; the owner can overrule
+it):** while Swan is being carried over, a faster way to do the same step is
+taken only when it runs on one thread and changes no byte of output.
+`memchr` (finding tabs and line ends) is in. Threads are not: `rayon` for
+Swan's own work on the rows, and SQLite's own sort threads, were both tried
+in scratch copies, both write the same map, and both wait for the owner's
+word and for stage 8, when the suite in the microVM can judge them.
+
+**Asked by the owner (2026-11-19):** whether rayon, crossbeam "or something"
+could speed things up; then rusqlite; then salsa and petgraph.
+
+**Measured** (`swan index`, time and peak memory, medians of 7 runs on
+relate and 5 on rea, turn about, one machine with 32 processors):
+
+| | relate (742 thousand occurrences) | rea (1.5 million) |
+|---|---|---|
+| Goose | 1,093 ms, 346 MB | 3,835 ms, 831 MB |
+| Rust, carried over | 1,065 ms, 338 MB | 3,521 ms, 795 MB |
+| with memchr (in the tree) | 972 ms, 339 MB | 3,316 ms, 794 MB |
+| and rayon (trial) | 839 ms, 362 MB | 3,103 ms, 840 MB |
+| and SQLite's sort threads (trial) | 790 ms, 321 MB | 2,665 ms, 714 MB |
+
+All five wrote the same tables on both repos, and on relate the same file
+byte for byte (the time stamp aside).
+
+**Why not threads now:**
+- About 70% of `swan index` is SQLite's own work on one connection (40% is
+  the nine indexes it builds at the end, timed step by step on relate). A
+  thread crate reaches only the rest.
+- A whole map is minutes of indexers; `index` is about a second of it.
+- Threads behave differently on a small machine, and until stage 8 the
+  microVM suite cannot run the Rust program: nothing would judge them there.
+- The rayon trial peaked 16 MB above the Goose program on relate and 9 MB on
+  rea; the bar is the same or better. Smaller batches would mend it; not
+  done.
+- SQLite's sort threads need temporary files on disk where Swan asks for
+  memory today: a new way for a map to fail.
+
+**Looked at and not taken:**
+- **crossbeam.** rayon is built on it, and Rust's own library has scoped
+  threads and channels now. Nothing here needs it by name.
+- **rusqlite.** A Rust layer over the same C SQLite, through the crate the
+  port already calls (`libsqlite3-sys`). The same engine at the same speed;
+  it would change how the code reads, not what it costs.
+- **salsa.** Keeps derived facts in memory and recomputes what changed,
+  inside one long-running process (rust-analyzer is built on it). Swan keeps
+  its facts in SQLite on disk, across processes, and gets them from
+  compilers; its "only what changed" is `refresh` and the reuse
+  fingerprints. Building on salsa would be a different Swan.
+- **petgraph.** Graphs held in memory. Swan's graph questions run inside
+  SQLite over indexed rows with nothing loaded first (2 to 6 ms for a
+  question on relate); loading 742 thousand rows for each question would
+  cost more than it saves. A fit, if ever, for a long-running server or for
+  Spread-Wings' graph.
+
+**Also true:** rayon is in Swan already. `native/swan-flatten` uses it.
+
+## 2026-11-20T09:43Z — The port's first two stages go into main; each later stage is its own pull request
+
+**Decision (the owner's):** asked which merge he meant by "get on rust do
+the merge", he chose "Rust branch into main": commit stage 1, push the
+branch and merge the port so far into main.
+
+**What it means:** `rust/`, the port's scripts (`scripts/port-*`) and its
+records are on main beside the Goose program. The Goose program is still
+what `scripts/build.sh` builds and what ships. Nothing builds the Rust
+program but the port's own commands, and nothing installs it.
+
+**From here:** a stage is one branch from main and one pull request, like
+any other change (AGENTS.md, rule 3). The long-lived `rust` branch ends
+with this merge.
+
+**Not decided by this:** when Rust becomes what is built (after stage 8);
+threads in the store; whether the slow questions are fixed in the Goose
+program now or carried into Rust later; and whether a folder is matched
+loosely, as now, or exactly.
