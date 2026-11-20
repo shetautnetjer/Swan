@@ -445,18 +445,69 @@ fn android_conventions(walk: &Walk, repo: &[u8], catalog: &[u8], aliases: &[u8])
     known
 }
 
-// Which of the repo's own Android plugins (android_conventions) s names in
-// quotes: its ANDROID_PLUGINS index, or -1.
+// Whether the quoted string at s[q] is a plugin being applied: `id("x")`,
+// `id 'x'`, `apply(plugin = "x")`, `apply plugin: 'x'` or
+// `pluginManager.apply("x")`. A convention plugin's id anywhere else (a
+// string a build file keeps) applies nothing; an Android plugin's own id is
+// read wherever it is in quotes (android_plugin_in), as before.
+fn gradle_applies_at(s: &[u8], q: usize) -> bool {
+    let blank = |c: u8| c == b' ' || c == b'\t';
+    let mut i = q;
+    while i > 0 && blank(s[i - 1]) {
+        i -= 1;
+    }
+    if i > 0 && (s[i - 1] == b'=' || s[i - 1] == b':') {
+        i -= 1;
+        while i > 0 && blank(s[i - 1]) {
+            i -= 1;
+        }
+        return gradle_word_before(s, i) == b"plugin";
+    }
+    let paren = i > 0 && s[i - 1] == b'(';
+    if paren {
+        i -= 1;
+        while i > 0 && blank(s[i - 1]) {
+            i -= 1;
+        }
+    }
+    let w = gradle_word_before(s, i);
+    w == b"id" || (paren && w == b"apply")
+}
+
+// The word that ends at s[end].
+fn gradle_word_before(s: &[u8], end: usize) -> &[u8] {
+    let mut i = end;
+    while i > 0 && is_ident(s[i - 1]) {
+        i -= 1;
+    }
+    &s[i..end]
+}
+
+// Which of the repo's own Android plugins (android_conventions) s applies
+// by id (gradle_applies_at): its ANDROID_PLUGINS index, or -1.
 fn convention_plugin_in(s: &[u8], conventions: &[u8]) -> i64 {
     let mut k = -1;
     for c in conventions.split(|&c| c == b'\n') {
         let tab = find(c, b"\t");
-        if k < 0 && tab > 0 {
-            let id = &c[..tab as usize];
-            if find(s, &[&b"\""[..], id, b"\""].concat()) >= 0 || find(s, &[&b"'"[..], id, b"'"].concat()) >= 0 {
-                if let Some(n) = parse_int(&c[tab as usize + 1..]) {
-                    k = n;
+        if !(k < 0 && tab > 0) {
+            continue;
+        }
+        let id = &c[..tab as usize];
+        for q in [&b"\""[..], b"'"] {
+            let quoted = [q, id, q].concat();
+            let mut p = 0;
+            while k < 0 && p < s.len() {
+                let a = find(&s[p..], &quoted);
+                if a < 0 {
+                    break;
                 }
+                let at = p + a as usize;
+                if gradle_applies_at(s, at) {
+                    if let Some(n) = parse_int(&c[tab as usize + 1..]) {
+                        k = n;
+                    }
+                }
+                p = at + 1;
             }
         }
     }

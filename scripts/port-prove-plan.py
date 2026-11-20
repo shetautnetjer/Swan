@@ -11,7 +11,8 @@ The tree is not touched: the copies are made and built in a temporary
 folder.
 
 Exit 0: every break was caught. 1: one was not (the judge has a hole), or a
-break no longer fits the source (mend BREAKS below, then run again).
+break no longer fits the source (mend BREAKS below, then run again). 2: the
+judge does not pass the unbroken program, so no break proves anything.
 """
 import os
 import shutil
@@ -242,6 +243,21 @@ BREAKS = [
     ("pyplan.rs", 'a folder of many loose files is never split by prefix',
      'if loose > PY_PIECE_FILES && plan_prefix_pieces(repo, &dir, &paths, &sizes, limit, &mut plan) {',
      'if false && plan_prefix_pieces(repo, &dir, &paths, &sizes, limit, &mut plan) {'),
+    ("gradle.rs", 'a convention id counts anywhere it is in quotes',
+     'fn gradle_applies_at(s: &[u8], q: usize) -> bool {\n',
+     'fn gradle_applies_at(s: &[u8], q: usize) -> bool {\n    if q < usize::MAX {\n        return true;\n    }\n'),
+    ("gradle.rs", 'any name before = or : applies a plugin',
+     'return gradle_word_before(s, i) == b"plugin";',
+     'return true;'),
+    ("gradle.rs", 'apply("x") does not apply a plugin',
+     'w == b"id" || (paren && w == b"apply")',
+     'w == b"id"'),
+    ("gradle.rs", "id 'x' without parentheses does not apply a plugin",
+     'w == b"id" || (paren && w == b"apply")',
+     '(paren && w == b"id") || (paren && w == b"apply")'),
+    ("gradle.rs", "only a convention id's first place on a line is looked at",
+     '                p = at + 1;',
+     '                p = s.len();'),
 ]
 
 
@@ -262,6 +278,24 @@ def prove(here, cargo, work):
     # break, so only the one crate is compiled each time.
     copy = os.path.join(work, "rust")
     shutil.copytree(os.path.join(here, "rust"), copy, ignore=shutil.ignore_patterns("target"))
+    # The unbroken program first: a judge that does not pass it would "catch"
+    # every break by failing for some other reason (review on #75).
+    made = subprocess.run([cargo, "build", "--release", "--manifest-path", os.path.join(copy, "Cargo.toml")],
+                          env=dict(os.environ, CARGO_TARGET_DIR=os.path.join(work, "target")),
+                          capture_output=True, text=True)
+    if made.returncode != 0:
+        print(f"the unbroken program does not build:\n{made.stderr[-600:]}")
+        return 2
+    base = os.path.join(work, "swan-0")
+    shutil.copy(os.path.join(work, "target", "release", "swan"), base)
+    ran = subprocess.run([os.path.join(here, "scripts", "port-plan.sh")], env=dict(os.environ, SWAN_NEW=base),
+                         capture_output=True, encoding="utf-8", errors="replace")
+    last = (ran.stdout.strip().splitlines() or [""])[-1]
+    if ran.returncode != 0 or not last.startswith("the same:"):
+        print(f"the judge does not pass the unbroken program (port-plan.sh exit {ran.returncode}), so it proves nothing:")
+        print("    " + "\n    ".join((ran.stdout + ran.stderr).strip().splitlines()[-8:]))
+        return 2
+    print(f"the unbroken program: {last}")
     built = []
     unfit = 0
     for n, (name, what, good, broken) in enumerate(BREAKS, 1):

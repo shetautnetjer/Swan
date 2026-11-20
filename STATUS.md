@@ -1765,3 +1765,67 @@ Limits:
   to carry too.
 - Run in a cloud session; not the trial repos, not the microVM suite.
 
+## 2026-11-20T21:13Z: a convention plugin's id counts only where a plugin is applied
+
+What was wrong (review of the change above, Macroscope): a convention
+plugin's id was read wherever it stood in quotes, so a plain JVM module that
+only names one in a string (`val conventionName = "demo.android.library"`)
+was taken for Android, and a repo of such modules would lose scip-java's
+`scipPrintDependencies` for compiles it may not have.
+
+Changed (src/gradle.goose): a convention plugin's id counts only as a plugin
+being applied: `id("x")`, `id 'x'`, `apply(plugin = "x")`, `apply plugin:
+'x'` or `pluginManager.apply("x")`. An Android plugin's own id is read as
+before. New fixture and check: convention-string.
+
+Checked: convention-string is Android on the Swan before this (seen
+failing) and plain after. The 17 fixture checks of lang_gradle by hand: 17
+of 17. Unchanged: every other case of fixtures/gradle-android,
+nowinandroid, architecture-samples, okhttp (Android) and RxJava (plain).
+
+Limits: as the change above (the microVM suite not run here).
+
+## 2026-11-20T21:39Z: review of the port's stage 2 (#75): a deadline that holds, a prover that checks itself, #74's fix carried
+
+What was wrong, found by review (Macroscope, Graphify) and checked:
+- `sys::run_capture` (only `rustup show home`, for `cargo-projects`) kept
+  its deadline only until the program exited: a child of it holding the
+  output open made it wait for that child. A unit test with `sh -c 'sleep
+  30 & echo hi'` and 500 ms took 30 s.
+- `scripts/port-prove-plan.py` never ran the judge on the unbroken program,
+  so a judge broken for some other reason (no Goose program, say) would
+  "catch" every break and report success.
+- #74 changed under review (a convention plugin's id counts only where a
+  plugin is applied); stage 2 carries the same.
+
+Changed:
+- `run_capture` runs the program in a process group of its own, as
+  `swan_run` does (native/swan_sys.c): one deadline holds for its output
+  and its exit, the whole group is killed at it, and a failed wait kills
+  it too. Two unit tests (`sys.rs`).
+- The prover builds and judges the unbroken program first and stops (exit
+  2) when the judge does not pass it.
+- `rust/src/gradle.rs`: `gradle_applies_at` and `convention_plugin_in`
+  as #74's `src/gradle.goose`. Five more made-up Gradle repos (`apply
+  plugin:`, `apply(plugin = ...)` after the id in a string on one line,
+  `pluginManager.apply`, Groovy's `id '...'`, and a module that only names
+  the id in a string, a `println` and `apply(from = ...)`), and five breaks.
+
+Checked:
+- The deadline test failed before (30 s) and passes after (0.5 s, no
+  `sleep` left running); `cargo test` 7 of 7.
+- The prover with no Goose program: before, it would have built and
+  "caught" every break; now it stops after the unbroken program with exit
+  2 (seen).
+- `scripts/port-plan.sh` against the Goose program of #74's head (`b23c1bc`):
+  583 of 583 the same with the 14 public repos (443 of 443 without them).
+- `scripts/port-prove-plan.py`: the unbroken program passes (443 of 443),
+  then 81 of 81 breaks caught.
+
+Not changed, and why: an enormous piece count (`swan plan-python <repo>
+4611686018427387904` on a repo with no .py file) overflows `2 * k` (Graphify).
+The program that ships has the same fault: it stops with "slice bounds
+out of range" (exit 1), the Rust program panics (exit 101). The port
+carries Goose as it is; the fix (`sizes.len / 2 < k`, the same answer for
+every k that does not overflow) is a change to both programs, waiting for
+the owner.
