@@ -49,6 +49,10 @@ old=${SWAN_OLD:-}
 if [ -z "$old" ]; then
     if [ -x "$HOME/.local/share/swan/current/bin/swan" ]; then old="$HOME/.local/share/swan/current/bin/swan"; else old="$here/bin/swan"; fi
 fi
+# A path given from the repository is one wherever this was started from, as
+# port-compare.sh takes it: the Goose program is also run here directly.
+case "$old" in /*) ;; *) old="$here/$old" ;; esac
+[ -x "$old" ] || { echo "port-store: no Goose program at $old" >&2; exit 2; }
 
 work=$(mktemp -d)
 if [ "${PORT_KEEP:-}" = 1 ]; then echo "work folder: $work"; else trap 'rm -rf "$work"' EXIT; fi
