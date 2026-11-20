@@ -330,7 +330,11 @@ def prove(here, cargo, work):
         for n, what, code, said in pool.map(judge, built):
             caught = [line for line in said.splitlines() if line.startswith("DIFFERENT (")]
             steps = list(dict.fromkeys(line[len("DIFFERENT ("):].rstrip(")") for line in caught))
-            if code == 1 and caught:
+            if code == 2:
+                missed += 1
+                print(f"break {n} NOT JUDGED ({what}): the judge could not compare (port-plan.sh exit 2)")
+                print("    " + "\n    ".join(said.splitlines()[-4:]))
+            elif code == 1 and caught:
                 print(f"break {n} caught ({what}) by: {'; '.join(steps)[:260]}")
             else:
                 missed += 1
