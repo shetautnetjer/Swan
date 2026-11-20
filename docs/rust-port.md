@@ -428,7 +428,8 @@ folders are.
   `src/swan.goose` and its file and include lists from that package's
   `treesitter.build`, so the two cannot drift. The cost: until stage 8 the
   Rust build needs the Goose build to have fetched the package (into
-  `.tools/goose-home`, or `SWAN_TREESITTER_SRC`). Stage 8 decides how the
+  `.tools/goose-home`, or `SWAN_TREESITTER_SRC`). The provers (`scripts/port-prove.py`, `port-prove-plan.py`) build their
+  copies of `rust/` beside a copy of `src/swan.goose` for that reason. Stage 8 decides how the
   Rust program gets these sources once Goose is not built (a submodule of
   goose-treesitter, or the C copied in).
 - Stage 3: goose-treesitter's own `treesitter.goose` (the structural
