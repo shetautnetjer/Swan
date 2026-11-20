@@ -742,6 +742,13 @@ fn lang_gradle() {
     lg_eq("gradle: id(\"com.android.application\") with .apply(false) on the next line stays plain", str(g, "/multiline-apply-false"), LG_PLAIN);
     lg_eq("gradle: include names with \"..\" or \"/\" are not followed out of the repo", str(g, "/bad-include/repo"), LG_PLAIN);
     lg_eq("gradle: only com.android.test modules get no compileDebugUnitTestKotlin", str(g, "/test-only"), "clean compileDebugKotlin scipCompileAll");
+    // Convention plugins: the module names the repo's own plugin, whose code
+    // in an included build or buildSrc applies Android (Now in Android).
+    lg_eq("gradle: a convention plugin class in build-logic, its id from the catalog, applies Android", str(g, "/convention-class"), LG_ANDROID);
+    lg_eq("gradle: a convention plugin that applies another convention plugin that applies Android", str(g, "/convention-chain"), LG_ANDROID);
+    lg_eq("gradle: a precompiled script plugin in buildSrc applies Android", str(g, "/convention-script"), LG_ANDROID);
+    lg_eq("gradle: a convention plugin that applies only com.android.test gets no unit-test compile", str(g, "/convention-test"), "clean compileDebugKotlin scipCompileAll");
+    lg_eq("gradle: a JVM convention plugin that only reacts to Android stays plain", str(g, "/convention-jvm"), LG_PLAIN);
 
     var tmpo: u8[>..] = [];
     var e0: u8[>..] = [];

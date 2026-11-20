@@ -1,0 +1,11 @@
+[versions]
+agp = "9.4.1"
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
+kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version = "2.2.20" }
+
+# Plugins defined by this project
+demo-android-library = { id = "demo.android.library" }
+demo-android-test = { id = "demo.android.test" }
+demo-jvm-library = { id = "demo.jvm.library" }

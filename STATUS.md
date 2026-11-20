@@ -1596,3 +1596,63 @@ after the port").
 Limits: as for `cargo-projects` above (cloud container; the trial repos and
 the microVM suite not run). Left in stage 2: `plan-python`, `stamp-bench`,
 `stamp-worker`; `modules`, `survey`, `tsproj`.
+
+## 2026-11-20T19:40Z: Android builds through convention plugins are read as Android (Now in Android)
+
+What was wrong: `swan gradle-tasks` (and so `swan map`'s scip-java run)
+called android/nowinandroid a plain JVM build: `clean scipPrintDependencies
+scipCompileAll`. Its modules apply the repo's own convention plugins
+(`alias(libs.plugins.nowinandroid.android.application)`), and only the
+Kotlin in its build-logic applies `com.android.application`. Swan read
+build files only. On an Android build `scipPrintDependencies` dies (the
+reason Swan names the Kotlin compiles instead), so such a repo would get no
+Java or Kotlin map. Found while carrying `gradle-tasks` to Rust.
+
+Changed (src/gradle.goose, then the same in rust/src/gradle.rs): the
+repo's own build logic is read too, as text, nothing run: buildSrc, and
+each build settings.gradle(.kts) includes with `includeBuild`. In it, a
+precompiled script plugin (a .gradle.kts or .gradle file under src/main;
+its id is its file name, after a Kotlin package) and a plugin registered
+in a gradlePlugin block (its id written out or taken from the catalog,
+its class found by file name) count as Android when their file applies an
+Android plugin or another such plugin, read by the same rules as a build
+file (comments and reactions like `hasPlugin` do not count). A module that
+applies one, by id or by catalog alias, is Android. Folders outside the
+repo (`..`) are not read.
+
+Before and after (`swan gradle-tasks`, the Swan before this change against
+this one):
+- nowinandroid: `scipPrintDependencies` before, `compileDebugKotlin
+  compileDebugUnitTestKotlin` after.
+- The five new fixtures (fixtures/gradle-android/convention-*): four gave
+  the plain list before and the Android one after (convention-class,
+  -chain, -script; -test without the unit-test compile); convention-jvm,
+  which only reacts to Android, is plain in both.
+- Unchanged: every older case of fixtures/gradle-android, tiny-kt,
+  tiny-java, architecture-samples and okhttp (Android in both), RxJava
+  (plain in both).
+
+Checked:
+- The five new checks in tests/check/lang_suite.goose (lang_gradle) run
+  `bin/swan gradle-tasks` on those fixtures; each command was run by hand
+  on the Swan before (four wrong) and after (five right).
+- The Rust port carries the same change: `scripts/port-plan.sh` against
+  the fixed Goose program, with 14 more made-up repos for the new rules:
+  201 of 201 the same (the fixtures, the made-up repos and the ten public
+  repos).
+  `scripts/port-prove-plan.py`: 56 of 56 breaks caught, 20 of them in the
+  new code.
+
+Limits:
+- The suites were not run: this cloud container has no microVM and not
+  the indexers the lang suite maps with. They are to run in the microVM
+  before this merges.
+- Gradle was not run on nowinandroid (a third-party build stays sealed;
+  no Android SDK here), so "the map now works there" is not shown, only
+  that the task list is the Android one. Its app module has product
+  flavors; Gradle runs compileDebugKotlin where a module has it (the
+  libraries), as before.
+- Not read: plugins applied by type (`apply<SomeClass>()`), by
+  `libs.findPlugin(...)` in code, from a published plugin jar, or a
+  settings plugin.
+- Its own commit on the session's branch; main needs the owner's word.

@@ -714,3 +714,19 @@ repo to run.
 over as it is (its rule: a better design is its own change afterwards).
 docs/rust-port.md, "Held for after the port", has serena-rs and what of
 this already exists.
+
+## 2026-11-20T19:33Z — A bug the port finds in the program that ships is fixed now, before the port builds on it
+
+**Decision (the owner's):** "Fix the bug now so we don't build on broken
+code as we go forward." Asked whether Now in Android, read as a plain JVM
+build by the Goose program, should be fixed now or after the port, the
+owner chose now.
+
+**What it means:** the fix goes into the Goose program first (it is what
+ships) with a check seen failing on the Swan before it, and the same change
+is carried into the Rust port, which is then judged against the fixed Goose
+program. A later bug found the same way takes the same path.
+
+**Not decided by this:** merging. The fix is its own commit on the
+session's branch, to go to main as its own pull request when the owner says.
+

@@ -191,7 +191,7 @@ fn main() {
     } else if cmd == b"trust" && n == 3 {
         not_carried(cmd, 4);
     } else if cmd == b"gradle-tasks" && n == 3 {
-        write_stdout(&gradle::gradle_scip_tasks(&abs_path(&a[2])));
+        write_stdout(&gradle::gradle_scip_tasks(&walk::Walk::default(), &abs_path(&a[2])));
     } else if cmd == b"cargo-projects" && n == 3 {
         write_stdout(&rustproj::cargo_projects_report(&abs_path(&a[2])));
     } else if cmd == b"check" && n == 4 {

@@ -310,6 +310,7 @@ folders are.
 | 2026-11-20T16:20Z | Stage 2 begun, one command at a time. `cargo-projects` carried: `rust/src/rustproj.rs` (src/rustproj.goose, with the five toolchain helpers it uses from src/seal.goose), and in `sys.rs` `env`, `write_stderr`, `realpath` and `run_capture` (only `rustup show home`; the full `swan_run` is stage 4). The Goose program judged is `bin/swan` built from main `8d3417a` in a cloud container (no trial repos there). `scripts/port-plan.sh`: 93 of 93 the same, on the 20 fixtures, four made-up repos, a missing repo, and relate, tokio, ripgrep, cargo (660 manifests, 366 lines out), bevy and cobra, each with RUSTUP_HOME unset, made up and missing. `--wrong-calls` 47 of 47. |
 | 2026-11-20T16:20Z | The judge seen failing: `scripts/port-prove-plan.py`, 11 of 11 breaks caught. The first judge caught 4 of 11; the made-up repos were widened until every break was caught (below). |
 | 2026-11-20T16:41Z | `gradle-tasks` carried: `rust/src/gradle.rs` (src/gradle.goose), sharing `scip::is_ident`. `scripts/port-plan.sh` now judges it on every repo, each case of fixtures/gradle-android and 31 made-up Gradle repos: 181 of 181 the same, with relate, tokio, ripgrep, cargo, bevy, cobra, nowinandroid, architecture-samples, okhttp and RxJava. `scripts/port-prove-plan.py`: 36 of 36 breaks caught (the first run 36 of 37; the one missed cannot change any answer, below). |
+| 2026-11-20T19:40Z | Fix, not the port's: Android through convention plugins (Now in Android). In `src/gradle.goose` first, then `rust/src/gradle.rs`; from here the Goose program judged is the fixed one. `scripts/port-plan.sh` 201 of 201 with 14 more made-up repos; `scripts/port-prove-plan.py` 56 of 56 (two breaks of before re-anchored, their text now in two places). |
 
 ## Found while porting
 
@@ -386,13 +387,15 @@ folders are.
 - Stage 2, not the port's: Now in Android (android/nowinandroid) applies
   Android through convention plugins of its own (`alias(libs.plugins.
   nowinandroid.android.application)`; the Kotlin in its `build-logic`
-  applies `com.android.application`). Swan reads build files only, so both
-  programs call it a plain JVM build and name `scipPrintDependencies`,
+  applies `com.android.application`). Swan read build files only, so both
+  programs called it a plain JVM build and named `scipPrintDependencies`,
   which the comment in `src/gradle.goose` says dies on an Android build.
-  Not run here: a third-party build stays sealed, and there is no Android
-  SDK in the container. A fix (reading which plugin ids a repo's own
-  build-logic applies, without running it) is its own change on main
-  first, then carried.
+  Fixed on the owner's word the same day (DECISIONS.md), in the Goose
+  program first and then carried: the repo's own build logic (buildSrc and
+  each `includeBuild`) is read for precompiled script plugins and
+  registered plugin classes, followed through plugins that apply other
+  such plugins. From that commit on, the Goose program the port is judged
+  against is the fixed one.
 
 ## Next
 

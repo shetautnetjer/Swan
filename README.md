@@ -586,7 +586,7 @@ src/scip.goose       SCIP symbol grammar: name, kind, name path
 src/query.goose      the tool queries, as JSON
 src/serve.goose      MCP JSON-RPC over stdio
 src/pipeline.goose   `swan map`: detects languages, runs the indexers, flattens, indexes
-src/gradle.goose     reads a Gradle build without running it (modules, Android, scip-java tasks)
+src/gradle.goose     reads a Gradle build without running it (modules, Android, the repo's own convention plugins, scip-java tasks)
 src/seal.goose       runs children sealed (eggshell); toolchains a sealed child is told about
 src/pyplan.goose     splits a Python repo into pieces for scip-python
 src/stamp.goose      content stamps, computed one worker per core

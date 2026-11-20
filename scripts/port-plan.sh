@@ -234,6 +234,147 @@ printf 'include(":app")\n' | put "$g/kts-wins/settings.gradle.kts"
 printf 'plugins { id("java") }\n' | put "$g/kts-wins/app/build.gradle.kts"
 printf "apply plugin: 'com.android.library'\n" | put "$g/kts-wins/app/build.gradle"
 
+# Convention plugins: the repo's own plugins, in buildSrc or a build that
+# settings includes with includeBuild, that apply Android for the modules.
+cls_android() { # <file> <applied id>: a Kotlin class that applies it
+    put "$1" <<EOF
+class P : Plugin<Project> {
+    override fun apply(target: Project) {
+        with(target) { apply(plugin = "$2") }
+    }
+}
+EOF
+}
+# A Groovy precompiled script plugin (its id: the file name less .gradle).
+printf "include ':app'\n" | put "$g/conv-groovy-script/settings.gradle"
+printf "plugins { id 'com.android.library' }\n" | put "$g/conv-groovy-script/buildSrc/src/main/groovy/demo.android-lib.gradle"
+printf "plugins { id 'demo.android-lib' }\n" | put "$g/conv-groovy-script/app/build.gradle"
+# A Kotlin one in a package: its id starts with the package.
+printf 'include(":app")\n' | put "$g/conv-kts-package/settings.gradle.kts"
+printf 'package demo.conv\n\nplugins { id("com.android.application") }\n' | put "$g/conv-kts-package/buildSrc/src/main/kotlin/demo/conv/android.gradle.kts"
+printf 'plugins { id("demo.conv.android") }\n' | put "$g/conv-kts-package/app/build.gradle.kts"
+# A script outside src/main is no plugin.
+printf 'include(":app")\n' | put "$g/conv-not-src/settings.gradle.kts"
+printf 'plugins { id("com.android.application") }\n' | put "$g/conv-not-src/buildSrc/scripts/demo.x.gradle.kts"
+printf 'plugins { id("demo.x") }\n' | put "$g/conv-not-src/app/build.gradle.kts"
+# Groovy: includeBuild with a space, a registration written `id '...'`,
+# and the class in a .groovy file.
+put "$g/conv-groovy-register/settings.gradle" <<'EOF'
+includeBuild 'logic'
+include ':app'
+EOF
+put "$g/conv-groovy-register/logic/build.gradle" <<'EOF'
+gradlePlugin {
+    plugins {
+        androidLib {
+            id 'demo.lib'
+            implementationClass = 'demo.AndroidLibPlugin'
+        }
+    }
+}
+EOF
+put "$g/conv-groovy-register/logic/src/main/groovy/demo/AndroidLibPlugin.groovy" <<'EOF'
+class AndroidLibPlugin implements Plugin<Project> {
+    void apply(Project project) { project.pluginManager.apply('com.android.library') }
+}
+EOF
+printf "apply plugin: 'demo.lib'\n" | put "$g/conv-groovy-register/app/build.gradle"
+# The class in a .java file.
+printf 'includeBuild("logic")\ninclude(":app")\n' | put "$g/conv-java-class/settings.gradle.kts"
+put "$g/conv-java-class/logic/build.gradle.kts" <<'EOF'
+gradlePlugin {
+    plugins {
+        register("lib") {
+            id = "demo.java"
+            implementationClass = "demo.JavaLibPlugin"
+        }
+    }
+}
+EOF
+put "$g/conv-java-class/logic/src/main/java/demo/JavaLibPlugin.java" <<'EOF'
+public class JavaLibPlugin implements Plugin<Project> {
+    public void apply(Project project) { project.getPluginManager().apply("com.android.library"); }
+}
+EOF
+printf 'plugins { id("demo.java") }\n' | put "$g/conv-java-class/app/build.gradle.kts"
+# includeBuild in a comment, in a longer word, or leaving the repo: not read.
+for c in conv-comment-include conv-word-include; do
+    put "$g/$c/logic/build.gradle.kts" <<'EOF'
+gradlePlugin { plugins { register("a") { id = "demo.a"; implementationClass = "A" } } }
+EOF
+    cls_android "$g/$c/logic/src/main/kotlin/A.kt" com.android.library
+    printf 'plugins { id("demo.a") }\n' | put "$g/$c/app/build.gradle.kts"
+done
+printf '// includeBuild("logic")\ninclude(":app")\n' | put "$g/conv-comment-include/settings.gradle.kts"
+printf 'myincludeBuild("logic")\ninclude(":app")\n' | put "$g/conv-word-include/settings.gradle.kts"
+printf 'includeBuild("../logic")\ninclude(":app")\n' | put "$g/conv-outside/repo/settings.gradle.kts"
+put "$g/conv-outside/logic/build.gradle.kts" <<'EOF'
+gradlePlugin { plugins { register("a") { id = "demo.a"; implementationClass = "A" } } }
+EOF
+cls_android "$g/conv-outside/logic/src/main/kotlin/A.kt" com.android.library
+printf 'plugins { id("demo.a") }\n' | put "$g/conv-outside/repo/app/build.gradle.kts"
+# The catalog: a plain "id:version" entry, a key that only holds "id",
+# and a key with '_'.
+for c in conv-catalog-plain conv-catalog-word conv-catalog-underscore; do
+    printf 'includeBuild("logic")\ninclude(":app")\n' | put "$g/$c/settings.gradle.kts"
+    put "$g/$c/logic/build.gradle.kts" <<'EOF'
+gradlePlugin { plugins { register("a") { id = "demo.lib"; implementationClass = "A" } } }
+EOF
+    cls_android "$g/$c/logic/src/main/kotlin/A.kt" com.android.library
+    printf 'plugins { alias(libs.plugins.demo.lib) }\n' | put "$g/$c/app/build.gradle.kts"
+done
+printf '[plugins]\ndemo-lib = "demo.lib:1.0"\n' | put "$g/conv-catalog-plain/gradle/libs.versions.toml"
+printf '[plugins]\ndemo-lib = { grid = "x", id = "demo.lib" }\n' | put "$g/conv-catalog-word/gradle/libs.versions.toml"
+printf '[plugins]\ndemo_lib = { id = "demo.lib" }\n' | put "$g/conv-catalog-underscore/gradle/libs.versions.toml"
+# A chain of three, registered from the top down, so one pass finds only
+# the last; and two plugins that apply each other, neither Android.
+printf 'includeBuild("logic")\ninclude(":app")\n' | put "$g/conv-chain3/settings.gradle.kts"
+put "$g/conv-chain3/logic/build.gradle.kts" <<'EOF'
+gradlePlugin {
+    plugins {
+        register("a") { id = "demo.a"; implementationClass = "A" }
+        register("b") { id = "demo.b"; implementationClass = "B" }
+        register("c") { id = "demo.c"; implementationClass = "C" }
+    }
+}
+EOF
+cls_android "$g/conv-chain3/logic/src/main/kotlin/A.kt" demo.b
+cls_android "$g/conv-chain3/logic/src/main/kotlin/B.kt" demo.c
+cls_android "$g/conv-chain3/logic/src/main/kotlin/C.kt" com.android.application
+printf 'plugins { id("demo.a") }\n' | put "$g/conv-chain3/app/build.gradle.kts"
+printf 'includeBuild("logic")\ninclude(":app")\n' | put "$g/conv-cycle/settings.gradle.kts"
+put "$g/conv-cycle/logic/build.gradle.kts" <<'EOF'
+gradlePlugin {
+    plugins {
+        register("a") { id = "demo.a"; implementationClass = "A" }
+        register("b") { id = "demo.b"; implementationClass = "B" }
+    }
+}
+EOF
+cls_android "$g/conv-cycle/logic/src/main/kotlin/A.kt" demo.b
+cls_android "$g/conv-cycle/logic/src/main/kotlin/B.kt" demo.a
+printf 'plugins { id("demo.a") }\n' | put "$g/conv-cycle/app/build.gradle.kts"
+# Two registrations: each id is read from its own block, so the JVM one
+# written first is not given the Android class written after it.
+printf 'includeBuild("logic")\ninclude(":app")\n' | put "$g/conv-two-blocks/settings.gradle.kts"
+put "$g/conv-two-blocks/logic/build.gradle.kts" <<'EOF'
+gradlePlugin {
+    plugins {
+        register("jvm") {
+            id = "demo.jvm"
+            implementationClass = "Jvm"
+        }
+        register("andr") {
+            implementationClass = "Andr"
+            id = "demo.andr"
+        }
+    }
+}
+EOF
+cls_android "$g/conv-two-blocks/logic/src/main/kotlin/Jvm.kt" org.jetbrains.kotlin.jvm
+cls_android "$g/conv-two-blocks/logic/src/main/kotlin/Andr.kt" com.android.library
+printf 'plugins { id("demo.jvm") }\n' | put "$g/conv-two-blocks/app/build.gradle.kts"
+
 # The last: a repo that does not exist, which both refuse.
 repos=(fixtures/* "$cases/many" "$cases/ws" "$cases/side" "$cases/tc" "$cases/does-not-exist" "$@")
 
@@ -265,7 +406,7 @@ judge() {
 }
 
 for repo in "${repos[@]}"; do judge cargo-projects "$repo" unset made-up missing; done
-for repo in "${repos[@]}" fixtures/gradle-android/*/ fixtures/gradle-android/bad-include/repo "$g"/*; do
+for repo in "${repos[@]}" fixtures/gradle-android/*/ fixtures/gradle-android/bad-include/repo "$g"/* "$g/conv-outside/repo"; do
     judge gradle-tasks "$repo"
 done
 

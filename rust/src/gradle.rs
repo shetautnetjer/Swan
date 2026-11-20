@@ -5,7 +5,8 @@
 
 use crate::scip::is_ident;
 use crate::sys;
-use crate::util::{contains_line, ends_with, find, parse_int, push_int, split, starts_with, trim};
+use crate::util::{contains_line, ends_with, find, parse_int, push_int, rfind, split, starts_with, trim};
+use crate::walk::Walk;
 
 // Gradle plugins that make a module an Android one.
 const ANDROID_PLUGINS: [&[u8]; 4] =
@@ -61,6 +62,405 @@ fn android_catalog_aliases(repo: &[u8]) -> Vec<u8> {
         }
     }
     out
+}
+
+// Every plugin in gradle/libs.versions.toml, as build files write its alias
+// ("libs.plugins.demo.android.library"), with its id: "alias\tid" lines. The
+// id is the quoted text after `id =` in a table, or a plain entry's string
+// up to its ':' ("id:version"). Read for the repo's own convention plugins,
+// whose ids name no Android plugin.
+fn catalog_plugin_ids(repo: &[u8]) -> Vec<u8> {
+    let mut out: Vec<u8> = Vec::new();
+    let mut toml: Vec<u8> = Vec::new();
+    if !sys::read_file(&[repo, b"/gradle/libs.versions.toml"].concat(), &mut toml) {
+        return out;
+    }
+    let mut plugins = false;
+    for raw in toml.split(|&c| c == b'\n') {
+        let line = trim(raw);
+        if starts_with(line, b"[") {
+            plugins = starts_with(line, b"[plugins]");
+        } else if plugins && !starts_with(line, b"#") {
+            let eq = find(line, b"=");
+            if eq <= 0 {
+                continue;
+            }
+            let eq = eq as usize;
+            let value = trim(&line[eq + 1..]);
+            let mut id: Vec<u8> = Vec::new();
+            if !value.is_empty() && (value[0] == b'"' || value[0] == b'\'') {
+                let end = gradle_quote_end(value, 0);
+                if end > 0 {
+                    let end = end as usize;
+                    let colon = find(&value[1..end], b":");
+                    id.extend_from_slice(if colon >= 0 { &value[1..1 + colon as usize] } else { &value[1..end] });
+                }
+            } else {
+                let mut p = 0;
+                while id.is_empty() && p < value.len() {
+                    let a = find(&value[p..], b"id");
+                    if a < 0 {
+                        break;
+                    }
+                    let mut i = p + a as usize + 2;
+                    p = i;
+                    if !(p - 2 == 0 || !is_ident(value[p - 3])) {
+                        continue;
+                    }
+                    while i < value.len() && value[i] == b' ' {
+                        i += 1;
+                    }
+                    if !(i < value.len() && value[i] == b'=') {
+                        continue;
+                    }
+                    i += 1;
+                    while i < value.len() && value[i] == b' ' {
+                        i += 1;
+                    }
+                    if !(i < value.len() && (value[i] == b'"' || value[i] == b'\'')) {
+                        continue;
+                    }
+                    let end = gradle_quote_end(value, i);
+                    if end > i as i64 {
+                        id.extend_from_slice(&value[i + 1..end as usize]);
+                    }
+                }
+            }
+            if !id.is_empty() {
+                let mut name: Vec<u8> = [&b"libs.plugins."[..], trim(&line[..eq])].concat();
+                for c in name.iter_mut() {
+                    if *c == b'-' || *c == b'_' {
+                        *c = b'.';
+                    }
+                }
+                out.extend_from_slice(&name);
+                out.push(b'\t');
+                out.extend_from_slice(&id);
+                out.push(b'\n');
+            }
+        }
+    }
+    out
+}
+
+// The end of the quoted string that starts at s[i] (a " or '), on the same
+// line, or -1.
+fn gradle_quote_end(s: &[u8], i: usize) -> i64 {
+    let mut j = i + 1;
+    while j < s.len() && s[j] != s[i] && s[j] != b'\n' {
+        j += 1;
+    }
+    if j < s.len() && s[j] == s[i] {
+        j as i64
+    } else {
+        -1
+    }
+}
+
+// The second field of the "key\tvalue" line whose key is `key`, else "".
+fn gradle_field(lines: &[u8], key: &[u8]) -> Vec<u8> {
+    for l in lines.split(|&c| c == b'\n') {
+        let tab = find(l, b"\t");
+        if tab > 0 && &l[..tab as usize] == key {
+            return l[tab as usize + 1..].to_vec();
+        }
+    }
+    Vec::new()
+}
+
+// The folders of the repo's own build logic, as paths from the repo, one
+// per line: buildSrc, and each build settings.gradle(.kts) includes with
+// includeBuild("..."), in pluginManagement or not. A path with ".." or a
+// leading "/" is skipped, as include names are.
+fn gradle_logic_dirs(repo: &[u8]) -> Vec<u8> {
+    let mut out: Vec<u8> = Vec::new();
+    if sys::is_dir(&[repo, b"/buildSrc"].concat()) {
+        out.extend_from_slice(b"buildSrc\n");
+    }
+    let mut s: Vec<u8> = Vec::new();
+    let kotlin = sys::read_file(&[repo, b"/settings.gradle.kts"].concat(), &mut s);
+    if !(kotlin || sys::read_file(&[repo, b"/settings.gradle"].concat(), &mut s)) {
+        return out;
+    }
+    let text = strip_gradle_comments(&s, kotlin);
+    let mut p = 0;
+    while p < text.len() {
+        let a = find(&text[p..], b"includeBuild");
+        if a < 0 {
+            break;
+        }
+        let a = a as usize;
+        let mut i = p + a + 12;
+        let word = p + a == 0 || !is_ident(text[p + a - 1]);
+        p = i;
+        while i < text.len() && (text[i] == b' ' || text[i] == b'\t' || text[i] == b'(') {
+            i += 1;
+        }
+        if !(word && i < text.len() && (text[i] == b'"' || text[i] == b'\'')) {
+            continue;
+        }
+        let end = gradle_quote_end(&text, i);
+        if end <= i as i64 {
+            continue;
+        }
+        let end = end as usize;
+        let mut name = &text[i + 1..end];
+        if starts_with(name, b"./") {
+            name = &name[2..];
+        }
+        while !name.is_empty() && name[name.len() - 1] == b'/' {
+            name = &name[..name.len() - 1];
+        }
+        let bad = name.is_empty() || name == b"." || find(name, b"..") >= 0 || name[0] == b'/';
+        if !bad && !contains_line(&out, name) {
+            out.extend_from_slice(name);
+            out.push(b'\n');
+        }
+        p = end + 1;
+    }
+    out
+}
+
+fn push_pair(out: &mut Vec<u8>, a: &[u8], b: &[u8]) {
+    out.extend_from_slice(a);
+    out.push(b'\t');
+    out.extend_from_slice(b);
+    out.push(b'\n');
+}
+
+// The convention plugins one folder of build logic defines: "id\tfile"
+// lines, the file being the source that says what the plugin does.
+//   - A precompiled script plugin, a .gradle.kts or .gradle file under
+//     src/main/kotlin or src/main/groovy: its id is its file name without
+//     the extension, after the package a Kotlin one declares.
+//   - A plugin a build file registers in its gradlePlugin block
+//     (`register("x") { id = ...; implementationClass = "..." }`): its id
+//     written out, or taken from the catalog (`id = libs.plugins.x.get()
+//     .pluginId`); its file the .kt, .groovy or .java one named for the
+//     class.
+fn gradle_logic_plugins(walk: &Walk, dir: &[u8], catalog: &[u8]) -> Vec<u8> {
+    let mut out: Vec<u8> = Vec::new();
+    let mut sources: Vec<u8> = Vec::new(); // "file name\tpath" of each .kt, .groovy and .java
+    let mut builds: Vec<u8> = Vec::new(); // build files, one path per line
+    walk.each_file(dir, |full, name| {
+        let script = ends_with(name, b".gradle.kts") || ends_with(name, b".gradle");
+        if name == b"build.gradle.kts" || name == b"build.gradle" {
+            builds.extend_from_slice(full);
+            builds.push(b'\n');
+        } else if script
+            && name != b"settings.gradle.kts"
+            && name != b"settings.gradle"
+            && (find(full, b"/src/main/kotlin/") >= 0 || find(full, b"/src/main/groovy/") >= 0)
+        {
+            let mut id: Vec<u8> = Vec::new();
+            if ends_with(name, b".gradle.kts") {
+                let mut text: Vec<u8> = Vec::new();
+                sys::read_file(full, &mut text);
+                for l in strip_gradle_comments(&text, true).split(|&c| c == b'\n') {
+                    let t = trim(l);
+                    if id.is_empty() && starts_with(t, b"package ") {
+                        id.extend_from_slice(trim(&t[8..]));
+                        id.push(b'.');
+                    }
+                }
+                id.extend_from_slice(&name[..name.len() - 11]);
+            } else {
+                id.extend_from_slice(&name[..name.len() - 7]);
+            }
+            push_pair(&mut out, &id, full);
+        } else if ends_with(name, b".kt") || ends_with(name, b".groovy") || ends_with(name, b".java") {
+            push_pair(&mut sources, name, full);
+        }
+    });
+    for b in builds.split(|&c| c == b'\n') {
+        if b.is_empty() {
+            continue;
+        }
+        let mut raw: Vec<u8> = Vec::new();
+        if !sys::read_file(b, &mut raw) {
+            continue;
+        }
+        let text = strip_gradle_comments(&raw, ends_with(b, b".kts"));
+        let mut p = 0;
+        while p < text.len() {
+            let a = find(&text[p..], b"implementationClass");
+            if a < 0 {
+                break;
+            }
+            let at = p + a as usize;
+            p = at + 19;
+            // The class: the quoted text after it, without its package.
+            let mut i = p;
+            while i < text.len() && (text[i] == b' ' || text[i] == b'\t' || text[i] == b'=') {
+                i += 1;
+            }
+            if !(i < text.len() && (text[i] == b'"' || text[i] == b'\'')) {
+                continue;
+            }
+            let end = gradle_quote_end(&text, i);
+            if end <= i as i64 {
+                continue;
+            }
+            let qualified = &text[i + 1..end as usize];
+            let dot = rfind(qualified, b".");
+            let cls = if dot >= 0 { &qualified[dot as usize + 1..] } else { qualified };
+            // The block it is in: from the unmatched { before it to the
+            // unmatched } after it.
+            let mut from = at;
+            let mut depth = 0;
+            while from > 0 {
+                from -= 1;
+                if text[from] == b'}' {
+                    depth += 1;
+                } else if text[from] == b'{' {
+                    if depth == 0 {
+                        break;
+                    }
+                    depth -= 1;
+                }
+            }
+            let mut to = at;
+            depth = 0;
+            while to < text.len() {
+                if text[to] == b'{' {
+                    depth += 1;
+                } else if text[to] == b'}' {
+                    if depth == 0 {
+                        break;
+                    }
+                    depth -= 1;
+                }
+                to += 1;
+            }
+            // Its id: `id = "..."`, `id '...'`, or `id = libs.plugins....`.
+            let mut id: Vec<u8> = Vec::new();
+            let mut j = from;
+            while id.is_empty() && j < to {
+                let c = find(&text[j..to], b"id");
+                if c < 0 {
+                    break;
+                }
+                let c = c as usize;
+                let mut k = j + c + 2;
+                let word = (j + c == 0 || !(is_ident(text[j + c - 1]) || text[j + c - 1] == b'.'))
+                    && (k >= text.len() || !is_ident(text[k]));
+                j = k;
+                if !word {
+                    continue;
+                }
+                while k < to && (text[k] == b' ' || text[k] == b'\t') {
+                    k += 1;
+                }
+                if k < to && text[k] == b'=' {
+                    k += 1;
+                }
+                while k < to && (text[k] == b' ' || text[k] == b'\t') {
+                    k += 1;
+                }
+                if k < to && (text[k] == b'"' || text[k] == b'\'') {
+                    let e = gradle_quote_end(&text, k);
+                    if e > k as i64 {
+                        id.extend_from_slice(&text[k + 1..e as usize]);
+                    }
+                } else if starts_with(&text[k..to], b"libs.plugins.") {
+                    let mut e = k;
+                    while e < to && (is_ident(text[e]) || text[e] == b'.') {
+                        e += 1;
+                    }
+                    let mut alias = &text[k..e];
+                    // libs.plugins.x.get().pluginId, or .asProvider().get() when
+                    // x is also the start of a longer alias.
+                    let mut cut = true;
+                    while cut {
+                        cut = false;
+                        for tail in [&b".get"[..], b".asProvider"] {
+                            if ends_with(alias, tail) {
+                                alias = &alias[..alias.len() - tail.len()];
+                                cut = true;
+                            }
+                        }
+                    }
+                    id.extend_from_slice(&gradle_field(catalog, alias));
+                }
+            }
+            if id.is_empty() {
+                continue;
+            }
+            let mut file: Vec<u8> = Vec::new();
+            for ext in [&b".kt"[..], b".groovy", b".java"] {
+                if file.is_empty() {
+                    file.extend_from_slice(&gradle_field(&sources, &[cls, ext].concat()));
+                }
+            }
+            if !file.is_empty() {
+                push_pair(&mut out, &id, &file);
+            }
+        }
+    }
+    out
+}
+
+// The repo's own plugins that apply an Android plugin, each with that
+// plugin's ANDROID_PLUGINS index: "id\tindex" lines. Convention plugins
+// hide Android from the build files that use them: Now in Android's
+// modules apply `alias(libs.plugins.nowinandroid.android.application)`,
+// and only the Kotlin of its build-logic applies com.android.application;
+// read without them it was taken for a JVM build (found 2026-11-20). A
+// plugin counts when its file applies an Android plugin, or one of the
+// repo's own plugins that does, read as a build file is (android_plugin_of:
+// a comment or a reaction such as hasPlugin does not count). Nothing runs.
+fn android_conventions(walk: &Walk, repo: &[u8], catalog: &[u8], aliases: &[u8]) -> Vec<u8> {
+    let mut plugins: Vec<u8> = Vec::new();
+    for d in gradle_logic_dirs(repo).split(|&c| c == b'\n') {
+        if !d.is_empty() {
+            plugins.extend_from_slice(&gradle_logic_plugins(walk, &[repo, b"/", d].concat(), catalog));
+        }
+    }
+    let mut known: Vec<u8> = Vec::new();
+    // Each pass adds the plugins that apply one found before: a chain of n
+    // takes n passes.
+    let mut more = !plugins.is_empty();
+    while more {
+        more = false;
+        for entry in plugins.split(|&c| c == b'\n') {
+            let tab = find(entry, b"\t");
+            if !(tab > 0 && gradle_field(&known, &entry[..tab as usize]).is_empty()) {
+                continue;
+            }
+            let tab = tab as usize;
+            let mut text: Vec<u8> = Vec::new();
+            if !sys::read_file(&entry[tab + 1..], &mut text) {
+                continue;
+            }
+            let k = android_plugin_of(&text, aliases, &known, ends_with(entry, b".kt") || ends_with(entry, b".kts"));
+            if k >= 0 {
+                known.extend_from_slice(&entry[..tab]);
+                known.push(b'\t');
+                push_int(&mut known, k);
+                known.push(b'\n');
+                more = true;
+            }
+        }
+    }
+    known
+}
+
+// Which of the repo's own Android plugins (android_conventions) s names in
+// quotes: its ANDROID_PLUGINS index, or -1.
+fn convention_plugin_in(s: &[u8], conventions: &[u8]) -> i64 {
+    let mut k = -1;
+    for c in conventions.split(|&c| c == b'\n') {
+        let tab = find(c, b"\t");
+        if k < 0 && tab > 0 {
+            let id = &c[..tab as usize];
+            if find(s, &[&b"\""[..], id, b"\""].concat()) >= 0 || find(s, &[&b"'"[..], id, b"'"].concat()) >= 0 {
+                if let Some(n) = parse_int(&c[tab as usize + 1..]) {
+                    k = n;
+                }
+            }
+        }
+    }
+    k
 }
 
 // Slashy strings occur where an expression may start; a slash after a value
@@ -283,12 +683,14 @@ fn gradle_apply_false(lines: &[&[u8]], at: usize) -> bool {
 
 // The Android plugin a build file applies (its ANDROID_PLUGINS index), or
 // -1: by id in a plugins {} block, `id("...")`, `id '...'` or `apply
-// plugin:`, or by `alias(libs.plugins....)` from the version catalog.
+// plugin:`, by one of the repo's own plugins that applies one
+// (`conventions`, from android_conventions), or by `alias(libs.plugins....)`
+// from the version catalog.
 // Comments are skipped. An entry with `apply false`, on its line or the
 // chained lines after it, only declares the plugin (a root build file does
 // that for its modules), and `plugins.withId(...)`, `hasPlugin(...)` and
 // `withPlugin(...)` only react to it.
-fn android_plugin_of(build: &[u8], aliases: &[u8], kotlin: bool) -> i64 {
+fn android_plugin_of(build: &[u8], aliases: &[u8], conventions: &[u8], kotlin: bool) -> i64 {
     let mut k = -1;
     let text = strip_gradle_reactions(&strip_gradle_comments(build, kotlin), kotlin);
     let lines = split(&text, b'\n');
@@ -301,6 +703,9 @@ fn android_plugin_of(build: &[u8], aliases: &[u8], kotlin: bool) -> i64 {
             continue;
         }
         k = android_plugin_in(line);
+        if k < 0 {
+            k = convention_plugin_in(line, conventions);
+        }
         let al = find(line, b"alias");
         if k < 0 && al >= 0 {
             let mut i = al as usize + 5;
@@ -464,8 +869,21 @@ fn gradle_includes(repo: &[u8]) -> Vec<u8> {
 // Gradle says which variants a module has, and a repo where no module has
 // compileDebugKotlin (only flavored variants) fails the run.
 // `clean` first: the compiles must run for scip-java to see them.
-pub fn gradle_scip_tasks(repo: &[u8]) -> Vec<u8> {
-    let aliases = android_catalog_aliases(repo);
+pub fn gradle_scip_tasks(walk: &Walk, repo: &[u8]) -> Vec<u8> {
+    let mut aliases = android_catalog_aliases(repo);
+    let catalog = catalog_plugin_ids(repo);
+    let conventions = android_conventions(walk, repo, &catalog, &aliases);
+    // The catalog's aliases for them, beside the Android plugins' own.
+    for e in catalog.split(|&c| c == b'\n') {
+        let tab = find(e, b"\t");
+        if tab <= 0 {
+            continue;
+        }
+        let k = gradle_field(&conventions, &e[tab as usize + 1..]);
+        if !k.is_empty() {
+            push_pair(&mut aliases, &e[..tab as usize], &k);
+        }
+    }
     let mut android = false;
     let mut unit = false;
     let mut module = |dir: &[u8]| {
@@ -474,7 +892,7 @@ pub fn gradle_scip_tasks(repo: &[u8]) -> Vec<u8> {
         if !(kotlin || sys::read_file(&[dir, b"/build.gradle"].concat(), &mut b)) {
             return;
         }
-        let k = android_plugin_of(&b, &aliases, kotlin);
+        let k = android_plugin_of(&b, &aliases, &conventions, kotlin);
         if k < 0 {
             return;
         }

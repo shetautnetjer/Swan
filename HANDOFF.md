@@ -59,10 +59,10 @@ the four trial repos and cobra. The trial repos are on the owner's machine:
 the last run is there.
 
 ## Decisions waiting on the owner
-- Now in Android is read as a plain JVM build by the program that ships
-  (convention plugins hide `com.android.application`; docs/rust-port.md,
-  "Found while porting"). Fix it on main now, as its own change, or after
-  the port?
+- The Now in Android fix (convention plugins) is its own commit on the
+  session's branch, in the Goose program and carried into Rust. It waits
+  for the owner's word to go to main as its own pull request, as do the
+  port's stage 2 commits.
 - "Ask drex max when unsure" (the owner, 2026-11-20): no drex model or
   service token reached the cloud session, so nothing was asked. Questions
   for it: none came up for `cargo-projects`; the port is line by line.
