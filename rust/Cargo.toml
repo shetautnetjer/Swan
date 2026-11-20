@@ -1,0 +1,19 @@
+[package]
+name = "swan"
+version = "0.1.0"
+edition = "2021"
+description = "A code map for agents. SCIP data in, SQLite map, MCP tools out."
+license = "MIT"
+
+[[bin]]
+name = "swan"
+path = "src/main.rs"
+
+[dependencies]
+libc = "0.2.191"
+memchr = "2.8"
+# Bundles SQLite 3.54.1, the release goose-sqlite builds (commit c759de7).
+libsqlite3-sys = { version = "=0.40.0", features = ["bundled"] }
+
+[profile.release]
+opt-level = 3

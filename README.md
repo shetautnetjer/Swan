@@ -591,6 +591,11 @@ tools/              modules.json, external npm tool manifest (the Node indexers 
 tests/               MCP smoke test, refresh-vs-fresh check, latency bench
 fixtures/tiny-ts/    a small repo with the tricky cases (re-export, rename, same-name method and function)
 skills/swan-code-check/  the agent skill for using Swan (single source; copies follow it, see its PROVENANCE.md)
+rust/                the port to Rust in progress (docs/rust-port.md); the Goose program above is what ships. So far the store: main.rs (commands), index.rs, scip.rs, fresh.rs, walk.rs, query.rs, graph.rs, diag.rs, db.rs, sys.rs and util.rs, each carried from the Goose file of its name
+scripts/port-compare.sh  one swan command run by the Goose program and by the Rust port: output, error text and exit code compared
+scripts/port-store.sh    the store's comparison: the same map (table hashes), the same refusals, the same staleness, the same answers
+scripts/port-tables.sh   a map's schema and tables as row counts and hashes
+scripts/port-prove.py    the store's comparison seen failing: nine copies of the Rust program, each broken in one place on purpose, each to be caught
 ```
 
 ## License

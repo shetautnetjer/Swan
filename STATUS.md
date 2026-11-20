@@ -1355,3 +1355,126 @@ Limits:
 - Not looked into: the repo's own modules that a map holds as outside
   symbols (graphify: 171, `tools.skillgen.gen` among them). They were
   there before and are named rightly, as the repo's.
+
+## 2026-11-19: a port to Rust is started, on a branch
+
+The owner asked for Swan to be carried over to Rust as a complete overhaul
+(Spread-Wings went the same way on 2026-11-18). Branch `rust`, from main
+`fb8df2a`. The Goose program is unchanged and is what ships.
+
+- The bar was written before any Rust: [docs/rust-port.md](docs/rust-port.md).
+  The same map by table hash, the same answers by bytes, the same suite
+  counts in the microVM, the same or better cost, and either program reading
+  the other's map. About 13,200 lines to carry, in nine stages.
+- Stage 0 is done: `rust/` builds with cargo 1.100.0, and
+  `scripts/port-compare.sh --wrong-calls` finds 47 of 47 wrong calls answered
+  as the installed Goose build `fb8df2a4c199` answers them. Every real
+  command exits 70 and names the stage it waits for.
+- The repository has a home now: `PROJECT.md`, `AGENTS.md`, `CLAUDE.md`, and
+  `HANDOFF.md` for the work in progress.
+
+Not done:
+
+- Stages 1 to 8. No map, query or server answer comes from Rust yet.
+- No suite was run; nothing the suites cover changed.
+- Nothing is committed or pushed.
+- `wings/` is still pinned to Spread-Wings from before its Rust port.
+
+## 2026-11-19: the store is carried to Rust (stage 1 of the port)
+
+The owner said to start turning Swan into Rust. Stage 1 of
+[docs/rust-port.md](docs/rust-port.md) is done on branch `rust`: the Rust
+program builds a map from flattened SCIP rows (`index`), updates one
+(`refresh`) and answers 13 of the 14 kinds of `swan query`, each as the
+installed Goose build `fb8df2a4c199` does. The Goose program is unchanged
+and is what ships.
+
+Carried: `native/swan_sys.c` (the stat call and the writer's lock), `db`,
+`writer`, `scip`, `index`, `fresh`, `query`, `graph`, the walk of a repo
+from the head of `pipeline` (`fresh` needs it) and the question half of
+`diag`. About 3,500 lines in `rust/src/`, with 5 unit tests.
+
+Both programs were given the same rows (`scripts/port-store.sh`):
+
+| Rows from | Tables the same | Refusals the same | Questions answered the same |
+|---|---|---|---|
+| Agent-Reach (Python) | 6 of 6 | 14 of 14 | 3,681 of 3,681 |
+| Understand-Anything (TypeScript, Python) | 6 of 6 | 14 of 14 | 4,216 of 4,216 |
+| relate (Rust, Python, TypeScript, Go, Java, C++) | 6 of 6 | 14 of 14 | 4,508 of 4,508 |
+| rea (TypeScript, Python, C++, Java) | 6 of 6 | 14 of 14 | 4,520 of 4,520 |
+| the 20 fixtures and cobra | 126 of 126 | 294 of 294 | 5,330 of 5,330 |
+
+- **Tables**, at six points for each: a new map; after a refresh with every
+  7th file gone and every 5th of the rest edited; after that refresh again;
+  after a refresh back to the first rows; a map from rows with no
+  `relationships.tsv`; and a map of a copy of the repo (below). A point is
+  the schema and all five tables, hashed in rowid order with the rowid
+  (`scripts/port-tables.sh`).
+- **Refusals**: no map, no rows, no folder, a file that is not a map, a map
+  of another schema, a linked map, a second writer, an unknown kind, rows
+  that are not rows. Output, exit code and the words of the error (12 of
+  the 14; the two rows with too few fields by exit code, see Limits).
+- **Questions**, every kind but `pattern`, on names, files and positions
+  taken from each map, compared by bytes. Part of them are asked of a copy
+  of about sixty of the repo's files, with a third edited since the SCIP
+  run, the rest of the repo gone, files added (four a walk must list and
+  eight it must not), four files marked as Swan's own edits, and
+  diagnostics dated before the edits. On relate that copy has 2,211 stale
+  files and 4 new ones, and both programs say so.
+
+Cost, medians (7 runs on relate, 5 on rea, 15 for a question), the two
+programs turn about on one machine:
+
+| | Goose | Rust |
+|---|---|---|
+| `index`, relate (742 thousand occurrences) | 1,054 ms, 346 MB | 947 ms, 338 MB |
+| `index`, rea (1.5 million) | 3,830 ms, 832 MB | 3,264 ms, 794 MB |
+| `refresh`, relate, nothing changed | 240 ms, 151 MB | 156 ms, 146 MB |
+| `query symbol`, `refs`, `callers`, `callees`, relate | 1 to 2 ms, 9 MB | 1 to 2 ms, 9 MB |
+| `query uses`, relate | 1,355 ms, 9 MB | 1,349 ms, 9 MB |
+| `query info`, relate | 6 ms, 9 MB | 6 ms, 9 MB |
+
+Checked:
+- The same counts on the final tree for all of the above, and
+  `scripts/port-compare.sh --wrong-calls`: 47 of 47.
+- Seen failing (`scripts/port-prove.py`, 9 of 9): nine copies of the Rust
+  program, each broken in one place on purpose, each caught by the step
+  meant to catch it. The smallest-body
+  rule and the hash constant by the tables; a column off by one by 1,551
+  of 1,806 questions; an edited file called fresh, hidden folders walked,
+  and stale diagnostics called fresh by the copy of the repo only; a
+  missing `relationships.tsv` made an error by its own map; two reworded
+  messages by their refusals. The first judge written passed two of these
+  (it had no stale file to ask about and did not compare the words of an
+  error); it was rewritten before the counts above were taken.
+- RustRover on a copy of `rust/` opened as its own project: no errors, no
+  warnings, three style notes left on purpose.
+
+Found on the way (docs/rust-port.md has each):
+- `swan index` is 70% SQLite's own work; 40% is the nine indexes at the
+  end. `memchr` is in (9% off relate). Threads were tried in scratch copies
+  and are held for the owner: `rayon` 14% more off relate, SQLite's own
+  sort threads 6% more (DECISIONS.md, 2026-11-20).
+- Not the port's: `query uses` is slow in the Goose program that ships,
+  1.4 s for one function on relate and 79 s for a shared name on rea;
+  `query diag` 4 s on rea. The SQL reads every symbol several times.
+
+Limits:
+- No map, check, edit or server answer comes from Rust yet: stages 2 to 8.
+  `swan query <db> pattern` exits 70 until stage 3.
+- The suite judges the Goose program, which this change does not touch;
+  the Rust program cannot run it before stage 8. It was run in full in the
+  microVM on the commit that went into main, and its counts are in that
+  pull request.
+- A row with too few fields is refused by both with exit 1, in different
+  words (Goose's is its own bounds check).
+- Not compared: a file Swan edited whose mark still matches its text (only
+  an edit makes that mark: stage 6); loading diagnostics (stage 6; the
+  Goose program loaded made-up ones for the questions); errors inside
+  SQLite for statements that never fail here.
+- The fixtures' maps are small (0 to 156 occurrences; five hold none, made
+  without trust), and cobra's holds 812.
+- Cost is from one machine with 32 processors.
+- Merged into main with stage 0, on the owner's word, as files beside the
+  Goose program. `scripts/build.sh` does not build the Rust program and
+  nothing installs or ships it.
