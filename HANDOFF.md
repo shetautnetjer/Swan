@@ -45,7 +45,7 @@ The trees are done: `rust/build.rs` builds goose-treesitter's own C, and
 breaks, like `scripts/port-plan.sh` and `scripts/port-prove-plan.py`.
 Rebuild the Goose program first (`scripts/build.sh`): it also fetches the
 goose-treesitter copy the Rust build compiles. Its own pull request when
-done, stacked on #75.
+done, stacked on #76 (stage 2 into main).
 
 ## Decisions waiting on the owner
 - Merging #76: stage 2 into main. #74 (the Now in Android fix) is in main;
