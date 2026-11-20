@@ -15,7 +15,7 @@ purpose are in [docs/rust-port.md](docs/rust-port.md). Read it first.
 | What ships | The Goose program, unchanged. `rust/` is the port |
 | Stage 0 | Done: 47 of 47 wrong calls answered as the Goose build answers them |
 | Stage 1, the store | Done: `index`, `refresh` and 13 of the 14 `query` kinds. The same tables, refusals, staleness and answers as the Goose build `fb8df2a4c199` on four trial repos (STATUS.md has the counts) |
-| Stage 2, planning | Begun 2026-11-20 on branch `ccr-6c949a09-uhlhfn` (a cloud session). `cargo-projects` carried and judged: `scripts/port-plan.sh` 93 of 93, `scripts/port-prove-plan.py` 11 of 11 breaks caught. Left: `gradle-tasks`, `plan-python`, `stamp-bench`, `stamp-worker`; `modules`, `survey`, `tsproj` |
+| Stage 2, planning | Begun 2026-11-20 on branch `ccr-6c949a09-uhlhfn` (a cloud session). `cargo-projects` and `gradle-tasks` carried and judged by `scripts/port-plan.sh` and `scripts/port-prove-plan.py` (STATUS.md has the counts). Left: `plan-python`, `stamp-bench`, `stamp-worker`; `modules`, `survey`, `tsproj` |
 | Stages 3 to 8 | Not started. Every command of theirs exits 70 and names its stage; `query pattern` waits for stage 3 |
 
 ## What passed, and how to see it again
@@ -36,12 +36,19 @@ cannot run it before stage 8.
 
 ## Next action: the rest of stage 2
 Done: `cargo-projects` (`rust/src/rustproj.rs`; `abs_path` and `realpath`
-are back). The judge is `scripts/port-plan.sh [repo...]` and its prover
+are back) and `gradle-tasks` (`rust/src/gradle.rs`). The judge is
+`scripts/port-plan.sh [repo...]` and its prover
 `scripts/port-prove-plan.py`. For each command left, in this order:
-1. `gradle-tasks` (src/gradle.goose), then `plan-python` (src/pyplan.goose),
-   then `stamp-bench` and `stamp-worker` (src/stamp.goose; workers as
-   processes, threads wait on the owner). `modules`, `survey` and `tsproj`
-   come with the command that first needs them.
+1. `plan-python` (src/pyplan.goose), then `stamp-bench` and
+   `stamp-worker` (src/stamp.goose; workers as processes, threads wait on
+   the owner). Read before `plan-python`: its two dictionaries are keyed
+   by Goose's `hash` of a name, so the Rust side keys by `util::hash` (a
+   collision merges two names in both); `PY_PIECE_FILES` 64 and
+   `PY_PIECE_GROUPS` 40 are in src/pipeline.goose; a file's size is
+   `stat`'s, at least 1; Goose's `sort` is not stable, but the prefix
+   groups it orders always differ, so any correct sort gives one order.
+   `modules`, `survey` and `tsproj` come with the command that first
+   needs them.
 2. Add the command to `port-plan.sh` with made-up repos for its cases, and
    breaks for it to `port-prove-plan.py`. Widen the repos until every break
    is caught.
@@ -52,6 +59,10 @@ the four trial repos and cobra. The trial repos are on the owner's machine:
 the last run is there.
 
 ## Decisions waiting on the owner
+- Now in Android is read as a plain JVM build by the program that ships
+  (convention plugins hide `com.android.application`; docs/rust-port.md,
+  "Found while porting"). Fix it on main now, as its own change, or after
+  the port?
 - "Ask drex max when unsure" (the owner, 2026-11-20): no drex model or
   service token reached the cloud session, so nothing was asked. Questions
   for it: none came up for `cargo-projects`; the port is line by line.
@@ -75,6 +86,12 @@ the last run is there.
   have the IDE judge the Rust in that window, attach `rust/Cargo.toml`
   there (the Cargo tool window). Until then a copy of `rust/` is opened as
   its own project, beside the trial repos.
+
+## Held for after the port
+The owner's direction of 2026-11-20 (DECISIONS.md): Spread-Wings in Swan,
+a file watcher such as `notify`, hidden files and git-ignored folders left
+out for privacy, and one report of every area left out and why; serena-rs
+as a reference at stage 5. docs/rust-port.md, "Held for after the port".
 
 ## Do not
 - Change `src/*.goose` on this branch except to fix a bug found by the port

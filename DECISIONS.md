@@ -699,3 +699,18 @@ with this merge.
 threads in the store; whether the slow questions are fixed in the Goose
 program now or carried into Rust later; and whether a folder is matched
 loosely, as now, or exactly.
+
+## 2026-11-20T16:33Z — After the port: Spread-Wings in Swan, a watcher, privacy by default, and what was left out said plainly
+
+**Direction (the owner's):** once the port is done, adopt serena-rs's
+methods where they make Swan behave better; incorporate Spread-Wings into
+Swan; use a file watcher (such as the `notify` crate) so the map keeps up
+the way Graphify does; index everything except hidden files and what git
+ignores, to keep people's information private; and spell out the areas
+left untouched because of Swan's own rules, unless the owner trusts the
+repo to run.
+
+**What it means now:** nothing changes during the port, which carries Swan
+over as it is (its rule: a better design is its own change afterwards).
+docs/rust-port.md, "Held for after the port", has serena-rs and what of
+this already exists.

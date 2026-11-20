@@ -18,8 +18,9 @@ carried over to Rust, a complete overhaul done one stage at a time, in
 codes) and stage 1 (the store: `index`, `refresh` and 13 of the 14 `query`
 kinds), checked against the Goose program on the fixtures and four trial
 repos. Under way: stage 2 (planning that runs nothing), `cargo-projects`
-carried so far. Not done: the rest of stage 2, and stages 3 to 8 (planning, pattern search, the map, checking,
-editing, the server, the switch). Nothing of the Rust program is built by
+and `gradle-tasks` carried so far. Not done: the rest of stage 2, and
+stages 3 to 8 (pattern search, the map, checking, editing, the server, the
+switch). Nothing of the Rust program is built by
 `scripts/build.sh`, installed or shipped yet, and the rest of this page
 describes the Goose program. The bar, the stages and the log are in
 [docs/rust-port.md](docs/rust-port.md); the work in progress is in
@@ -608,12 +609,12 @@ tools/              modules.json, external npm tool manifest (the Node indexers 
 tests/               MCP smoke test, refresh-vs-fresh check, latency bench
 fixtures/tiny-ts/    a small repo with the tricky cases (re-export, rename, same-name method and function)
 skills/swan-code-check/  the agent skill for using Swan (single source; copies follow it, see its PROVENANCE.md)
-rust/                the port to Rust in progress (docs/rust-port.md); the Goose program above is what ships. So far the store: main.rs (commands), index.rs, scip.rs, fresh.rs, walk.rs, query.rs, graph.rs, diag.rs, db.rs, sys.rs and util.rs, each carried from the Goose file of its name; and from stage 2, rustproj.rs (`cargo-projects`)
+rust/                the port to Rust in progress (docs/rust-port.md); the Goose program above is what ships. So far the store: main.rs (commands), index.rs, scip.rs, fresh.rs, walk.rs, query.rs, graph.rs, diag.rs, db.rs, sys.rs and util.rs, each carried from the Goose file of its name; and from stage 2, rustproj.rs (`cargo-projects`) and gradle.rs (`gradle-tasks`)
 scripts/port-compare.sh  one swan command run by the Goose program and by the Rust port: output, error text and exit code compared
 scripts/port-store.sh    the store's comparison: the same map (table hashes), the same refusals, the same staleness, the same answers
 scripts/port-tables.sh   a map's schema and tables as row counts and hashes
 scripts/port-prove.py    the store's comparison seen failing: nine copies of the Rust program, each broken in one place on purpose, each to be caught
-scripts/port-plan.sh     stage 2's comparison: the planning commands on the fixtures, made-up repos and any repos given, under three rustup homes
+scripts/port-plan.sh     stage 2's comparison: the planning commands on the fixtures, made-up repos and any repos given (cargo-projects under three rustup homes)
 scripts/port-prove-plan.py  stage 2's comparison seen failing: copies of the Rust program broken on purpose, each to be caught
 ```
 

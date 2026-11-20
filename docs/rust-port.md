@@ -240,6 +240,62 @@ indexes; rename's list of the family in name order has the `callers` shape
 Not looked at: the statements behind checking and the server's own tools
 (stages 6 and 7), and the rest of editing.
 
+## Held for after the port
+
+The port carries Swan over as it is; a better design is its own change once
+the port passes, with its own measurement (rules above). These are written
+down so they are not lost.
+
+### serena-rs, a Rust rewrite of Serena (noted 2026-11-20T16:33Z)
+
+[flobsx/serena-rs](https://github.com/flobsx/serena-rs), published as the
+crate `serena-rs` (0.1.7, 2026-10; young: no stars, 32 downloads when
+noted). Serena's tools in one Rust binary, answered by asking a live
+language server each time: definition, references, rename, hover,
+completion, code actions, diagnostics, formatting. Its README names
+`tower-lsp` for the client and `rmcp` for the MCP server. Smaller trials of
+the same name: GeorgePearse/serena-rs (2025), cp-yu/serena-rs-cli.
+
+How it differs from Swan: Swan answers from a map built ahead of time by
+compiler-grade indexers and stored in SQLite (milliseconds, and the
+questions a map makes cheap: callers, impact, tests, unused code,
+implementations, pattern search), uses live servers only for errors now,
+and seals a repo so its code does not run unasked. Its README says nothing
+about sealing.
+
+Use: a reference at stage 5, when the language-server client
+(`lsp/golsp.goose`) is carried, to see which Rust libraries it uses and how.
+Its license is to be read before anything is borrowed.
+
+### The owner's direction for after the port (noted 2026-11-20T16:33Z)
+
+In the owner's words, shortened: adopt serena-rs's methods where they make
+Swan behave better, so the code base "literally talks to you" and can be
+searched; Spread-Wings incorporated into Swan; a file watcher such as the
+`notify` crate, so Spread-Wings keeps up the way Graphify does; index
+everything except hidden files and what git ignores, to keep people's
+information private; and spell out the areas left untouched because of
+Swan's own rules, unless the owner trusts the repo to run.
+
+What is already there, so the change starts from facts:
+- The walk leaves out hidden folders and the folders git ignores
+  (`rust/src/walk.rs`, from `src/pipeline.goose`). Hidden files are not
+  left out today: only folders are checked for a leading dot, so a `.env`
+  at the top of a repo is walked (whether anything reads it then depends
+  on its language).
+- Spread-Wings ships inside Swan (`wings/`, pinned) and has `watch`
+  (inotify, one watch a folder, a look every 30 s as well;
+  `wings/docs/DESIGN.md`). It is Linux only; without events it looks every
+  two seconds. `notify` would bring macOS and Windows events.
+- Some areas left out are named already: Rust projects past the limit
+  ("not mapped"), crates with no rows (`rust_unmapped`), a repo's build
+  code not run until `swan trust` (sealing).
+
+What would be new: one report of every area left out and why (hidden,
+git-ignored, sealed and untrusted, past a limit, no indexer), the watcher
+keeping Swan's own map current, and hidden files left out as hidden
+folders are.
+
 ## Log
 
 | When (UTC) | What |
@@ -253,6 +309,7 @@ Not looked at: the statements behind checking and the server's own tools
 | 2026-11-20T09:43Z | Stages 0 and 1 go into main on the owner's word (asked which merge he meant, he chose "Rust branch into main"). The full suite ran in the microVM on the commit that merges; its counts are in the pull request. |
 | 2026-11-20T16:20Z | Stage 2 begun, one command at a time. `cargo-projects` carried: `rust/src/rustproj.rs` (src/rustproj.goose, with the five toolchain helpers it uses from src/seal.goose), and in `sys.rs` `env`, `write_stderr`, `realpath` and `run_capture` (only `rustup show home`; the full `swan_run` is stage 4). The Goose program judged is `bin/swan` built from main `8d3417a` in a cloud container (no trial repos there). `scripts/port-plan.sh`: 93 of 93 the same, on the 20 fixtures, four made-up repos, a missing repo, and relate, tokio, ripgrep, cargo (660 manifests, 366 lines out), bevy and cobra, each with RUSTUP_HOME unset, made up and missing. `--wrong-calls` 47 of 47. |
 | 2026-11-20T16:20Z | The judge seen failing: `scripts/port-prove-plan.py`, 11 of 11 breaks caught. The first judge caught 4 of 11; the made-up repos were widened until every break was caught (below). |
+| 2026-11-20T16:41Z | `gradle-tasks` carried: `rust/src/gradle.rs` (src/gradle.goose), sharing `scip::is_ident`. `scripts/port-plan.sh` now judges it on every repo, each case of fixtures/gradle-android and 31 made-up Gradle repos: 181 of 181 the same, with relate, tokio, ripgrep, cargo, bevy, cobra, nowinandroid, architecture-samples, okhttp and RxJava. `scripts/port-prove-plan.py`: 36 of 36 breaks caught (the first run 36 of 37; the one missed cannot change any answer, below). |
 
 ## Found while porting
 
@@ -311,10 +368,36 @@ Not looked at: the statements behind checking and the server's own tools
   and waits 10 s as `swan_run` does. The rest of `swan_run` (environment
   entries, standard error, sealing) is carried with the map at stage 4.
 
+- Stage 2: `is_ident` is one function for the whole Goose program
+  (`src/scip.goose`), and it counts `+`, `-` and `$` as name characters.
+  `src/gradle.goose` uses it too: Goose files share one namespace. The
+  Rust side shares `scip::is_ident` rather than writing a plain letters
+  and digits test, which would read a Groovy slash after `x-` or `$` as
+  the start of a string where the Goose program reads division, and the
+  reverse.
+- Stage 2: one rule of `src/gradle.goose` has no effect any input can
+  show: the version catalog's commented lines are skipped
+  (`!starts_with(line, "#")`), but a commented key would keep its `#` in
+  the alias it makes (`libs.plugins.#android.app`), and a build file
+  cannot name such an alias (`#` is not a name character). Carried as it
+  is. The break that drops it passed the judge (36 of 37 caught on the
+  first run) and was taken out of `scripts/port-prove-plan.py`, since no
+  judge could catch it.
+- Stage 2, not the port's: Now in Android (android/nowinandroid) applies
+  Android through convention plugins of its own (`alias(libs.plugins.
+  nowinandroid.android.application)`; the Kotlin in its `build-logic`
+  applies `com.android.application`). Swan reads build files only, so both
+  programs call it a plain JVM build and name `scipPrintDependencies`,
+  which the comment in `src/gradle.goose` says dies on an Android build.
+  Not run here: a third-party build stays sealed, and there is no Android
+  SDK in the container. A fix (reading which plugin ids a repo's own
+  build-logic applies, without running it) is its own change on main
+  first, then carried.
+
 ## Next
 
 Stage 2, planning that runs nothing. Carried: `cargo-projects`
-(`rustproj`). Left: `gradle-tasks` (`gradle`), `plan-python` (`pyplan`),
+(`rustproj`) and `gradle-tasks` (`gradle`). Left: `plan-python` (`pyplan`),
 `stamp-bench` and `stamp-worker` (`stamp`, as processes), and `modules`,
 `survey` and `tsproj`, which the map uses and no command prints alone. Each
 command is added to `scripts/port-plan.sh` with made-up repos for its

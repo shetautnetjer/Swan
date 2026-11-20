@@ -1546,3 +1546,53 @@ Limits:
   `stamp-bench`, `stamp-worker`, and `modules`, `survey` and `tsproj`.
 - On the session's branch with the README entry before it, not a branch of
   its own.
+
+## 2026-11-20T16:41Z: stage 2 of the port: `gradle-tasks` in Rust
+
+What was missing: the Rust program answered `swan gradle-tasks <repo>` with
+exit 70, "not carried over yet (stage 2)".
+
+Changed: `rust/src/gradle.rs` carries src/gradle.goose line by line: the
+Android plugin ids in quotes, the version catalog's aliases, comments taken
+out (Kotlin's nest, Groovy's do not; strings, triple-quoted strings and
+Groovy's slashy and dollar-slashy strings kept), reactions (`withId`,
+`hasPlugin`, `withPlugin`) masked, `apply false` on chained lines, and the
+modules `settings.gradle(.kts)` includes. It shares `scip::is_ident` with
+the store, as the Goose program does. Nothing ships.
+
+The judge: `scripts/port-plan.sh` runs `gradle-tasks` on every repo it
+judges, on each case of fixtures/gradle-android, and on 31 made-up Gradle
+repos, one rule each, which hide or show an Android plugin depending on
+whether the reader gets that rule right (each case's answer was looked at:
+11 Android, 20 plain).
+
+Checked, Goose program built from main `8d3417a` against the Rust one:
+- `scripts/port-plan.sh` with relate, tokio, ripgrep, cargo, bevy, cobra,
+  nowinandroid, architecture-samples, okhttp and RxJava (shallow clones,
+  read only): 181 of 181 the same.
+- Seen failing: `scripts/port-prove-plan.py`, 36 of 36 breaks caught (11
+  for `cargo-projects`, 25 for `gradle-tasks`). The first run caught 36 of
+  37; the one missed (a commented catalog line read) cannot change any
+  answer, so it was taken out (docs/rust-port.md, "Found while porting").
+  A rerun crashed when its work folder was deleted by mistake (taken for
+  the leftover of a stopped run); it was run again, whole.
+- `--wrong-calls` 47 of 47. `cargo test` 5 of 5. No linter notes on the
+  new files.
+
+Cost: 2 to 4 ms in both programs on every repo.
+
+Found, not the port's: Now in Android is read as a plain JVM build by the
+program that ships. Its modules apply Android through convention plugins
+of its own, which only its build-logic Kotlin names as
+`com.android.application`. Swan then names `scipPrintDependencies`, which
+its own comment says dies on an Android build. Not run (third-party,
+sealed; no Android SDK here). Waiting on the owner: fix on main now or
+after the port.
+
+Also recorded: serena-rs as a reference for stage 5, and the owner's
+direction for after the port (DECISIONS.md; docs/rust-port.md, "Held for
+after the port").
+
+Limits: as for `cargo-projects` above (cloud container; the trial repos and
+the microVM suite not run). Left in stage 2: `plan-python`, `stamp-bench`,
+`stamp-worker`; `modules`, `survey`, `tsproj`.
