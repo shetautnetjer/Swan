@@ -9,7 +9,7 @@
 
 use crate::util::{find, starts_with};
 
-fn is_ident(c: u8) -> bool {
+pub fn is_ident(c: u8) -> bool {
     c.is_ascii_alphanumeric() || c == b'_' || c == b'+' || c == b'-' || c == b'$'
 }
 

@@ -5,6 +5,7 @@
 use std::ffi::{CStr, CString, OsStr};
 use std::fs;
 use std::os::unix::ffi::OsStrExt;
+use std::os::unix::ffi::OsStringExt;
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 
@@ -165,5 +166,115 @@ impl WriterLock {
             while libc::flock(self.fd, libc::LOCK_UN) != 0 && errno() == libc::EINTR {}
             libc::close(self.fd);
         }
+    }
+}
+
+/// An environment variable's value; empty when unset.
+pub fn env(name: &[u8]) -> Vec<u8> {
+    std::env::var_os(OsStr::from_bytes(name)).map(|v| v.into_vec()).unwrap_or_default()
+}
+
+/// Goose's write_stderr: the bytes as they are, no line end added.
+pub fn write_stderr(text: &[u8]) {
+    use std::io::Write;
+    let _ = std::io::stderr().write_all(text);
+}
+
+/// The real path, links and "." and ".." worked out (realpath(3)); None
+/// when it does not exist.
+pub fn realpath(p: &[u8]) -> Option<Vec<u8>> {
+    fs::canonicalize(path(p)).ok().map(|d| d.into_os_string().into_vec())
+}
+
+/// Runs argv in `cwd` with this process's environment and stdin closed, in
+/// a process group of its own, as swan_run does (native/swan_sys.c): one
+/// deadline of `timeout_ms` holds for its output and its exit, even after
+/// the program exits while a child of it keeps the output open, and the
+/// whole group is killed at it. Some((exit code, or 128 + signal; stdout))
+/// when it ran to the end; None when it could not be started or was killed.
+/// Stage 2 needs only `rustup show home`; the full swan_run (environment
+/// entries, standard error, sealing) comes with the map at stage 4.
+pub fn run_capture(argv: &[&[u8]], cwd: &[u8], timeout_ms: u64) -> Option<(i32, Vec<u8>)> {
+    use std::io::Read;
+    use std::os::unix::process::{CommandExt, ExitStatusExt};
+    use std::process::{Child, Command, Stdio};
+    use std::time::{Duration, Instant};
+    let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+    let (first, rest) = argv.split_first()?;
+    let mut child = Command::new(OsStr::from_bytes(first))
+        .args(rest.iter().map(|a| OsStr::from_bytes(a)))
+        .current_dir(path(cwd))
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .process_group(0)
+        .spawn()
+        .ok()?;
+    let group = child.id() as i32;
+    let kill = |child: &mut Child| {
+        unsafe { libc::kill(-group, libc::SIGKILL) };
+        let _ = child.wait();
+    };
+    let Some(mut stdout) = child.stdout.take() else {
+        kill(&mut child);
+        return None;
+    };
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut o = Vec::new();
+        let _ = stdout.read_to_end(&mut o);
+        let _ = tx.send(o);
+    });
+    // The output, until every process holding it closes it.
+    let out = match rx.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+        Ok(o) => o,
+        Err(_) => {
+            kill(&mut child);
+            return None;
+        }
+    };
+    // Then the program itself, which may still run with its output closed.
+    loop {
+        match child.try_wait() {
+            Ok(Some(s)) => return Some((s.code().or(s.signal().map(|n| 128 + n)).unwrap_or(-1), out)),
+            Ok(None) if Instant::now() >= deadline => {
+                kill(&mut child);
+                return None;
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(5)),
+            Err(_) => {
+                kill(&mut child);
+                return None;
+            }
+        }
+    }
+}
+
+/// A file's size in bytes (stat(2), links followed), or -1
+/// (native/swan_sys.c, swan_file_size).
+pub fn file_size(p: &[u8]) -> i64 {
+    if p.is_empty() || p.len() >= 4096 {
+        return -1;
+    }
+    fs::metadata(path(p)).map(|m| m.len() as i64).unwrap_or(-1)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::run_capture;
+
+    #[test]
+    fn run_capture_gives_the_output_and_the_exit_code() {
+        assert_eq!(run_capture(&[b"sh", b"-c", b"echo hi; exit 3"], b"/", 10000), Some((3, b"hi\n".to_vec())));
+    }
+
+    // A program that exits but leaves a child holding its output: the
+    // deadline still holds, as in swan_run (Macroscope, on #75).
+    #[test]
+    fn run_capture_keeps_its_deadline_after_the_program_exits() {
+        let t = std::time::Instant::now();
+        let got = run_capture(&[b"sh", b"-c", b"sleep 30 & echo hi"], b"/", 500);
+        assert!(t.elapsed().as_secs() < 5, "took {:?}", t.elapsed());
+        assert_eq!(got, None);
     }
 }
