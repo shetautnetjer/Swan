@@ -1790,3 +1790,35 @@ out of range" (exit 1), the Rust program panics (exit 101). The port
 carries Goose as it is; the fix (`sizes.len / 2 < k`, the same answer for
 every k that does not overflow) is a change to both programs, waiting for
 the owner.
+
+## 2026-11-20T23:49Z: where an agent still cannot see, measured on flask; the next experiment proposed
+
+What was asked: where Swan leaves an agent blind, and one next experiment.
+Written up in [docs/agent-gaps-2026-11-20.md](docs/agent-gaps-2026-11-20.md).
+
+What was wrong, on flask (`49943b5a9441`, the Goose program of main
+`049fd7c`, pyright 1.1.414):
+- Without flask's packages, which is how Swan maps a fresh clone, pyright
+  reports 203 errors. With them (wheels only, in a scratch virtualenv,
+  nothing of flask or its packages run) it reports 111. 120 of the 203 (59%)
+  are false, and 28 of the 111 (25%) were hidden.
+- The whole-repo problems answer is 53,913 bytes (about 13,500 tokens) with
+  no summary.
+- `swan doctor` calls node missing (it looks only in /usr/local/bin,
+  /usr/bin and /bin) while `swan map` used node from PATH for scip-python.
+- No grammar covers SQL, YAML, JSON, TOML, protobuf, GraphQL, OpenAPI or
+  templates.
+- 36 of 4,481 symbols have a signature starting `undefined =`, from
+  scip-python.
+
+What changed: nothing in Swan. The report proposes "sealed dependencies":
+Swan sets up a repo's declared packages in the map folder, with no install
+code run, and lists what it could not set up. Its pass criteria are written
+before anything is built.
+
+Limits: one Python repo was measured. The TypeScript count is the
+experiment's step 2. drex, jev-cli, pstack and superpowers were not
+available in this session, so none was used.
+
+Needs the owner: whether Swan's own package setup, with code execution off,
+is inside AGENTS.md rule 1 or needs trust.
