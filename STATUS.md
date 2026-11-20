@@ -1478,3 +1478,23 @@ Limits:
 - Merged into main with stage 0, on the owner's word, as files beside the
   Goose program. `scripts/build.sh` does not build the Rust program and
   nothing installs or ships it.
+
+## 2026-11-20T16:04Z: README says Goose still ships and Rust is the way forward
+
+Wrong: the README opened with "built in Goose" and never said the program is
+moving to Rust; the only mention was one line in the layout list. A reader
+(the owner) took it as out of date.
+
+Changed: a short paragraph under the opening says the shipped program is
+still Goose, the port to Rust has been under way since 2026-11-19, stages 0
+and 1 are merged (2026-11-20), stages 2 to 8 are not done, and nothing of
+the Rust program is built, installed or shipped yet. A line under "What a
+Goose Serena means here" says that section is today's design. Text only.
+
+Checked: the claims read against HANDOFF.md, docs/rust-port.md and the stage
+0 and 1 entries above. Fetched every branch: no Rust work newer than the
+2026-11-20 merge is on GitHub.
+
+Limits: the rest of the README still describes the Goose program, as it
+should until a stage ships. Any Rust work done on the owner's own computer
+and not pushed is not in this entry.

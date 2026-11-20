@@ -6,10 +6,23 @@ uses it, what a change would break, which tests to run, and what errors a
 file has right now. The agent asks Swan instead of guessing from text, and
 gets answers in milliseconds. Swan runs on your own machine, reads your code
 without changing it (unless you ask it to edit), and talks to agents over
-MCP, the standard way agents use tools. It is built in
-[Goose](https://aardappel.github.io/goose/) and is a take on
+MCP, the standard way agents use tools. It is a take on
 [Serena](https://github.com/oraios/serena): Serena's tool design, a different
 engine underneath.
+
+**Moving from Goose to Rust (started 2026-11-19, on the owner's word).**
+The program that ships, builds and installs today is still written in
+[Goose](https://aardappel.github.io/goose/) (`src/*.goose`). It is being
+carried over to Rust, a complete overhaul done one stage at a time, in
+`rust/`. Done and merged on 2026-11-20: stage 0 (commands, usage text, exit
+codes) and stage 1 (the store: `index`, `refresh` and 13 of the 14 `query`
+kinds), checked against the Goose program on the fixtures and four trial
+repos. Not done: stages 2 to 8 (planning, pattern search, the map, checking,
+editing, the server, the switch). Nothing of the Rust program is built by
+`scripts/build.sh`, installed or shipped yet, and the rest of this page
+describes the Goose program. The bar, the stages and the log are in
+[docs/rust-port.md](docs/rust-port.md); the work in progress is in
+[HANDOFF.md](HANDOFF.md).
 
 **What it can do today (2026-10-26):**
 
@@ -85,6 +98,9 @@ package's name and version. The roadmap, most valuable first:
    have adapters; support depends on the project's toolchain.
 
 ## What "a Goose Serena" means here
+
+(This is the design as built today. The Rust port keeps it, stage by stage;
+see the note at the top.)
 
 [Goose](https://aardappel.github.io/goose/) is Wouter van Oortmerssen's
 systems language (not Go, and not Block's goose agent). Serena is a Python MCP
