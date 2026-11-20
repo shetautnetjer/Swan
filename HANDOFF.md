@@ -15,8 +15,8 @@ purpose are in [docs/rust-port.md](docs/rust-port.md). Read it first.
 | What ships | The Goose program, unchanged. `rust/` is the port |
 | Stage 0 | Done: 47 of 47 wrong calls answered as the Goose build answers them |
 | Stage 1, the store | Done: `index`, `refresh` and 13 of the 14 `query` kinds. The same tables, refusals, staleness and answers as the Goose build `fb8df2a4c199` on four trial repos (STATUS.md has the counts) |
-| Stage 2, planning | Begun 2026-11-20 on branch `ccr-6c949a09-uhlhfn` (a cloud session). `cargo-projects` and `gradle-tasks` carried and judged by `scripts/port-plan.sh` and `scripts/port-prove-plan.py` (STATUS.md has the counts). Left: `plan-python`, `stamp-bench`, `stamp-worker`; `modules`, `survey`, `tsproj` |
-| Stages 3 to 8 | Not started. Every command of theirs exits 70 and names its stage; `query pattern` waits for stage 3 |
+| Stage 2, planning | Done 2026-11-20 on branch `ccr-6c949a09-uhlhfn` (a cloud session; not on main): `cargo-projects`, `gradle-tasks`, `plan-python`. STATUS.md has the counts |
+| Stages 3 to 8 | Not started (stage 3 now holds `stamp` too). Every command of theirs exits 70 and names its stage; `query pattern` waits for stage 3 |
 
 ## What passed, and how to see it again
 ```bash
@@ -25,6 +25,8 @@ CARGO_TARGET_DIR=$PWD/build/rust ~/.cargo/bin/cargo test --release --manifest-pa
 scripts/port-compare.sh --wrong-calls                                       # 47 of 47
 scripts/port-store.sh $TRIES/maps/relate $TRIES/relate               # ends "the same: ..."
 scripts/port-prove.py $TRIES/maps/Agent-Reach $TRIES/Agent-Reach     # 9 of 9 breaks caught
+SWAN_OLD=bin/swan scripts/port-plan.sh [repo...]                     # stage 2: ends "the same: N of N"
+SWAN_OLD=$PWD/bin/swan scripts/port-prove-plan.py                    # stage 2: 76 of 76 breaks caught (about 30 min on 4 cores)
 ```
 `$TRIES` is the folder of trial repo copies the swan-change-loop skill
 names, with the Goose program's maps of them under `maps/`. `port-store.sh`
@@ -34,29 +36,21 @@ minute each in both programs). The full suite ran in the microVM on the
 commit that went into main. It judges the Goose program: the Rust program
 cannot run it before stage 8.
 
-## Next action: the rest of stage 2
-Done: `cargo-projects` (`rust/src/rustproj.rs`; `abs_path` and `realpath`
-are back) and `gradle-tasks` (`rust/src/gradle.rs`). The judge is
-`scripts/port-plan.sh [repo...]` and its prover
-`scripts/port-prove-plan.py`. For each command left, in this order:
-1. `plan-python` (src/pyplan.goose), then `stamp-bench` and
-   `stamp-worker` (src/stamp.goose; workers as processes, threads wait on
-   the owner). Read before `plan-python`: its two dictionaries are keyed
-   by Goose's `hash` of a name, so the Rust side keys by `util::hash` (a
-   collision merges two names in both); `PY_PIECE_FILES` 64 and
-   `PY_PIECE_GROUPS` 40 are in src/pipeline.goose; a file's size is
-   `stat`'s, at least 1; Goose's `sort` is not stable, but the prefix
-   groups it orders always differ, so any correct sort gives one order.
-   `modules`, `survey` and `tsproj` come with the command that first
-   needs them.
-2. Add the command to `port-plan.sh` with made-up repos for its cases, and
-   breaks for it to `port-prove-plan.py`. Widen the repos until every break
-   is caught.
-3. Rebuild the Goose program from main first (`scripts/build.sh`; Spread-
-   Wings needs libcurl's headers) and pass it as `SWAN_OLD=bin/swan`.
-Stage 2 passes when every command prints the same bytes on the fixtures,
-the four trial repos and cobra. The trial repos are on the owner's machine:
-the last run is there.
+## Next action: stage 3, syntax
+Stage 2 is done: `cargo-projects`, `gradle-tasks` and `plan-python`
+(`rust/src/rustproj.rs`, `gradle.rs`, `pyplan.rs`), judged by
+`scripts/port-plan.sh [repo...]` and seen failing with
+`scripts/port-prove-plan.py`. `stamp`, `tsproj`, `survey` and `modules`
+moved to the stage of their first user (docs/rust-port.md, the stage
+table and "Found while porting").
+1. Read docs/rust-port.md, "Next": stage 3 builds tree-sitter and its
+   grammars from the same C sources goose-treesitter vendors at
+   `59313e9da0b9`, so the trees are the Goose program's.
+2. Compare trees first (each grammar's snippets), then carry `syntax`,
+   `structural`, `stamp` and the code stamps of `change`.
+3. Its own branch and pull request from main, as each stage is.
+Rebuild the Goose program from the branch first (`scripts/build.sh`;
+Spread-Wings needs libcurl's headers) and pass it as `SWAN_OLD=bin/swan`.
 
 ## Decisions waiting on the owner
 - The Now in Android fix (convention plugins) is its own commit on the

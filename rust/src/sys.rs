@@ -225,3 +225,12 @@ pub fn run_capture(argv: &[&[u8]], cwd: &[u8], timeout_ms: u64) -> Option<(i32, 
     let out = reader.join().unwrap_or_default();
     Some((status.code().unwrap_or(-1), out))
 }
+
+/// A file's size in bytes (stat(2), links followed), or -1
+/// (native/swan_sys.c, swan_file_size).
+pub fn file_size(p: &[u8]) -> i64 {
+    if p.is_empty() || p.len() >= 4096 {
+        return -1;
+    }
+    fs::metadata(path(p)).map(|m| m.len() as i64).unwrap_or(-1)
+}

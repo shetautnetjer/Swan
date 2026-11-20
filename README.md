@@ -17,10 +17,10 @@ carried over to Rust, a complete overhaul done one stage at a time, in
 `rust/`. Done and merged on 2026-11-20: stage 0 (commands, usage text, exit
 codes) and stage 1 (the store: `index`, `refresh` and 13 of the 14 `query`
 kinds), checked against the Goose program on the fixtures and four trial
-repos. Under way: stage 2 (planning that runs nothing), `cargo-projects`
-and `gradle-tasks` carried so far. Not done: the rest of stage 2, and
-stages 3 to 8 (pattern search, the map, checking, editing, the server, the
-switch). Nothing of the Rust program is built by
+repos. Done on a branch, not yet on main: stage 2 (planning that runs
+nothing: `cargo-projects`, `gradle-tasks` and `plan-python`). Not done:
+stages 3 to 8 (syntax and pattern search, the map, language servers,
+checking and editing, the server, the switch). Nothing of the Rust program is built by
 `scripts/build.sh`, installed or shipped yet, and the rest of this page
 describes the Goose program. The bar, the stages and the log are in
 [docs/rust-port.md](docs/rust-port.md); the work in progress is in
@@ -609,7 +609,7 @@ tools/              modules.json, external npm tool manifest (the Node indexers 
 tests/               MCP smoke test, refresh-vs-fresh check, latency bench
 fixtures/tiny-ts/    a small repo with the tricky cases (re-export, rename, same-name method and function)
 skills/swan-code-check/  the agent skill for using Swan (single source; copies follow it, see its PROVENANCE.md)
-rust/                the port to Rust in progress (docs/rust-port.md); the Goose program above is what ships. So far the store: main.rs (commands), index.rs, scip.rs, fresh.rs, walk.rs, query.rs, graph.rs, diag.rs, db.rs, sys.rs and util.rs, each carried from the Goose file of its name; and from stage 2, rustproj.rs (`cargo-projects`) and gradle.rs (`gradle-tasks`)
+rust/                the port to Rust in progress (docs/rust-port.md); the Goose program above is what ships. So far the store: main.rs (commands), index.rs, scip.rs, fresh.rs, walk.rs, query.rs, graph.rs, diag.rs, db.rs, sys.rs and util.rs, each carried from the Goose file of its name; and from stage 2, rustproj.rs (`cargo-projects`), gradle.rs (`gradle-tasks`) and pyplan.rs (`plan-python`)
 scripts/port-compare.sh  one swan command run by the Goose program and by the Rust port: output, error text and exit code compared
 scripts/port-store.sh    the store's comparison: the same map (table hashes), the same refusals, the same staleness, the same answers
 scripts/port-tables.sh   a map's schema and tables as row counts and hashes

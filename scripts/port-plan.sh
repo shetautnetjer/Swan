@@ -7,12 +7,14 @@
 #
 #   scripts/port-plan.sh [repo...]
 #
-# The commands judged are those carried so far: cargo-projects and
-# gradle-tasks. cargo-projects is run three times, with RUSTUP_HOME unset,
+# The commands judged are those carried so far: cargo-projects,
+# gradle-tasks and plan-python. cargo-projects is run three times, with RUSTUP_HOME unset,
 # set to a made-up rustup home (an old pinned toolchain installed, a newer
 # default with its library source) and set to a folder that does not exist,
 # so the toolchain lines are judged too. gradle-tasks is run once on each
 # repo, on each case of fixtures/gradle-android, and on made-up Gradle repos.
+# plan-python is run on each repo and on made-up Python repos, with its
+# number of pieces unset (6) and set to 1, 2, 3, 4 and 8.
 #
 # SWAN_OLD, SWAN_NEW: as for port-compare.sh.
 # Prints one "DIFFERENT (<command> <repo>, rustup <which>)" block for each
@@ -375,11 +377,91 @@ cls_android "$g/conv-two-blocks/logic/src/main/kotlin/Jvm.kt" org.jetbrains.kotl
 cls_android "$g/conv-two-blocks/logic/src/main/kotlin/Andr.kt" com.android.library
 printf 'plugins { id("demo.jvm") }\n' | put "$g/conv-two-blocks/app/build.gradle.kts"
 
+# ---- plan-python ----
+# Each repo under py/ holds Python files whose number, size, names and
+# imports decide the pieces. Run with k unset (6) and k = 1, 2, 3, 4, 8.
+p="$cases/py"
+pyfile() { # <file> <bytes of filler> [first line]
+    mkdir -p "$(dirname "$1")"
+    { [ -n "${3:-}" ] && printf '%s\n' "$3"; head -c "$2" /dev/zero | tr '\0' '#'; printf '\n'; } >"$1"
+}
+# Too few files for the pieces: one run.
+for f in a b c; do pyfile "$p/few/$f.py" 10; done
+# Packages of different sizes, files at the root, and a nested package.
+for i in 1 2 3 4 5 6; do pyfile "$p/pkgs/big/m$i.py" 4000; done
+for i in 1 2; do pyfile "$p/pkgs/small/s$i.py" 300; done
+for i in 1 2 3; do pyfile "$p/pkgs/deep/one/d$i.py" 900; pyfile "$p/pkgs/deep/two/e$i.py" 700; done
+pyfile "$p/pkgs/top.py" 50; pyfile "$p/pkgs/setup.py" 20
+mkdir -p "$p/pkgs/node_modules/x" && pyfile "$p/pkgs/node_modules/x/n.py" 99999
+# A flat tests/ of standalone scripts (stdlib imports only): split by prefix.
+for pre in a b c; do for i in $(seq -w 1 30); do pyfile "$p/flat/tests/test_${pre}$i.py" $((10#$i * 7)) "import os, sys"; done; done
+pyfile "$p/flat/pkg/core.py" 500; pyfile "$p/flat/pkg/util.py" 300
+# The same, but most import the repo's own package: kept whole.
+for i in $(seq -w 1 80); do pyfile "$p/flat-own/tests/t$i.py" 40 "from pkg import core"; done
+pyfile "$p/flat-own/pkg/core.py" 500; pyfile "$p/flat-own/pkg/x.py" 100
+# Relative imports, and imports of a sibling module by its file name.
+for i in $(seq -w 1 80); do pyfile "$p/flat-rel/tests/t$i.py" 40 "from . import helper"; done
+for i in $(seq -w 1 80); do pyfile "$p/flat-sib/tests/u$i.py" 40 "import u01"; done
+pyfile "$p/flat-rel/pkg/a.py" 900; pyfile "$p/flat-sib/pkg/a.py" 900
+# Exactly one in ten imports the repo (allowed), and one more (not).
+for c in ten eleven; do
+    for i in $(seq -w 1 70); do pyfile "$p/ratio-$c/tests/r$i.py" 30 "import json"; done
+    for i in 01 02 03 04 05 06 07; do pyfile "$p/ratio-$c/tests/r$i.py" 30 "import pkg"; done
+    pyfile "$p/ratio-$c/pkg/m.py" 800
+done
+pyfile "$p/ratio-eleven/tests/r08.py" 30 "import pkg"
+# Loose standalone scripts at the root: pieces with no folder in front.
+for pre in x y; do for i in $(seq -w 1 40); do pyfile "$p/root-loose/${pre}$i.py" 25 "import re"; done; done
+# Two names that only share a dot, beside many others: the group "." is
+# under the limits, and "." cannot be a piece, so the root is one run.
+pyfile "$p/dot/.a1.py" 25; pyfile "$p/dot/.b1.py" 25
+for i in $(seq -w 1 80); do pyfile "$p/dot/z$i.py" 25; done
+# A folder named as the prefix ends a split there.
+for i in $(seq -w 1 80); do pyfile "$p/ends/s/t$i.py" 25; done
+pyfile "$p/ends/s/t/inner.py" 25
+# Many first letters: more groups than allowed stops the split.
+for l in a b c d e f g h i j k l m n o p q r s t u v w x y z A B C D E F G H I J K L M N O P Q; do
+    for i in 1 2; do pyfile "$p/many/tests/${l}$i.py" 30; done
+done
+# A split by a second and third byte; byte order, a space and UTF-8.
+for pre in aa ab ac ba bb; do for i in $(seq -w 1 20); do pyfile "$p/deep/tests/${pre}_$i.py" 60; done; done
+for i in $(seq -w 1 20); do pyfile "$p/deep/tests/Zz $i.py" 60; pyfile "$p/deep/tests/é$i.py" 60; done
+# Big files: a group over the byte limit, not the file count.
+for i in $(seq -w 1 70); do pyfile "$p/bytes/tests/b$i.py" $((10#$i < 10 ? 20000 : 30)); done
+pyfile "$p/bytes/pkg/a.py" 30
+# A second name in one import line counts: `import os, pkg` needs the repo.
+for i in $(seq -w 1 80); do pyfile "$p/flat-multi/tests/m$i.py" 40 "import os, pkg"; done
+pyfile "$p/flat-multi/pkg/core.py" 500
+# At the limits: exactly 40 first letters (the most groups a split may
+# make), and exactly 64 loose scripts (not more than a piece may hold).
+for l in a b c d e f g h i j k l m n o p q r s t u v w x y z A B C D E F G H I J K L M N; do
+    for i in 1 2; do pyfile "$p/groups40/tests/${l}$i.py" 30; done
+done
+for i in $(seq -w 1 64); do pyfile "$p/files64/tests/f$i.py" 30; done
+pyfile "$p/files64/pkg/a.py" 900
+# A folder exactly at the size limit (k = 4: 800 bytes, 200 each), beside
+# one whose name starts the same.
+for i in 1 2; do pyfile "$p/limit-eq/a/x$i.py" 99; pyfile "$p/limit-eq/ab/y$i.py" 99; done
+for i in 1 2 3 4; do pyfile "$p/limit-eq/c/z$i.py" 99; done
+# Two groups as big as each other, each splitting 36 ways: whichever is
+# split first takes the room, and the other stays whole.
+for pre in a b; do for x in 0 1 2 3 4 5 6 7 8 9 a b c d e f g h i j k l m n o p q r s t u v w x y z; do
+    for i in 1 2; do pyfile "$p/tie/tests/${pre}${x}_$i.py" 30; done
+done; done
+# Empty files count as one byte: at k = 4, three empty files beside five
+# of one byte are over the limit (2) and split, not under it (1) and whole.
+mkdir -p "$p/empty-mix/e" "$p/empty-mix/d"
+for f in a b c; do : >"$p/empty-mix/e/$f.py"; done
+for f in a b c d e; do printf x >"$p/empty-mix/d/$f.py"; done
+# Empty files count as one byte.
+for i in $(seq -w 1 20); do : >"$p/empty-$i.py"; done 2>/dev/null; mkdir -p "$p/empty"; for i in $(seq -w 1 20); do : >"$p/empty/e$i.py"; done; rm -f "$p"/empty-*.py
+
 # The last: a repo that does not exist, which both refuse.
 repos=(fixtures/* "$cases/many" "$cases/ws" "$cases/side" "$cases/tc" "$cases/does-not-exist" "$@")
 
 total=0; bad=0
 # judge <command> <repo> [rustup homes...]: with none given, once as it is.
+# PORT_PLAN_ARG: one more argument after the repo.
 judge() {
     local cmd=$1 repo=$2
     shift 2
@@ -391,14 +473,14 @@ judge() {
             unset) (unset RUSTUP_HOME; scripts/port-compare.sh "$cmd" "$repo") >"$cases/report" 2>&1 ;;
             made-up) RUSTUP_HOME=$rh scripts/port-compare.sh "$cmd" "$repo" >"$cases/report" 2>&1 ;;
             missing) RUSTUP_HOME=$cases/nowhere scripts/port-compare.sh "$cmd" "$repo" >"$cases/report" 2>&1 ;;
-            as-is) scripts/port-compare.sh "$cmd" "$repo" >"$cases/report" 2>&1 ;;
+            as-is) scripts/port-compare.sh "$cmd" "$repo" ${PORT_PLAN_ARG:+"$PORT_PLAN_ARG"} >"$cases/report" 2>&1 ;;
         esac
         code=$?
         total=$((total + 1))
         if [ $code = 3 ]; then echo "port-plan: $cmd is not carried over yet"; exit 3; fi
         if [ $code != 0 ]; then
             bad=$((bad + 1))
-            if [ "$which" = as-is ]; then echo "DIFFERENT ($cmd ${repo#"$cases/"})"
+            if [ "$which" = as-is ]; then echo "DIFFERENT ($cmd ${repo#"$cases/"}${PORT_PLAN_ARG:+ $PORT_PLAN_ARG})"
             else echo "DIFFERENT ($cmd ${repo#"$cases/"}, rustup $which)"; fi
             sed 's/^/    /' "$cases/report"
         fi
@@ -408,6 +490,9 @@ judge() {
 for repo in "${repos[@]}"; do judge cargo-projects "$repo" unset made-up missing; done
 for repo in "${repos[@]}" fixtures/gradle-android/*/ fixtures/gradle-android/bad-include/repo "$g"/* "$g/conv-outside/repo"; do
     judge gradle-tasks "$repo"
+done
+for repo in "${repos[@]}" "$p"/*; do
+    for k in "" 1 2 3 4 8; do PORT_PLAN_ARG=$k judge plan-python "$repo"; done
 done
 
 if [ $bad = 0 ]; then echo "the same: $total of $total"; exit 0; fi

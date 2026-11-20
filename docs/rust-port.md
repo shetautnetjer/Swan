@@ -78,11 +78,11 @@ build and the Rust build of the same commit.
 |---|---|---|---|---|
 | 0 | Skeleton: commands, usage text, exit codes, the compare script | `swan.goose` | 248 | usage and exit code for every wrong call |
 | 1 | The store: reading flattened SCIP into a map, refresh, questions | `swan_sys.c`, `db`, `scip`, `index`, `fresh`, `graph`, `query`, `writer` | 2,110 | `index`, `refresh`: table hashes. `query`: bytes, 13 of the 14 kinds (`pattern` reads source with tree-sitter: stage 3). Done 2026-11-20: `scripts/port-store.sh` |
-| 2 | Planning that runs nothing | `modules`, `survey`, `rustproj`, `tsproj`, `gradle`, `pyplan`, `stamp` | 2,007 | `cargo-projects`, `gradle-tasks`, `plan-python`, `stamp-bench`: bytes |
-| 3 | Syntax | `syntax`, `structural` | 1,080 | `syntax-index` rows; `query pattern` bytes |
-| 4 | The map | `seal`, `run`, `pipeline`, `pypatch`, `tspatch`, `scip`, `wings` | 3,681 | `swan map`: table hashes, the report, "reused" on the second run |
+| 2 | Planning that runs nothing | `rustproj`, `gradle`, `pyplan` (and the toolchain helpers of `seal` that `rustproj` uses) | 934 | `cargo-projects`, `gradle-tasks`, `plan-python`: bytes. Done 2026-11-20: `scripts/port-plan.sh`. `stamp`, `tsproj`, `survey` and `modules` moved to the stage of their first user (2026-11-20, "Found while porting") |
+| 3 | Syntax | `syntax`, `structural`, `stamp` and the code stamps of `change` (`cosmetic_lang`, `code_hash`) | 1,080 + 237 + some of 280 | `syntax-index` rows; `query pattern` bytes; `stamp-bench`'s stamps.tsv and `stamp-worker` |
+| 4 | The map | `seal`, `run`, `pipeline`, `pypatch`, `tspatch`, `scip`, `wings`, `tsproj`, `survey` | 3,681 + 387 | `swan map`: table hashes, the report, "reused" on the second run |
 | 5 | Language servers | `golsp.goose`, `proc.c`, `glue.c`, `lspindex`, `live` | 1,815 | `lsp-index` SCIP output; `lsp-ask` answers |
-| 6 | Checking and editing | `checkers`, `diag`, `broke`, `change`, `edit` | 1,549 | `check`, `broke`, `format`, `test`, `diagnostics`: reports and rows |
+| 6 | Checking and editing | `checkers`, `diag`, `broke`, `change`, `edit`, `modules` | 1,549 + 449 | `check`, `broke`, `format`, `test`, `diagnostics`: reports and rows |
 | 7 | The server | `serve` | 890 | every MCP tool's answer; the `mcp` suite |
 | 8 | Build and suite | `scripts/build.sh`, `space-test.sh`, `swan-flatten` into the workspace | | the full suite in the microVM; the cost table |
 
@@ -311,6 +311,7 @@ folders are.
 | 2026-11-20T16:20Z | The judge seen failing: `scripts/port-prove-plan.py`, 11 of 11 breaks caught. The first judge caught 4 of 11; the made-up repos were widened until every break was caught (below). |
 | 2026-11-20T16:41Z | `gradle-tasks` carried: `rust/src/gradle.rs` (src/gradle.goose), sharing `scip::is_ident`. `scripts/port-plan.sh` now judges it on every repo, each case of fixtures/gradle-android and 31 made-up Gradle repos: 181 of 181 the same, with relate, tokio, ripgrep, cargo, bevy, cobra, nowinandroid, architecture-samples, okhttp and RxJava. `scripts/port-prove-plan.py`: 36 of 36 breaks caught (the first run 36 of 37; the one missed cannot change any answer, below). |
 | 2026-11-20T19:40Z | Fix, not the port's: Android through convention plugins (Now in Android). In `src/gradle.goose` first, then `rust/src/gradle.rs`; from here the Goose program judged is the fixed one. `scripts/port-plan.sh` 201 of 201 with 14 more made-up repos; `scripts/port-prove-plan.py` 56 of 56 (two breaks of before re-anchored, their text now in two places). |
+| 2026-11-20T20:19Z | Stage 2 done. `plan-python` carried: `rust/src/pyplan.rs` (src/pyplan.goose). `scripts/port-plan.sh` with 21 made-up Python repos, each at six values of k: 577 of 577 the same, with the 14 public repos (requests, flask, pytest and django among them; django 2,943 .py files, 239 pieces, 22 to 28 ms in both). `scripts/port-prove-plan.py`: 76 of 76. `stamp`, `tsproj`, `survey` and `modules` moved to stages 3, 4 and 6 (stage table). |
 
 ## Found while porting
 
@@ -397,14 +398,45 @@ folders are.
   such plugins. From that commit on, the Goose program the port is judged
   against is the fixed one.
 
+- Stage 2: four of its seven files had no command of the stage to judge
+  them by, so they move to the stage of their first user (2026-11-20T19:43Z).
+  `stamp` (`stamp-bench`, `stamp-worker`) stamps a file by its code with
+  `code_hash` in `src/change.goose`, which parses with tree-sitter: a stamp
+  is the same bytes only with the same tree-sitter runtime and grammars,
+  which stage 3 pins. `tsproj` and `survey` are used only by the map (and
+  `survey` by the server: it starts Spread-Wings); `modules` only by
+  `check`, `format`, `test` and live errors. Carried without a judge, they
+  would be Rust no comparison has seen.
+
+- Stage 2: the judge had a hole of my making, found by its prover. The
+  made-up Python repos were written in loops over `g`, the name that also
+  held the made-up Gradle repos' folder, so after them no Gradle repo was
+  judged and 37 Gradle breaks passed (a run said "the same: 381 of 381").
+  The loops use another name; every count from then on is after it.
+- Stage 2: two rules of `plan-python` were seen to matter only once a case
+  was made for each: which of two equally big groups is split first (only
+  when the 40-group room runs out between them: `tie`), and an empty file
+  counting as one byte (only beside files that are not empty:
+  `empty-mix`). One rule shows nothing any input can see, so it has no
+  break: at the root, a folder of too many loose files gives "the whole
+  repo in one run" both by its own return and by falling through, since
+  nothing else is in the plan or the queue yet.
+
 ## Next
 
-Stage 2, planning that runs nothing. Carried: `cargo-projects`
-(`rustproj`) and `gradle-tasks` (`gradle`). Left: `plan-python` (`pyplan`),
-`stamp-bench` and `stamp-worker` (`stamp`, as processes), and `modules`,
-`survey` and `tsproj`, which the map uses and no command prints alone. Each
-command is added to `scripts/port-plan.sh` with made-up repos for its
-cases, and to `scripts/port-prove-plan.py` with breaks, before it is
-trusted. The stage passes when every command prints the same bytes on the
-fixtures, the four trial repos and cobra; the trial repos are on the
-owner's machine, so the last run is there.
+Stage 3, syntax: `src/syntax.goose` and `src/structural.goose` (behind
+`syntax-index` and `query pattern`), with `src/stamp.goose` and the code
+stamps of `src/change.goose` (`cosmetic_lang`, `code_hash`; behind
+`stamp-bench` and `stamp-worker`). Everything here reads trees from
+tree-sitter, so the trees must be the Goose program's: the runtime and
+grammars are those goose-treesitter builds at the commit `src/swan.goose`
+imports (`59313e9da0b9`): tree-sitter 0.25.10 (language version 15),
+TypeScript 0.23.2, JavaScript 0.25.0, Python 0.25.0, Rust 0.24.0, Java
+0.23.5, C 0.24.1, C++ 0.23.4, C# 0.23.5, Kotlin 1.1.0, Lua 0.5.0, PHP
+0.25.1, GDScript 6.1.0, WGSL 0.0.1, and CUDA, GLSL and HLSL copied in as
+sources with no version. First step: build those same C sources from that
+commit (a `build.rs` with the `cc` crate) rather than crates of the same
+version numbers, whose generated parsers can differ; and compare a tree
+dump of each grammar's test snippets before carrying any Goose. The judge
+for the stage sits beside `scripts/port-plan.sh` and is seen failing
+before it is trusted.

@@ -1656,3 +1656,62 @@ Limits:
   `libs.findPlugin(...)` in code, from a published plugin jar, or a
   settings plugin.
 - Its own commit on the session's branch; main needs the owner's word.
+
+## 2026-11-20T20:19Z: stage 2 of the port done: `plan-python` in Rust; `stamp` and three more files moved
+
+What was missing: the Rust program answered `swan plan-python <repo> [k]`
+with exit 70, "not carried over yet (stage 2)".
+
+Changed: `rust/src/pyplan.rs` carries src/pyplan.goose line by line: the
+.py files of the repo, by size (at least one byte each); folders over
+their share split into subfolders and files; a folder of more than k
+loose files kept whole unless its scripts stand alone (at most one in ten
+imports a folder or module of the repo, or imports relatively), when it is
+split by filename prefix (at most 64 files and 40 pieces). Names are kept
+by Goose's `hash`, as the Goose program keeps them. `sys::file_size`
+added. `piece_target`, which only the map uses, waits for stage 4.
+
+Moved out of stage 2 (docs/rust-port.md, the stage table): `stamp`
+(`stamp-bench`, `stamp-worker`) stamps files by their code with
+tree-sitter, so it goes to stage 3 with the pinned grammars; `tsproj` and
+`survey` go to stage 4 (only the map and the server use them); `modules`
+to stage 6 (only check, format, test and live errors). No command of stage
+2 prints what they make, so no comparison could judge them now.
+
+The judge: `scripts/port-plan.sh` runs `plan-python` on every repo it
+judges and on 21 made-up Python repos (few files; packages of different
+sizes; flat folders of scripts that stand alone, import the repo, import
+relatively, import a sibling module or name the repo second on an import
+line; exactly one in ten and one more; loose scripts at the root; names
+sharing only a dot; a folder named as the prefix; more than 40 and exactly
+40 first letters; exactly 64 scripts; splits by second and third byte with
+a space and UTF-8; a group over the byte limit; empty files, alone and beside others; a folder
+exactly at the limit beside one whose name starts the same; two equal
+groups competing for room), each with k unset and 1, 2, 3, 4 and 8.
+
+Checked, the Goose program built from this branch (with the convention
+plugin fix) against the Rust one:
+- `scripts/port-plan.sh` with relate, tokio, ripgrep, cargo, bevy, cobra,
+  nowinandroid, architecture-samples, okhttp, RxJava, requests, flask,
+  pytest and django: 577 of 577 the same.
+- Seen failing: `scripts/port-prove-plan.py`, 76 of 76 breaks caught (20 for
+  `plan-python`, 45 for `gradle-tasks`, 11 for `cargo-projects`).
+- `--wrong-calls` 47 of 47. `cargo test` 5 of 5. The linter's notes on
+  pyplan.rs are three loops over an index, kept as the Goose lines are.
+
+Cost: django, 2,943 .py files and 239 pieces: 22 to 28 ms in both
+programs; pytest 3 ms in both.
+
+My mistake, found by the prover: the made-up Python repos were written in
+loops over `g`, which is also the folder of the made-up Gradle repos, so
+after them no Gradle repo was judged: a run said "the same: 497 of 497"
+without them (and 381 without the public repos), and 37 Gradle breaks went
+uncaught. The loops now use another name; the counts above are from after
+the fix. Two prover runs then crashed on a judge's output that was not
+UTF-8 (a diff cut inside "é"); I first took the crash for its time limit
+and capped it at one judge a core, which it keeps. It now reads judges'
+output with bad bytes replaced.
+
+Limits: the cloud container, as for the commands before: not the trial
+repos, not the microVM suite. Stage 2 is on the session's branch with the
+rest of today's work; main needs the owner's word.

@@ -182,6 +182,66 @@ BREAKS = [
     ("gradle.rs", "'_' in a convention plugin's catalog key is kept",
      "trim(&line[..eq])].concat();\n                for c in name.iter_mut() {\n                    if *c == b'-' || *c == b'_' {",
      "trim(&line[..eq])].concat();\n                for c in name.iter_mut() {\n                    if *c == b'-' {"),
+    ("pyplan.rs", 'a piece may hold 63 files, not 64',
+     'const PY_PIECE_FILES: i64 = 64;',
+     'const PY_PIECE_FILES: i64 = 63;'),
+    ("pyplan.rs", 'a split may make 39 groups, not 40',
+     'const PY_PIECE_GROUPS: usize = 40;',
+     'const PY_PIECE_GROUPS: usize = 39;'),
+    ("pyplan.rs", 'a relative import does not need the repo',
+     'if !m.is_empty() && m[0] == b\'.\' {\n                f(b".");',
+     'if false {\n                f(b".");'),
+    ("pyplan.rs", 'only the first name of an import line is read',
+     "for part in l[7..].split(|&c| c == b',') {",
+     "for part in l[7..].split(|&c| c == b',').take(1) {"),
+    ("pyplan.rs", "a module's name keeps its .py",
+     'let stem = if ends_with(&p[at..], b".py") { &p[at..p.len() - 3] } else { &p[at..] };',
+     'let stem = &p[at..];'),
+    ("pyplan.rs", "a folder is not one of the repo's names",
+     'own.insert(hash(&p[at..at + sl]));',
+     'let _ = sl;'),
+    ("pyplan.rs", 'one in ten importing the repo is too many',
+     'needs_repo * 10 <= loose',
+     'needs_repo * 10 < loose'),
+    ("pyplan.rs", 'a group is over the limits by its file count only',
+     'if (files > PY_PIECE_FILES || bytes > limit) && files > pick_files {',
+     'if files > PY_PIECE_FILES && files > pick_files { let _ = bytes;'),
+    ("pyplan.rs", 'the last of the biggest groups is split first',
+     '&& files > pick_files {',
+     '&& files >= pick_files {'),
+    ("pyplan.rs", 'a name that ends at the prefix does not stop the split',
+     'if nm.len() == plen {\n                    ends_here = true;\n                } else if',
+     'if false {\n                    ends_here = true;\n                } else if nm.len() > plen &&'),
+    ("pyplan.rs", 'no limit on how many groups a split makes',
+     'if ends_here || kids < 2 || g_rep.len() - 1 + kids > PY_PIECE_GROUPS {',
+     'if ends_here || kids < 2 {'),
+    ("pyplan.rs", "a split group's prefix is not lengthened",
+     '            if !g_done[g] {\n                lengthen(g, &g_rep, &mut g_len);',
+     '            if false {\n                lengthen(g, &g_rep, &mut g_len);'),
+    ("pyplan.rs", '"." can be a piece',
+     'if pre.is_empty() || pre == b"." || pre == b".." {',
+     'if pre.is_empty() {'),
+    ("pyplan.rs", 'pieces in reverse name order',
+     'order.sort_by(|&a, &b| prefix(a).cmp(prefix(b)));',
+     'order.sort_by(|&a, &b| prefix(b).cmp(prefix(a)));'),
+    ("pyplan.rs", 'an empty file counts as nothing',
+     'sizes.push(sys::file_size(full).max(1));',
+     'sizes.push(sys::file_size(full));'),
+    ("pyplan.rs", 'one run only below k files, not 2k',
+     'if k <= 1 || (sizes.len() as i64) < 2 * k {',
+     'if k <= 1 || (sizes.len() as i64) < k {'),
+    ("pyplan.rs", 'a folder exactly at the limit is split',
+     'if size_under(&dir) <= limit && !dir.is_empty() {',
+     'if size_under(&dir) < limit && !dir.is_empty() {'),
+    ("pyplan.rs", 'a folder holds the files of a longer name beside it',
+     "dir.is_empty() || (starts_with(p, dir) && p.len() > dir.len() && p[dir.len()] == b'/')",
+     'dir.is_empty() || (starts_with(p, dir) && p.len() > dir.len())'),
+    ("pyplan.rs", 'a subfolder is queued once per file',
+     'if subs.insert(sub) {',
+     'if subs.insert(sub) || true {'),
+    ("pyplan.rs", 'a folder of many loose files is never split by prefix',
+     'if loose > PY_PIECE_FILES && plan_prefix_pieces(repo, &dir, &paths, &sizes, limit, &mut plan) {',
+     'if false && plan_prefix_pieces(repo, &dir, &paths, &sizes, limit, &mut plan) {'),
 ]
 
 
@@ -227,11 +287,12 @@ def prove(here, cargo, work):
     def judge(item):
         n, what, program = item
         ran = subprocess.run([os.path.join(here, "scripts", "port-plan.sh")],
-                             env=dict(os.environ, SWAN_NEW=program), capture_output=True, text=True)
+                             env=dict(os.environ, SWAN_NEW=program), capture_output=True, encoding="utf-8", errors="replace")
         return n, what, ran.returncode, ran.stdout
 
     missed = 0
-    with ThreadPoolExecutor(len(built) or 1) as pool:
+    # One judge a core: each runs hundreds of comparisons.
+    with ThreadPoolExecutor(max(1, min(len(built), os.cpu_count() or 4))) as pool:
         for n, what, code, said in pool.map(judge, built):
             caught = [line for line in said.splitlines() if line.startswith("DIFFERENT (")]
             steps = list(dict.fromkeys(line[len("DIFFERENT ("):].rstrip(")") for line in caught))
