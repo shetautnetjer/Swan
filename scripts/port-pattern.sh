@@ -36,6 +36,8 @@ const o = { key: 1 };
 const p = { other: 2, key: 3 };
 let t = y + y;
 let u = y + z;
+bar(1, 2,);
+// $X
 const long = foo("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx");
 EOF
 put "$r/b.tsx" <<'EOF'
@@ -58,6 +60,7 @@ x = foo(1)
 if a:
     pass
 '''doc $X'''
+'''it's $X'''
 # comment $X
 def g(q):
     return q
@@ -102,6 +105,7 @@ fun f() {
     val s = """raw $X"""
     foo(1)
     val t = x.unwrap()
+    val q = """a " $X"""
 }
 EOF
 put "$r/sub/k.lua" <<'EOF'
@@ -130,7 +134,7 @@ func _ready():
 	foo(1)
 EOF
 put "$r/p.cs" <<'EOF'
-class A { void M() { var s = @"verbatim ""$X"""; Foo(1); var t = foo(2); } }
+class A { void M() { var s = @"verbatim ""$X"""; Foo(1); var t = foo(2); Bar(@"a\", 5); } }
 EOF
 put "$r/q.php" <<'EOF'
 <?php
@@ -180,10 +184,19 @@ local $X = foo($Y)
 $X.expect($M)
 foo($_)
 $F($$$)
+local s = [[long $X]]
+Bar(@"a\", $Y)
+'''it's $X'''
+"""a " $X"""
+if ($V) { return $V; }
+call($$$A, $B)
+bar($A, $B)
 EOF
 )
-multi=("$(printf 'def $F($$$P):\n    return $R')" "$(printf 'func $F():\n\tprint($X)')" "$(printf '<<<EOT\n$X text\nEOT')" "")
+multi=("$(printf 'def $F($$$P):\n    return $R')" "$(printf "# don't\\nfoo(\$A)")" "$(printf "// it's\\nfoo(\$A)")" "$(printf 'func $F():\n\tprint($X)')" "$(printf '<<<EOT\n$X text\nEOT')" "")
 paths=("" "e.rs" "sub" "src/d.py" "nowhere")
+# Asked of the made-up map only: on a real repo each would match millions of nodes.
+small=('$X')
 
 total=0; bad=0
 ask() {   # ask <db> <label> <pattern> [path]
@@ -204,6 +217,7 @@ judge_map() {   # judge_map <db> <label>
     for p in "${multi[@]}"; do ask "$db" "$label" "$p"; done
 }
 judge_map "$work/map/swan.db" made-up
+for p in "${small[@]}"; do ask "$work/map/swan.db" made-up "$p"; done
 for db in "$@"; do judge_map "$db" "$db"; done
 if [ $bad = 0 ]; then echo "the same: $total of $total"; exit 0; fi
 echo "DIFFERENT: $bad of $total"

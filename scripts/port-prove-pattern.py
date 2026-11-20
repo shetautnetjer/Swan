@@ -51,9 +51,14 @@ BREAKS = [
     ('treesitter.rs', '$$$ with no name is not anonymous',
      '            out.extend_from_slice(if e > i + d { &pattern[i + d..e] } else { b"_" });',
      '            out.extend_from_slice(if e > i + d { &pattern[i + d..e] } else { b"R" });'),
-    ('treesitter.rs', "a GDScript pattern's lines are not indented into the function",
-     '            if k == 7 && lang == b"gdscript" && find(&renamed, b"\\n") >= 0 {',
-     '            if false {'),
+    # Not a break: indenting a GDScript pattern's further lines into the
+    # function (context 7) cannot be seen. The grammar at the commit Swan
+    # pins reads the same statements at the top of a file as inside a
+    # function, so a pattern that parses in the function has already parsed
+    # bare, and one that does not parse bare does not parse in the function
+    # either: 22 texts parsed both ways had the same errors, and 10 multi-line
+    # patterns on godot-demo-projects gave the same bytes from the Goose
+    # program and a copy without the indenting.
     ('treesitter.rs', 'a pattern is not tried inside a function (Rust, C)',
      '        1 => (b"fn zswan_ctx() {\\n", b"\\n}"),',
      '        1 => (b"", b""),'),

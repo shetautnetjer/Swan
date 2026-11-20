@@ -318,6 +318,7 @@ folders are.
 | 2026-11-20T19:40Z | Fix, not the port's: Android through convention plugins (Now in Android). In `src/gradle.goose` first, then `rust/src/gradle.rs`; from here the Goose program judged is the fixed one. `scripts/port-plan.sh` 201 of 201 with 14 more made-up repos; `scripts/port-prove-plan.py` 56 of 56 (two breaks of before re-anchored, their text now in two places). |
 | 2026-11-20T20:19Z | Stage 2 done. `plan-python` carried: `rust/src/pyplan.rs` (src/pyplan.goose). `scripts/port-plan.sh` with 21 made-up Python repos, each at six values of k: 577 of 577 the same, with the 14 public repos (requests, flask, pytest and django among them; django 2,943 .py files, 239 pieces, 22 to 28 ms in both). `scripts/port-prove-plan.py`: 76 of 76. `stamp`, `tsproj`, `survey` and `modules` moved to stages 3, 4 and 6 (stage table). |
 | 2026-11-20T21:10Z | Stage 3 begun (branch `rust-stage-3`, on #75). Tree-sitter in Rust: `rust/build.rs` builds goose-treesitter's own C (its `ts_shim.c`, the runtime 0.25.10 and 17 grammars) from the Goose build's copy at the commit `src/swan.goose` imports, with the lists of that package's `treesitter.build`; `rust/src/treesitter.rs` calls the shim. `scripts/port-trees.sh` (dumpers `scripts/port-trees.goose` and `rust/src/bin/port-trees.rs`): 25,300 of 25,300 files the same tree, 46 million nodes, every grammar. Seen failing: a `.h` file taken for C++, and a column one too far in a changed shim, each caught. |
+| 2026-11-20T23:53Z | `query pattern` carried: `rust/src/treesitter.rs` (goose-treesitter's matcher) and `rust/src/structural.rs` (src/structural.goose). `scripts/port-pattern.sh`: 182 of 182 on a made-up repo in all 17 languages, 1630 of 1630 with eight maps (swan-rust, django, laravel, godot-demo-projects, wgpu, ripgrep, shadcn-ui, flask). `scripts/port-prove-pattern.py`: 33 of 33 breaks caught, after the first judge caught 23 of 34 (below). About as fast as the Goose program (STATUS.md). |
 
 ## Found while porting
 
@@ -440,17 +441,34 @@ folders are.
 - Stage 3: goose-treesitter's own `treesitter.goose` (the structural
   matcher behind `query pattern`, 750 lines) is Goose to carry too; it
   was not in the stage's list of sources.
+- Stage 3: the first judge for `query pattern` caught 23 of 34 breaks.
+  Its made-up strings held `$` only where the plain string rule already
+  kept it, so the rules for Lua long brackets, C# verbatim strings,
+  Python's and Kotlin's triple quotes and comments changed nothing it
+  asked. Each now has a case only its own rule gets right: a quote or a
+  backslash inside (`'''it's $X'''`, `@"a\"`, `# don't`). Also added: a
+  trailing comma, an empty `$$$` before a comma, a C++ `if` only the
+  function context finds, and `$X` alone (every node), asked of the
+  made-up map only.
+- Stage 3: one rule shows nothing any pattern can see, so it has no
+  break. A GDScript pattern's further lines are indented into the function
+  (context 7). The grammar at the pinned commit reads the same statements
+  at the top of a file as inside a function, so a pattern that would parse
+  there has already parsed bare. 22 texts parsed both ways had the same
+  errors, and 10 multi-line patterns on godot-demo-projects gave the same
+  bytes from the Goose program and a copy without the rule. Carried as it
+  is.
+- Stage 3: `fill_template` (the rewrite half of the matcher) is not used
+  by `query pattern`. It goes with `rewrite_pattern`, in the server's
+  stage.
 
 ## Next
 
-Stage 3, syntax, on branch `rust-stage-3`. Done: the trees (above). Left,
-in this order, each judged against the Goose program and seen failing
-before it is trusted:
-1. goose-treesitter's matcher (`treesitter.goose`: `compile`, `search`,
-   `search_files`, bindings, `fill_template`, `rename_metavars`) and
-   `src/structural.goose`, behind `swan query <db> pattern`.
-2. `src/syntax.goose`, behind `swan syntax-index` (its rows).
-3. `src/stamp.goose` with `cosmetic_lang` and `code_hash` from
+Stage 3, syntax, on branch `rust-stage-3`. Done: the trees, and the
+matcher with `swan query <db> pattern` (above). Left, in this order, each
+judged against the Goose program and seen failing before it is trusted:
+1. `src/syntax.goose`, behind `swan syntax-index` (its rows).
+2. `src/stamp.goose` with `cosmetic_lang` and `code_hash` from
    `src/change.goose`, behind `stamp-bench` and `stamp-worker`; the
    workers as processes.
 Rebuild the Goose program first (`scripts/build.sh`), which also fetches

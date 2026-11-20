@@ -1,6 +1,6 @@
 # Handoff: Swan in Rust (branch `rust`)
 
-Written 2026-11-20T07:25Z; stage 2 part rewritten 2026-11-20T16:21Z. For the next session, any agent.
+Written 2026-11-20T07:25Z; stage 2 part rewritten 2026-11-20T16:21Z, stage 3 part 2026-11-20T23:51Z. For the next session, any agent.
 
 ## The task
 Carry Swan over from Goose to Rust, on the owner's word, as a complete
@@ -16,8 +16,8 @@ purpose are in [docs/rust-port.md](docs/rust-port.md). Read it first.
 | Stage 0 | Done: 47 of 47 wrong calls answered as the Goose build answers them |
 | Stage 1, the store | Done: `index`, `refresh` and 13 of the 14 `query` kinds. The same tables, refusals, staleness and answers as the Goose build `fb8df2a4c199` on four trial repos (STATUS.md has the counts) |
 | Stage 2, planning | Done and on main (#76, merged 2026-11-20 on the owner's word): `cargo-projects`, `gradle-tasks`, `plan-python`. STATUS.md has the counts |
-| Stage 3, syntax | Begun on branch `rust-stage-3`: the trees are the same (`scripts/port-trees.sh`). Left: `query pattern`, `syntax-index`, the stamps |
-| Stages 4 to 8 | Not started. Every command of theirs exits 70 and names its stage; `query pattern` waits for stage 3 |
+| Stage 3, syntax | On branch `rust-stage-3`: the trees are the same (`scripts/port-trees.sh`), and `query pattern` (`scripts/port-pattern.sh`, seen failing by `scripts/port-prove-pattern.py`, 33 of 33). Left: `syntax-index`, the stamps |
+| Stages 4 to 8 | Not started. Every command of theirs exits 70 and names its stage |
 
 ## What passed, and how to see it again
 ```bash
@@ -28,6 +28,9 @@ scripts/port-store.sh $TRIES/maps/relate $TRIES/relate               # ends "the
 scripts/port-prove.py $TRIES/maps/Agent-Reach $TRIES/Agent-Reach     # 9 of 9 breaks caught
 SWAN_OLD=bin/swan scripts/port-plan.sh [repo...]                     # stage 2: ends "the same: N of N"
 SWAN_OLD=$PWD/bin/swan scripts/port-prove-plan.py                    # stage 2: 76 of 76 breaks caught (about 30 min on 4 cores)
+SWAN_OLD=bin/swan scripts/port-trees.sh [repo...]                    # stage 3: the same trees
+SWAN_OLD=bin/swan scripts/port-pattern.sh [map.db...]                # stage 3: 182 of 182 on the made-up repo alone
+SWAN_OLD=$PWD/bin/swan scripts/port-prove-pattern.py                 # stage 3: 33 of 33 breaks caught (about 6 min)
 ```
 `$TRIES` is the folder of trial repo copies the swan-change-loop skill
 names, with the Goose program's maps of them under `maps/`. `port-store.sh`
@@ -40,14 +43,21 @@ cannot run it before stage 8.
 ## Next action: the rest of stage 3, syntax (branch `rust-stage-3`)
 The trees are done: `rust/build.rs` builds goose-treesitter's own C, and
 `scripts/port-trees.sh` finds the same tree in both programs (25,300 of
-25,300 files). Left, in order (docs/rust-port.md, "Next"): the matcher and
-`query pattern`; `syntax-index`; the stamps. Each gets made-up cases and
+25,300 files). `query pattern` is done (STATUS.md has the counts). Left, in
+order (docs/rust-port.md, "Next"): `syntax-index`; the stamps. Each gets made-up cases and
 breaks, like `scripts/port-plan.sh` and `scripts/port-prove-plan.py`.
 Rebuild the Goose program first (`scripts/build.sh`): it also fetches the
 goose-treesitter copy the Rust build compiles. Its own pull request when
 done, from main.
 
 ## Decisions waiting on the owner
+- The next experiment after the port's stage 3, proposed in
+  docs/agent-gaps-2026-11-20.md (branch `ccr-6c949a09-uhlhfn`): "sealed
+  dependencies". On flask, 120 of 203 errors are false and 28 real ones
+  hidden while the repo's packages are not installed. May Swan set the
+  packages up itself, into the map folder, wheels only and with install
+  scripts off? AGENTS.md rule 1 keeps package managers off untrusted repos,
+  so this is the owner's call.
 - The microVM suite has not run on main since #74 and #76 went in.
 - `plan-python`'s overflow on an enormous piece count (Graphify, #75, #76):
   the same in Goose and Rust; a one-line fix to both (`sizes.len / 2 < k`)

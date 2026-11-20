@@ -1829,3 +1829,46 @@ out of range" (exit 1), the Rust program panics (exit 101). The port
 carries Goose as it is; the fix (`sizes.len / 2 < k`, the same answer for
 every k that does not overflow) is a change to both programs, waiting for
 the owner.
+
+## 2026-11-20T23:53Z: stage 3 of the port: structural search (`swan query <db> pattern`) in Rust, the same bytes
+
+What changed (branch `rust-stage-3`):
+- `rust/src/treesitter.rs` carries goose-treesitter's matcher
+  (`treesitter.goose` at `59313e9da0b9`, the commit `src/swan.goose`
+  imports). That covers renaming `$X` and `$$$X`, and leaving alone strings,
+  comments, raw and verbatim strings, triple quotes, Lua long brackets and
+  PHP heredocs. It covers the ten contexts a pattern is tried in and the
+  matching rules: repeated names, `_`, punctuation the pattern leaves out,
+  the comma beside an empty `$$$`. The search runs on up to 16 threads.
+- `rust/src/structural.rs` carries `search_pattern` from
+  `src/structural.goose`: the 17 languages, `in_symbol`, `stale`,
+  `truncated`, and why a language was skipped.
+- `scripts/port-pattern.sh` is the judge. It writes a made-up repo with
+  code in all 17 languages, maps it with the Goose program, edits one file
+  after so its matches are stale, and asks 35 patterns under 5 paths, 6
+  multi-line patterns and `$X`.
+- `scripts/port-prove-pattern.py` is its prover: 33 breaks.
+
+Checked:
+- The made-up repo: 182 of 182 the same.
+- With eight maps (swan-rust, django, laravel, godot-demo-projects, wgpu,
+  ripgrep, shadcn-ui, and flask mapped by scip-python): 1630 of 1630 the same, in 171 s.
+- The prover: the unbroken program passes (182 of 182), then 33 of 33
+  breaks caught. The first judge caught 23 of 34. Its strings held `$`
+  only where the plain string rule already kept it, so five string and
+  comment rules, the GDScript indent, the Rust and C function context and
+  three punctuation rules changed nothing it asked. Ten new cases close
+  ten of the eleven holes (docs/rust-port.md, "Found while porting").
+- Time, best of three on 4 cores, Goose then Rust: `$F($$$)` on django
+  (203,612 matches) 1,483 and 1,334 ms; `$X.unwrap()` on wgpu (2,108)
+  544 and 567 ms.
+- The eleventh cannot be seen. A GDScript pattern's further lines are
+  indented into a function, but the grammar reads the same statements at
+  the top of a file, so the rule is never reached. 22 texts parsed both
+  ways and 10 patterns on godot-demo-projects gave the same bytes without
+  it. It is carried as it is, with no break.
+
+Limits: `fill_template`, the rewrite half of the matcher, is not carried.
+It goes with `rewrite_pattern` in the server's stage. Six of the eight
+maps were built with empty symbol rows, so `in_symbol` is judged only on
+the made-up repo, swan-rust and flask.
