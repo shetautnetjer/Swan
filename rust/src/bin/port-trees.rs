@@ -8,6 +8,7 @@
 // "path\tlanguage\tnodes", then one line of the eight numbers of each node;
 // "path\t-" for a file with no grammar or that cannot be read.
 
+#[allow(dead_code)]
 #[path = "../treesitter.rs"]
 mod treesitter;
 

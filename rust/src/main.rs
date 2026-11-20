@@ -18,7 +18,9 @@ mod pyplan;
 mod query;
 mod rustproj;
 mod scip;
+mod structural;
 mod sys;
+mod treesitter;
 mod util;
 mod walk;
 
@@ -159,8 +161,7 @@ fn main() {
         } else if kind == b"hierarchy" {
             graph::get_type_hierarchy(&db, &fr, arg, rel, 3, 200, &mut out);
         } else if kind == b"pattern" {
-            // Structural search reads source with tree-sitter: stage 3.
-            not_carried(b"query pattern", 3);
+            structural::search_pattern(&db, &fr, arg, b"", rel, 1000000, &mut out);
         } else {
             usage();
         }
