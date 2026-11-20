@@ -15,7 +15,7 @@ purpose are in [docs/rust-port.md](docs/rust-port.md). Read it first.
 | What ships | The Goose program, unchanged. `rust/` is the port |
 | Stage 0 | Done: 47 of 47 wrong calls answered as the Goose build answers them |
 | Stage 1, the store | Done: `index`, `refresh` and 13 of the 14 `query` kinds. The same tables, refusals, staleness and answers as the Goose build `fb8df2a4c199` on four trial repos (STATUS.md has the counts) |
-| Stage 2, planning | Done 2026-11-20 on branch `ccr-6c949a09-uhlhfn` (a cloud session; not on main): `cargo-projects`, `gradle-tasks`, `plan-python`. STATUS.md has the counts |
+| Stage 2, planning | Done 2026-11-20: `cargo-projects`, `gradle-tasks`, `plan-python`. Pull request #76 (branch `rust-stage-2`, into main); not on main yet. STATUS.md has the counts |
 | Stages 3 to 8 | Not started (stage 3 now holds `stamp` too). Every command of theirs exits 70 and names its stage; `query pattern` waits for stage 3 |
 
 ## What passed, and how to see it again
@@ -53,10 +53,10 @@ Rebuild the Goose program from the branch first (`scripts/build.sh`;
 Spread-Wings needs libcurl's headers) and pass it as `SWAN_OLD=bin/swan`.
 
 ## Decisions waiting on the owner
-- The Now in Android fix (convention plugins) is its own commit on the
-  session's branch, in the Goose program and carried into Rust. It waits
-  for the owner's word to go to main as its own pull request, as do the
-  port's stage 2 commits.
+- Merging #76: stage 2 into main. #74 (the Now in Android fix) is in main;
+  #75 was merged into #74's branch rather than main, so #76 carries the
+  same tree to main (the owner chose this, 2026-11-20). The microVM suite
+  has not run on it.
 - "Ask drex max when unsure" (the owner, 2026-11-20): no drex model or
   service token reached the cloud session, so nothing was asked. Questions
   for it: none came up for `cargo-projects`; the port is line by line.

@@ -19,7 +19,8 @@
 # SWAN_OLD, SWAN_NEW: as for port-compare.sh.
 # Prints one "DIFFERENT (<command> <repo>, rustup <which>)" block for each
 # disagreement, then "the same: N of N" or "DIFFERENT: K of N".
-# Exit 0: all the same. 1: some differ. 3: a command is not carried yet.
+# Exit 0: all the same. 1: some differ. 2: a comparison could not be made
+# (a program is missing). 3: a command is not carried yet.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
@@ -356,6 +357,26 @@ EOF
 cls_android "$g/conv-cycle/logic/src/main/kotlin/A.kt" demo.b
 cls_android "$g/conv-cycle/logic/src/main/kotlin/B.kt" demo.a
 printf 'plugins { id("demo.a") }\n' | put "$g/conv-cycle/app/build.gradle.kts"
+# How a module applies a convention plugin: only applying it counts.
+for c in conv-apply-groovy conv-apply-kts conv-plugin-manager conv-id-space conv-not-applied; do
+    put "$g/$c/logic/build.gradle.kts" <<'EOF'
+gradlePlugin { plugins { register("a") { id = "demo.a"; implementationClass = "A" } } }
+EOF
+    cls_android "$g/$c/logic/src/main/kotlin/A.kt" com.android.library
+done
+for c in conv-apply-groovy conv-id-space; do printf "includeBuild 'logic'\ninclude ':app'\n" | put "$g/$c/settings.gradle"; done
+for c in conv-apply-kts conv-plugin-manager conv-not-applied; do printf 'includeBuild("logic")\ninclude(":app")\n' | put "$g/$c/settings.gradle.kts"; done
+printf "apply plugin: 'demo.a'\n" | put "$g/conv-apply-groovy/app/build.gradle"
+printf "plugins { id 'demo.a' }\n" | put "$g/conv-id-space/app/build.gradle"
+# Named in a string first, then applied, on one line.
+printf 'val n = "demo.a"; apply(plugin = "demo.a")\n' | put "$g/conv-apply-kts/app/build.gradle.kts"
+printf 'pluginManager.apply("demo.a")\n' | put "$g/conv-plugin-manager/app/build.gradle.kts"
+put "$g/conv-not-applied/app/build.gradle.kts" <<'EOF'
+plugins { kotlin("jvm") }
+val n = "demo.a"
+println("demo.a")
+apply(from = "demo.a")
+EOF
 # Two registrations: each id is read from its own block, so the JVM one
 # written first is not given the Android class written after it.
 printf 'includeBuild("logic")\ninclude(":app")\n' | put "$g/conv-two-blocks/settings.gradle.kts"
@@ -478,6 +499,9 @@ judge() {
         code=$?
         total=$((total + 1))
         if [ $code = 3 ]; then echo "port-plan: $cmd is not carried over yet"; exit 3; fi
+        # port-compare.sh could not run the two programs (one is missing): no
+        # comparison was made, so nothing may be counted as a difference.
+        if [ $code = 2 ]; then echo "port-plan: no comparison could be made ($cmd ${repo#"$cases/"}):"; sed 's/^/    /' "$cases/report"; exit 2; fi
         if [ $code != 0 ]; then
             bad=$((bad + 1))
             if [ "$which" = as-is ]; then echo "DIFFERENT ($cmd ${repo#"$cases/"}${PORT_PLAN_ARG:+ $PORT_PLAN_ARG})"

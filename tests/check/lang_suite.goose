@@ -749,6 +749,7 @@ fn lang_gradle() {
     lg_eq("gradle: a precompiled script plugin in buildSrc applies Android", str(g, "/convention-script"), LG_ANDROID);
     lg_eq("gradle: a convention plugin that applies only com.android.test gets no unit-test compile", str(g, "/convention-test"), "clean compileDebugKotlin scipCompileAll");
     lg_eq("gradle: a JVM convention plugin that only reacts to Android stays plain", str(g, "/convention-jvm"), LG_PLAIN);
+    lg_eq("gradle: a JVM module that only names an Android convention plugin in a string stays plain", str(g, "/convention-string"), LG_PLAIN);
 
     var tmpo: u8[>..] = [];
     var e0: u8[>..] = [];

@@ -1479,6 +1479,63 @@ Limits:
   Goose program. `scripts/build.sh` does not build the Rust program and
   nothing installs or ships it.
 
+## 2026-11-20T19:40Z: Android builds through convention plugins are read as Android (Now in Android)
+
+What was wrong: `swan gradle-tasks` (and so `swan map`'s scip-java run)
+called android/nowinandroid a plain JVM build: `clean scipPrintDependencies
+scipCompileAll`. Its modules apply the repo's own convention plugins
+(`alias(libs.plugins.nowinandroid.android.application)`), and only the
+Kotlin in its build-logic applies `com.android.application`. Swan read
+build files only. On an Android build `scipPrintDependencies` dies (the
+reason Swan names the Kotlin compiles instead), so such a repo would get no
+Java or Kotlin map. Found while carrying `gradle-tasks` to Rust (the
+port's stage 2).
+
+Changed (src/gradle.goose): the repo's own build logic is read too, as
+text, nothing run: buildSrc, and
+each build settings.gradle(.kts) includes with `includeBuild`. In it, a
+precompiled script plugin (a .gradle.kts or .gradle file under src/main;
+its id is its file name, after a Kotlin package) and a plugin registered
+in a gradlePlugin block (its id written out or taken from the catalog,
+its class found by file name) count as Android when their file applies an
+Android plugin or another such plugin, read by the same rules as a build
+file (comments and reactions like `hasPlugin` do not count). A module that
+applies one, by id or by catalog alias, is Android. Folders outside the
+repo (`..`) are not read.
+
+Before and after (`swan gradle-tasks`, the Swan before this change against
+this one):
+- nowinandroid: `scipPrintDependencies` before, `compileDebugKotlin
+  compileDebugUnitTestKotlin` after.
+- The five new fixtures (fixtures/gradle-android/convention-*): four gave
+  the plain list before and the Android one after (convention-class,
+  -chain, -script; -test without the unit-test compile); convention-jvm,
+  which only reacts to Android, is plain in both.
+- Unchanged: every older case of fixtures/gradle-android, tiny-kt,
+  tiny-java, architecture-samples and okhttp (Android in both), RxJava
+  (plain in both).
+
+Checked:
+- The five new checks in tests/check/lang_suite.goose (lang_gradle) run
+  `bin/swan gradle-tasks` on those fixtures; each command was run by hand
+  on the Swan before (four wrong) and after (five right).
+- Carried into the Rust port (`rust/src/gradle.rs`) in the port's stage 2
+  pull request, which is judged against this fixed program.
+
+Limits:
+- The suites were not run: this cloud container has no microVM and not
+  the indexers the lang suite maps with. They are to run in the microVM
+  before this merges.
+- Gradle was not run on nowinandroid (a third-party build stays sealed;
+  no Android SDK here), so "the map now works there" is not shown, only
+  that the task list is the Android one. Its app module has product
+  flavors; Gradle runs compileDebugKotlin where a module has it (the
+  libraries), as before.
+- Not read: plugins applied by type (`apply<SomeClass>()`), by
+  `libs.findPlugin(...)` in code, from a published plugin jar, or a
+  settings plugin.
+- Its own pull request; merging needs the owner's word.
+
 ## 2026-11-20T16:04Z: README says Goose still ships and Rust is the way forward
 
 Wrong: the README opened with "built in Goose" and never said the program is
@@ -1597,65 +1654,18 @@ Limits: as for `cargo-projects` above (cloud container; the trial repos and
 the microVM suite not run). Left in stage 2: `plan-python`, `stamp-bench`,
 `stamp-worker`; `modules`, `survey`, `tsproj`.
 
-## 2026-11-20T19:40Z: Android builds through convention plugins are read as Android (Now in Android)
+## 2026-11-20T19:40Z: the convention-plugin fix carried into the port
 
-What was wrong: `swan gradle-tasks` (and so `swan map`'s scip-java run)
-called android/nowinandroid a plain JVM build: `clean scipPrintDependencies
-scipCompileAll`. Its modules apply the repo's own convention plugins
-(`alias(libs.plugins.nowinandroid.android.application)`), and only the
-Kotlin in its build-logic applies `com.android.application`. Swan read
-build files only. On an Android build `scipPrintDependencies` dies (the
-reason Swan names the Kotlin compiles instead), so such a repo would get no
-Java or Kotlin map. Found while carrying `gradle-tasks` to Rust.
+What: the fix of its own pull request (`fix/gradle-convention-plugins`:
+Android through convention plugins, Now in Android) made the same in
+`rust/src/gradle.rs`, so the port matches the fixed Goose program, which it
+is judged against from then on.
 
-Changed (src/gradle.goose, then the same in rust/src/gradle.rs): the
-repo's own build logic is read too, as text, nothing run: buildSrc, and
-each build settings.gradle(.kts) includes with `includeBuild`. In it, a
-precompiled script plugin (a .gradle.kts or .gradle file under src/main;
-its id is its file name, after a Kotlin package) and a plugin registered
-in a gradlePlugin block (its id written out or taken from the catalog,
-its class found by file name) count as Android when their file applies an
-Android plugin or another such plugin, read by the same rules as a build
-file (comments and reactions like `hasPlugin` do not count). A module that
-applies one, by id or by catalog alias, is Android. Folders outside the
-repo (`..`) are not read.
-
-Before and after (`swan gradle-tasks`, the Swan before this change against
-this one):
-- nowinandroid: `scipPrintDependencies` before, `compileDebugKotlin
-  compileDebugUnitTestKotlin` after.
-- The five new fixtures (fixtures/gradle-android/convention-*): four gave
-  the plain list before and the Android one after (convention-class,
-  -chain, -script; -test without the unit-test compile); convention-jvm,
-  which only reacts to Android, is plain in both.
-- Unchanged: every older case of fixtures/gradle-android, tiny-kt,
-  tiny-java, architecture-samples and okhttp (Android in both), RxJava
-  (plain in both).
-
-Checked:
-- The five new checks in tests/check/lang_suite.goose (lang_gradle) run
-  `bin/swan gradle-tasks` on those fixtures; each command was run by hand
-  on the Swan before (four wrong) and after (five right).
-- The Rust port carries the same change: `scripts/port-plan.sh` against
-  the fixed Goose program, with 14 more made-up repos for the new rules:
-  201 of 201 the same (the fixtures, the made-up repos and the ten public
-  repos).
-  `scripts/port-prove-plan.py`: 56 of 56 breaks caught, 20 of them in the
-  new code.
-
-Limits:
-- The suites were not run: this cloud container has no microVM and not
-  the indexers the lang suite maps with. They are to run in the microVM
-  before this merges.
-- Gradle was not run on nowinandroid (a third-party build stays sealed;
-  no Android SDK here), so "the map now works there" is not shown, only
-  that the task list is the Android one. Its app module has product
-  flavors; Gradle runs compileDebugKotlin where a module has it (the
-  libraries), as before.
-- Not read: plugins applied by type (`apply<SomeClass>()`), by
-  `libs.findPlugin(...)` in code, from a published plugin jar, or a
-  settings plugin.
-- Its own commit on the session's branch; main needs the owner's word.
+Checked: `scripts/port-plan.sh` against the fixed Goose program, with 14
+more made-up repos for the new rules: 201 of 201 the same (the fixtures,
+the made-up repos and the ten public repos). `scripts/port-prove-plan.py`:
+56 of 56 breaks caught, 20 of them in the new code; two breaks of before
+were anchored again, their text now being in two places.
 
 ## 2026-11-20T20:19Z: stage 2 of the port done: `plan-python` in Rust; `stamp` and three more files moved
 
@@ -1715,3 +1725,68 @@ output with bad bytes replaced.
 Limits: the cloud container, as for the commands before: not the trial
 repos, not the microVM suite. Stage 2 is on the session's branch with the
 rest of today's work; main needs the owner's word.
+
+## 2026-11-20T21:13Z: a convention plugin's id counts only where a plugin is applied
+
+What was wrong (review of the change above, Macroscope): a convention
+plugin's id was read wherever it stood in quotes, so a plain JVM module that
+only names one in a string (`val conventionName = "demo.android.library"`)
+was taken for Android, and a repo of such modules would lose scip-java's
+`scipPrintDependencies` for compiles it may not have.
+
+Changed (src/gradle.goose): a convention plugin's id counts only as a plugin
+being applied: `id("x")`, `id 'x'`, `apply(plugin = "x")`, `apply plugin:
+'x'` or `pluginManager.apply("x")`. An Android plugin's own id is read as
+before. New fixture and check: convention-string.
+
+Checked: convention-string is Android on the Swan before this (seen
+failing) and plain after. The 17 fixture checks of lang_gradle by hand: 17
+of 17. Unchanged: every other case of fixtures/gradle-android,
+nowinandroid, architecture-samples, okhttp (Android) and RxJava (plain).
+
+Limits: as the change above (the microVM suite not run here).
+
+## 2026-11-20T21:39Z: review of the port's stage 2 (#75): a deadline that holds, a prover that checks itself, #74's fix carried
+
+What was wrong, found by review (Macroscope, Graphify) and checked:
+- `sys::run_capture` (only `rustup show home`, for `cargo-projects`) kept
+  its deadline only until the program exited: a child of it holding the
+  output open made it wait for that child. A unit test with `sh -c 'sleep
+  30 & echo hi'` and 500 ms took 30 s.
+- `scripts/port-prove-plan.py` never ran the judge on the unbroken program,
+  so a judge broken for some other reason (no Goose program, say) would
+  "catch" every break and report success.
+- #74 changed under review (a convention plugin's id counts only where a
+  plugin is applied); stage 2 carries the same.
+
+Changed:
+- `run_capture` runs the program in a process group of its own, as
+  `swan_run` does (native/swan_sys.c): one deadline holds for its output
+  and its exit, the whole group is killed at it, and a failed wait kills
+  it too. Two unit tests (`sys.rs`).
+- The prover builds and judges the unbroken program first and stops (exit
+  2) when the judge does not pass it.
+- `rust/src/gradle.rs`: `gradle_applies_at` and `convention_plugin_in`
+  as #74's `src/gradle.goose`. Five more made-up Gradle repos (`apply
+  plugin:`, `apply(plugin = ...)` after the id in a string on one line,
+  `pluginManager.apply`, Groovy's `id '...'`, and a module that only names
+  the id in a string, a `println` and `apply(from = ...)`), and five breaks.
+
+Checked:
+- The deadline test failed before (30 s) and passes after (0.5 s, no
+  `sleep` left running); `cargo test` 7 of 7.
+- The prover with no Goose program: before, it would have built and
+  "caught" every break; now it stops after the unbroken program with exit
+  2 (seen).
+- `scripts/port-plan.sh` against the Goose program of #74's head (`b23c1bc`):
+  583 of 583 the same with the 14 public repos (443 of 443 without them).
+- `scripts/port-prove-plan.py`: the unbroken program passes (443 of 443),
+  then 81 of 81 breaks caught.
+
+Not changed, and why: an enormous piece count (`swan plan-python <repo>
+4611686018427387904` on a repo with no .py file) overflows `2 * k` (Graphify).
+The program that ships has the same fault: it stops with "slice bounds
+out of range" (exit 1), the Rust program panics (exit 101). The port
+carries Goose as it is; the fix (`sizes.len / 2 < k`, the same answer for
+every k that does not overflow) is a change to both programs, waiting for
+the owner.

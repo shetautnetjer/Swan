@@ -28,5 +28,8 @@ Negative cases, which must keep the plain list:
   lines after the `id(...)`.
 - convention-jvm: a JVM convention plugin whose class only reacts to an
   Android plugin (`hasPlugin`) and names one in a comment.
+- convention-string: a JVM module that names the repo's Android convention
+  plugin in a string (`val conventionName = "demo.android.library"`) and
+  applies only `kotlin("jvm")`.
 - bad-include/repo: `include` names with ".." or "/", which would reach the
   Android build file in bad-include/outside; they are skipped.
