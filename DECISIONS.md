@@ -602,3 +602,21 @@ Decided:
   project borders.
 - **A trusted repo's top virtualenv is still run**, as it was. It gives
   the same names now; reading it instead is a later simplification.
+
+## 2026-11-19 22:03 PT — Swan is carried over to Rust on a branch; Goose ships until the numbers are in
+
+**Decision (the owner's):** carry Swan from Goose to Rust as a complete
+overhaul, on branch `rust`.
+
+**Why:** the owner chose Rust for Spread-Wings on 2026-11-18 after its trial
+("I think I will stay rust": easier to build on, to carry other tools' ideas
+into and to add languages to) and asked for the same for Swan.
+
+**How:** the method that carried Spread-Wings: a bar written first
+(docs/rust-port.md), the code carried line by line and not redesigned, each
+stage held to the same output as the Goose build before the next is built on
+it. The check suites stay as they are and judge the port from outside.
+
+**Not decided:** when Rust becomes what is built. That is the owner's call
+after stage 8, with the map hashes, the suite counts and the cost table.
+Retiring the Goose sources is a change of its own.

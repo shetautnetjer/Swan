@@ -1355,3 +1355,27 @@ Limits:
 - Not looked into: the repo's own modules that a map holds as outside
   symbols (graphify: 171, `tools.skillgen.gen` among them). They were
   there before and are named rightly, as the repo's.
+
+## 2026-11-19: a port to Rust is started, on a branch
+
+The owner asked for Swan to be carried over to Rust as a complete overhaul
+(Spread-Wings went the same way on 2026-11-18). Branch `rust`, from main
+`fb8df2a`. The Goose program is unchanged and is what ships.
+
+- The bar was written before any Rust: [docs/rust-port.md](docs/rust-port.md).
+  The same map by table hash, the same answers by bytes, the same suite
+  counts in the microVM, the same or better cost, and either program reading
+  the other's map. About 13,200 lines to carry, in nine stages.
+- Stage 0 is done: `rust/` builds with cargo 1.100.0, and
+  `scripts/port-compare.sh --wrong-calls` finds 47 of 47 wrong calls answered
+  as the installed Goose build `fb8df2a4c199` answers them. Every real
+  command exits 70 and names the stage it waits for.
+- The repository has a home now: `PROJECT.md`, `AGENTS.md`, `CLAUDE.md`, and
+  `HANDOFF.md` for the work in progress.
+
+Not done:
+
+- Stages 1 to 8. No map, query or server answer comes from Rust yet.
+- No suite was run; nothing the suites cover changed.
+- Nothing is committed or pushed.
+- `wings/` is still pinned to Spread-Wings from before its Rust port.
