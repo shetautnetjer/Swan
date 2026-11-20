@@ -181,7 +181,12 @@ ConcurrentModificationException (its WriteDependencies walks the project's
 configurations while AGP adds some; 0.13.2 and 0.14.1 alike) and
 `scipCompileAll` alone does nothing there. For a repo with an Android module,
 Swan runs `clean compileDebugKotlin compileDebugUnitTestKotlin scipCompileAll`
-(`swan gradle-tasks <repo>` prints the list). The compiles are unqualified:
+(`swan gradle-tasks <repo>` prints the list). A module is Android when its
+build file applies an Android plugin, or one of the repo's own convention
+plugins that does: a precompiled script plugin or a registered plugin class
+in buildSrc or a build settings includes with `includeBuild` (Now in
+Android's build-logic), followed through plugins that apply other such
+plugins. They are read as text, like the build files; nothing runs. The compiles are unqualified:
 Gradle runs them in every project that has them, so a module without a debug
 variant or without Kotlin is simply skipped, and a module wrongly taken for
 Android costs nothing. But either task missing from every project
