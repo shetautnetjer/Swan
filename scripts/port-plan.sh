@@ -356,6 +356,26 @@ EOF
 cls_android "$g/conv-cycle/logic/src/main/kotlin/A.kt" demo.b
 cls_android "$g/conv-cycle/logic/src/main/kotlin/B.kt" demo.a
 printf 'plugins { id("demo.a") }\n' | put "$g/conv-cycle/app/build.gradle.kts"
+# How a module applies a convention plugin: only applying it counts.
+for c in conv-apply-groovy conv-apply-kts conv-plugin-manager conv-id-space conv-not-applied; do
+    put "$g/$c/logic/build.gradle.kts" <<'EOF'
+gradlePlugin { plugins { register("a") { id = "demo.a"; implementationClass = "A" } } }
+EOF
+    cls_android "$g/$c/logic/src/main/kotlin/A.kt" com.android.library
+done
+for c in conv-apply-groovy conv-id-space; do printf "includeBuild 'logic'\ninclude ':app'\n" | put "$g/$c/settings.gradle"; done
+for c in conv-apply-kts conv-plugin-manager conv-not-applied; do printf 'includeBuild("logic")\ninclude(":app")\n' | put "$g/$c/settings.gradle.kts"; done
+printf "apply plugin: 'demo.a'\n" | put "$g/conv-apply-groovy/app/build.gradle"
+printf "plugins { id 'demo.a' }\n" | put "$g/conv-id-space/app/build.gradle"
+# Named in a string first, then applied, on one line.
+printf 'val n = "demo.a"; apply(plugin = "demo.a")\n' | put "$g/conv-apply-kts/app/build.gradle.kts"
+printf 'pluginManager.apply("demo.a")\n' | put "$g/conv-plugin-manager/app/build.gradle.kts"
+put "$g/conv-not-applied/app/build.gradle.kts" <<'EOF'
+plugins { kotlin("jvm") }
+val n = "demo.a"
+println("demo.a")
+apply(from = "demo.a")
+EOF
 # Two registrations: each id is read from its own block, so the JVM one
 # written first is not given the Android class written after it.
 printf 'includeBuild("logic")\ninclude(":app")\n' | put "$g/conv-two-blocks/settings.gradle.kts"
