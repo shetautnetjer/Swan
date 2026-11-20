@@ -5,6 +5,7 @@
 use std::ffi::{CStr, CString, OsStr};
 use std::fs;
 use std::os::unix::ffi::OsStrExt;
+use std::os::unix::ffi::OsStringExt;
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 
@@ -166,4 +167,61 @@ impl WriterLock {
             libc::close(self.fd);
         }
     }
+}
+
+/// An environment variable's value; empty when unset.
+pub fn env(name: &[u8]) -> Vec<u8> {
+    std::env::var_os(OsStr::from_bytes(name)).map(|v| v.into_vec()).unwrap_or_default()
+}
+
+/// Goose's write_stderr: the bytes as they are, no line end added.
+pub fn write_stderr(text: &[u8]) {
+    use std::io::Write;
+    let _ = std::io::stderr().write_all(text);
+}
+
+/// The real path, links and "." and ".." worked out (realpath(3)); None
+/// when it does not exist.
+pub fn realpath(p: &[u8]) -> Option<Vec<u8>> {
+    fs::canonicalize(path(p)).ok().map(|d| d.into_os_string().into_vec())
+}
+
+/// Runs argv in `cwd` with this process's environment, stdin closed, and
+/// waits at most `timeout_ms` (then kills it). Some((exit code, stdout))
+/// when it ran; None when it could not be started or was killed. Stage 2
+/// needs only `rustup show home`; the full swan_run (environment entries,
+/// standard error, sealing) comes with the map at stage 4.
+pub fn run_capture(argv: &[&[u8]], cwd: &[u8], timeout_ms: u64) -> Option<(i32, Vec<u8>)> {
+    use std::io::Read;
+    use std::process::{Command, Stdio};
+    let (first, rest) = argv.split_first()?;
+    let mut child = Command::new(OsStr::from_bytes(first))
+        .args(rest.iter().map(|a| OsStr::from_bytes(a)))
+        .current_dir(path(cwd))
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let mut stdout = child.stdout.take()?;
+    let reader = std::thread::spawn(move || {
+        let mut o = Vec::new();
+        let _ = stdout.read_to_end(&mut o);
+        o
+    });
+    let start = std::time::Instant::now();
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(s)) => break s,
+            Ok(None) if start.elapsed().as_millis() as u64 >= timeout_ms => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(5)),
+            Err(_) => return None,
+        }
+    };
+    let out = reader.join().unwrap_or_default();
+    Some((status.code().unwrap_or(-1), out))
 }

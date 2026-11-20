@@ -1498,3 +1498,51 @@ Checked: the claims read against HANDOFF.md, docs/rust-port.md and the stage
 Limits: the rest of the README still describes the Goose program, as it
 should until a stage ships. Any Rust work done on the owner's own computer
 and not pushed is not in this entry.
+
+## 2026-11-20T16:21Z: stage 2 of the port begun: `cargo-projects` in Rust
+
+What was missing: the Rust program answered `swan cargo-projects <repo>`
+with exit 70, "not carried over yet (stage 2)".
+
+Changed: `rust/src/rustproj.rs` carries src/rustproj.goose line by line,
+with the five toolchain helpers it uses from src/seal.goose (which channel
+a repo pins, where rustup lives, whether it has that toolchain, its
+default, the version of each). `sys.rs` gains `env`, `write_stderr`,
+`realpath` and `run_capture` (for `rustup show home` only). The command
+prints the same projects, settings, toolchain warnings and "not mapped"
+lines as the Goose program. Nothing ships: `scripts/build.sh` still builds
+only the Goose program.
+
+The judge: `scripts/port-plan.sh` runs each stage 2 command carried so far
+through `port-compare.sh` on the 20 fixtures, on made-up repos that hold
+the cases the fixtures do not (15 crates side by side, a workspace with a
+multi-line exclude and a cut-off fuzz crate, path dependencies that leave
+the repo or hide in another word, odd folder names, skipped folders, a
+symlink, pinned toolchains old, new, missing and broken), on a repo that
+does not exist and on any repo named, each under three rustup homes.
+
+Checked, Goose program built from main `8d3417a` against the Rust one:
+- `scripts/port-plan.sh` with relate, tokio, ripgrep, cargo, bevy and
+  cobra (shallow clones, read only; the command runs nothing in a repo):
+  93 of 93 the same. On cargo, 660 manifests: 366 lines from both, 12
+  projects and 354 "not mapped".
+- Seen failing: `scripts/port-prove-plan.py`, 11 copies of the Rust
+  program each broken in one place, 11 caught. The first judge caught 4;
+  the made-up repos were widened until all were (docs/rust-port.md).
+- `--wrong-calls` 47 of 47. `cargo test` 5 of 5. No new linter notes.
+
+Cost, one run each in the judge: cargo 71 ms Goose, 53 ms Rust; bevy 26
+against 13; relate 18 against 12.
+
+Limits:
+- Run in a cloud container, not on the owner's machine: the four trial
+  repos and their maps are not here. relate was cloned fresh (its current
+  head, not the trial copy). Understand-Anything, rea and Agent-Reach were
+  not run; they hold no Rust that the fixtures and clones do not cover, but
+  that is a reading, not a run.
+- The microVM suite was not run: it judges the Goose program, which this
+  change does not touch.
+- The rest of stage 2 is not done: `gradle-tasks`, `plan-python`,
+  `stamp-bench`, `stamp-worker`, and `modules`, `survey` and `tsproj`.
+- On the session's branch with the README entry before it, not a branch of
+  its own.

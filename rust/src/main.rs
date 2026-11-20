@@ -14,6 +14,7 @@ mod fresh;
 mod graph;
 mod index;
 mod query;
+mod rustproj;
 mod scip;
 mod sys;
 mod util;
@@ -191,7 +192,7 @@ fn main() {
     } else if cmd == b"gradle-tasks" && n == 3 {
         not_carried(cmd, 2);
     } else if cmd == b"cargo-projects" && n == 3 {
-        not_carried(cmd, 2);
+        write_stdout(&rustproj::cargo_projects_report(&abs_path(&a[2])));
     } else if cmd == b"check" && n == 4 {
         not_carried(cmd, 6);
     } else if cmd == b"broke" && n >= 4 {
@@ -213,4 +214,21 @@ fn main() {
     } else {
         usage();
     }
+}
+
+/// The real path of a path given on the command line; it ends the run when
+/// there is none (src/pipeline.goose, abs_path).
+fn abs_path(p: &[u8]) -> Vec<u8> {
+    match sys::realpath(p) {
+        Some(o) => o,
+        None => die(&[&b"swan: no such path: "[..], p].concat()),
+    }
+}
+
+/// Goose's write_stdout: the bytes as they are, no line end added.
+fn write_stdout(text: &[u8]) {
+    let out = std::io::stdout();
+    let mut out = out.lock();
+    let _ = out.write_all(text);
+    let _ = out.flush();
 }

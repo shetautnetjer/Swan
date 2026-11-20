@@ -1,6 +1,6 @@
 # Handoff: Swan in Rust (branch `rust`)
 
-Written 2026-11-20T07:25Z. For the next session, any agent.
+Written 2026-11-20T07:25Z; stage 2 part rewritten 2026-11-20T16:21Z. For the next session, any agent.
 
 ## The task
 Carry Swan over from Goose to Rust, on the owner's word, as a complete
@@ -15,7 +15,8 @@ purpose are in [docs/rust-port.md](docs/rust-port.md). Read it first.
 | What ships | The Goose program, unchanged. `rust/` is the port |
 | Stage 0 | Done: 47 of 47 wrong calls answered as the Goose build answers them |
 | Stage 1, the store | Done: `index`, `refresh` and 13 of the 14 `query` kinds. The same tables, refusals, staleness and answers as the Goose build `fb8df2a4c199` on four trial repos (STATUS.md has the counts) |
-| Stages 2 to 8 | Not started. Every command of theirs exits 70 and names its stage; `query pattern` waits for stage 3 |
+| Stage 2, planning | Begun 2026-11-20 on branch `ccr-6c949a09-uhlhfn` (a cloud session). `cargo-projects` carried and judged: `scripts/port-plan.sh` 93 of 93, `scripts/port-prove-plan.py` 11 of 11 breaks caught. Left: `gradle-tasks`, `plan-python`, `stamp-bench`, `stamp-worker`; `modules`, `survey`, `tsproj` |
+| Stages 3 to 8 | Not started. Every command of theirs exits 70 and names its stage; `query pattern` waits for stage 3 |
 
 ## What passed, and how to see it again
 ```bash
@@ -33,22 +34,27 @@ minute each in both programs). The full suite ran in the microVM on the
 commit that went into main. It judges the Goose program: the Rust program
 cannot run it before stage 8.
 
-## Next action: stage 2, planning that runs nothing
-`modules`, `survey`, `rustproj`, `tsproj`, `gradle`, `pyplan`, `stamp`
-(2,007 lines), behind `cargo-projects`, `gradle-tasks`, `plan-python`,
-`stamp-bench` and `stamp-worker`. Compared by bytes.
-1. Read the seven files and list what they call outside themselves
-   (`seal`, `run`, the walk). The walk is carried (`rust/src/walk.rs`);
-   `abs_path` needs `realpath` back in `rust/src/sys.rs`.
-2. `stamp` starts `swan stamp-worker` processes. Carry it as processes.
-   Threads are a question waiting on the owner (below).
-3. Write the stage's judge beside `port-store.sh`: each command on every
-   fixture and trial repo through `scripts/port-compare.sh`, and break the
-   Rust program on purpose to see each step fail before trusting it.
-Stage 2 passes when the four commands print the same bytes on the fixtures,
-the four trial repos and cobra.
+## Next action: the rest of stage 2
+Done: `cargo-projects` (`rust/src/rustproj.rs`; `abs_path` and `realpath`
+are back). The judge is `scripts/port-plan.sh [repo...]` and its prover
+`scripts/port-prove-plan.py`. For each command left, in this order:
+1. `gradle-tasks` (src/gradle.goose), then `plan-python` (src/pyplan.goose),
+   then `stamp-bench` and `stamp-worker` (src/stamp.goose; workers as
+   processes, threads wait on the owner). `modules`, `survey` and `tsproj`
+   come with the command that first needs them.
+2. Add the command to `port-plan.sh` with made-up repos for its cases, and
+   breaks for it to `port-prove-plan.py`. Widen the repos until every break
+   is caught.
+3. Rebuild the Goose program from main first (`scripts/build.sh`; Spread-
+   Wings needs libcurl's headers) and pass it as `SWAN_OLD=bin/swan`.
+Stage 2 passes when every command prints the same bytes on the fixtures,
+the four trial repos and cobra. The trial repos are on the owner's machine:
+the last run is there.
 
 ## Decisions waiting on the owner
+- "Ask drex max when unsure" (the owner, 2026-11-20): no drex model or
+  service token reached the cloud session, so nothing was asked. Questions
+  for it: none came up for `cargo-projects`; the port is line by line.
 - Threads in the store. Measured, the same map written: `rayon` takes a
   further 14% off `index` on relate, SQLite's own sort threads 6% more
   (14% on rea). Held until stage 8 so the microVM suite can judge them;

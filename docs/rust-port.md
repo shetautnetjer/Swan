@@ -251,6 +251,8 @@ Not looked at: the statements behind checking and the server's own tools
 | 2026-11-20T07:33Z | Cost (STATUS.md has the table): `index` 947 ms against the Goose program's 1,054 on relate and 3,264 against 3,830 on rea, with less memory in both; an unchanged `refresh` 156 ms against 240; questions the same to the millisecond. |
 | 2026-11-20T08:00Z | The judge times every question (`PORT_SLOW`). On Understand-Anything, relate and rea it found two kinds over 300 ms (`uses`, `diag`), and the plans three more that read every symbol (`callers`, `impls` and `hierarchy`, and the folder and path kinds). Rewrites for the first four were run beside the old statements: the same rows in the same order. Section above. |
 | 2026-11-20T09:43Z | Stages 0 and 1 go into main on the owner's word (asked which merge he meant, he chose "Rust branch into main"). The full suite ran in the microVM on the commit that merges; its counts are in the pull request. |
+| 2026-11-20T16:20Z | Stage 2 begun, one command at a time. `cargo-projects` carried: `rust/src/rustproj.rs` (src/rustproj.goose, with the five toolchain helpers it uses from src/seal.goose), and in `sys.rs` `env`, `write_stderr`, `realpath` and `run_capture` (only `rustup show home`; the full `swan_run` is stage 4). The Goose program judged is `bin/swan` built from main `8d3417a` in a cloud container (no trial repos there). `scripts/port-plan.sh`: 93 of 93 the same, on the 20 fixtures, four made-up repos, a missing repo, and relate, tokio, ripgrep, cargo (660 manifests, 366 lines out), bevy and cobra, each with RUSTUP_HOME unset, made up and missing. `--wrong-calls` 47 of 47. |
+| 2026-11-20T16:20Z | The judge seen failing: `scripts/port-prove-plan.py`, 11 of 11 breaks caught. The first judge caught 4 of 11; the made-up repos were widened until every break was caught (below). |
 
 ## Found while porting
 
@@ -297,15 +299,26 @@ Not looked at: the statements behind checking and the server's own tools
   program on relate (243 MB against 151), found by the cost table and not
   by any comparison: the rows file was read into one buffer and copied into
   another. Read straight into its place now: 146 MB.
+- Stage 2: the first judge for `cargo-projects`, the fixtures and three
+  made-up repos, passed 7 of 11 breaks. None of its repos had a crate named
+  inside another word (`mypath = "..."`), a `..` that leaves the repo
+  before coming back in, a crate under an excluded folder, a pinned
+  toolchain newer than the default, a library path that needs JSON escapes,
+  a quoted folder name in a comment, or a repo that does not exist. Each
+  is a case in `scripts/port-plan.sh` now.
+- Stage 2: `rustup show home`, asked when $RUSTUP_HOME and ~/.rustup hold
+  no toolchains, is run by `run_capture`, which inherits the environment
+  and waits 10 s as `swan_run` does. The rest of `swan_run` (environment
+  entries, standard error, sealing) is carried with the map at stage 4.
 
 ## Next
 
-Stage 2, planning that runs nothing: `modules`, `survey`, `rustproj`,
-`tsproj`, `gradle`, `pyplan` and `stamp` (2,007 lines), behind
-`cargo-projects`, `gradle-tasks`, `plan-python`, `stamp-bench` and
-`stamp-worker`. Before writing it: list what the seven files call outside
-themselves (`seal` and `run` are stage 4; the walk is carried); carry
-`stamp`'s worker processes as processes; and write the stage's judge
-beside `port-store.sh`, seen failing before it is trusted. It passes when
-the commands print the same bytes on the fixtures, the four trial repos and
-cobra.
+Stage 2, planning that runs nothing. Carried: `cargo-projects`
+(`rustproj`). Left: `gradle-tasks` (`gradle`), `plan-python` (`pyplan`),
+`stamp-bench` and `stamp-worker` (`stamp`, as processes), and `modules`,
+`survey` and `tsproj`, which the map uses and no command prints alone. Each
+command is added to `scripts/port-plan.sh` with made-up repos for its
+cases, and to `scripts/port-prove-plan.py` with breaks, before it is
+trusted. The stage passes when every command prints the same bytes on the
+fixtures, the four trial repos and cobra; the trial repos are on the
+owner's machine, so the last run is there.
