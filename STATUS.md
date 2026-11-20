@@ -1535,3 +1535,23 @@ Limits:
   `libs.findPlugin(...)` in code, from a published plugin jar, or a
   settings plugin.
 - Its own pull request; merging needs the owner's word.
+
+## 2026-11-20T21:13Z: a convention plugin's id counts only where a plugin is applied
+
+What was wrong (review of the change above, Macroscope): a convention
+plugin's id was read wherever it stood in quotes, so a plain JVM module that
+only names one in a string (`val conventionName = "demo.android.library"`)
+was taken for Android, and a repo of such modules would lose scip-java's
+`scipPrintDependencies` for compiles it may not have.
+
+Changed (src/gradle.goose): a convention plugin's id counts only as a plugin
+being applied: `id("x")`, `id 'x'`, `apply(plugin = "x")`, `apply plugin:
+'x'` or `pluginManager.apply("x")`. An Android plugin's own id is read as
+before. New fixture and check: convention-string.
+
+Checked: convention-string is Android on the Swan before this (seen
+failing) and plain after. The 17 fixture checks of lang_gradle by hand: 17
+of 17. Unchanged: every other case of fixtures/gradle-android,
+nowinandroid, architecture-samples, okhttp (Android) and RxJava (plain).
+
+Limits: as the change above (the microVM suite not run here).

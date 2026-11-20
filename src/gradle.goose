@@ -301,15 +301,54 @@ fn android_conventions(repo: const u8[:], catalog: const u8[:], aliases: const u
     return known;
 }
 
-// Which of the repo's own Android plugins (android_conventions) s names in
-// quotes: its ANDROID_PLUGINS index, or -1.
+// Whether the quoted string at s[q] is a plugin being applied: `id("x")`,
+// `id 'x'`, `apply(plugin = "x")`, `apply plugin: 'x'` or
+// `pluginManager.apply("x")`. A convention plugin's id anywhere else (a
+// string a build file keeps) applies nothing; an Android plugin's own id is
+// read wherever it is in quotes (android_plugin_in), as before.
+fn gradle_applies_at(s: const u8[:], q: i64) -> bool {
+    var i = q;
+    while i > 0 && (s[i - 1] == ' ' || s[i - 1] == '\t') { i--; }
+    if i > 0 && (s[i - 1] == '=' || s[i - 1] == ':') {
+        i--;
+        while i > 0 && (s[i - 1] == ' ' || s[i - 1] == '\t') { i--; }
+        return gradle_word_before(s, i) == "plugin";
+    }
+    let paren = i > 0 && s[i - 1] == '(';
+    if paren {
+        i--;
+        while i > 0 && (s[i - 1] == ' ' || s[i - 1] == '\t') { i--; }
+    }
+    let w = gradle_word_before(s, i);
+    return w == "id" || (paren && w == "apply");
+}
+
+// The word that ends at s[end].
+fn gradle_word_before(s: const u8[:], end: i64) -> const u8[:] {
+    var i = end;
+    while i > 0 && is_ident(s[i - 1]) { i--; }
+    return s[i..end];
+}
+
+// Which of the repo's own Android plugins (android_conventions) s applies
+// by id (gradle_applies_at): its ANDROID_PLUGINS index, or -1.
 fn convention_plugin_in(s: const u8[:], conventions: const u8[:]) -> i64 {
     var k = -1;
     each_split(conventions, '\n') { c =>
         let tab = find(c, "\t");
-        if k < 0 && tab > 0 && (find(s, str("\"", c[..tab], "\"")) >= 0 || find(s, str("'", c[..tab], "'")) >= 0) {
-            let n, ok = parse_int(c[tab + 1..]);
-            if ok { k = n; }
+        guard k < 0 && tab > 0;
+        for q in ["\"", "'"] {
+            let quoted = str(q, c[..tab], q);
+            var p = 0;
+            while k < 0 && p < s.len {
+                let a = find(s[p..], quoted);
+                guard a >= 0 else { break; }
+                if gradle_applies_at(s, p + a) {
+                    let n, ok = parse_int(c[tab + 1..]);
+                    if ok { k = n; }
+                }
+                p = p + a + 1;
+            }
         }
     };
     return k;
