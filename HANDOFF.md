@@ -1,6 +1,6 @@
 # Handoff: Swan in Rust (branch `rust`)
 
-Written 2026-11-20T07:25Z. For the next session, any agent.
+Written 2026-11-20T07:25Z; stage 2 part rewritten 2026-11-20T16:21Z. For the next session, any agent.
 
 ## The task
 Carry Swan over from Goose to Rust, on the owner's word, as a complete
@@ -15,7 +15,8 @@ purpose are in [docs/rust-port.md](docs/rust-port.md). Read it first.
 | What ships | The Goose program, unchanged. `rust/` is the port |
 | Stage 0 | Done: 47 of 47 wrong calls answered as the Goose build answers them |
 | Stage 1, the store | Done: `index`, `refresh` and 13 of the 14 `query` kinds. The same tables, refusals, staleness and answers as the Goose build `fb8df2a4c199` on four trial repos (STATUS.md has the counts) |
-| Stages 2 to 8 | Not started. Every command of theirs exits 70 and names its stage; `query pattern` waits for stage 3 |
+| Stage 2, planning | Done 2026-11-20 on branch `ccr-6c949a09-uhlhfn` (a cloud session; not on main): `cargo-projects`, `gradle-tasks`, `plan-python`. STATUS.md has the counts |
+| Stages 3 to 8 | Not started (stage 3 now holds `stamp` too). Every command of theirs exits 70 and names its stage; `query pattern` waits for stage 3 |
 
 ## What passed, and how to see it again
 ```bash
@@ -24,6 +25,8 @@ CARGO_TARGET_DIR=$PWD/build/rust ~/.cargo/bin/cargo test --release --manifest-pa
 scripts/port-compare.sh --wrong-calls                                       # 47 of 47
 scripts/port-store.sh $TRIES/maps/relate $TRIES/relate               # ends "the same: ..."
 scripts/port-prove.py $TRIES/maps/Agent-Reach $TRIES/Agent-Reach     # 9 of 9 breaks caught
+SWAN_OLD=bin/swan scripts/port-plan.sh [repo...]                     # stage 2: ends "the same: N of N"
+SWAN_OLD=$PWD/bin/swan scripts/port-prove-plan.py                    # stage 2: 76 of 76 breaks caught (about 30 min on 4 cores)
 ```
 `$TRIES` is the folder of trial repo copies the swan-change-loop skill
 names, with the Goose program's maps of them under `maps/`. `port-store.sh`
@@ -33,22 +36,30 @@ minute each in both programs). The full suite ran in the microVM on the
 commit that went into main. It judges the Goose program: the Rust program
 cannot run it before stage 8.
 
-## Next action: stage 2, planning that runs nothing
-`modules`, `survey`, `rustproj`, `tsproj`, `gradle`, `pyplan`, `stamp`
-(2,007 lines), behind `cargo-projects`, `gradle-tasks`, `plan-python`,
-`stamp-bench` and `stamp-worker`. Compared by bytes.
-1. Read the seven files and list what they call outside themselves
-   (`seal`, `run`, the walk). The walk is carried (`rust/src/walk.rs`);
-   `abs_path` needs `realpath` back in `rust/src/sys.rs`.
-2. `stamp` starts `swan stamp-worker` processes. Carry it as processes.
-   Threads are a question waiting on the owner (below).
-3. Write the stage's judge beside `port-store.sh`: each command on every
-   fixture and trial repo through `scripts/port-compare.sh`, and break the
-   Rust program on purpose to see each step fail before trusting it.
-Stage 2 passes when the four commands print the same bytes on the fixtures,
-the four trial repos and cobra.
+## Next action: stage 3, syntax
+Stage 2 is done: `cargo-projects`, `gradle-tasks` and `plan-python`
+(`rust/src/rustproj.rs`, `gradle.rs`, `pyplan.rs`), judged by
+`scripts/port-plan.sh [repo...]` and seen failing with
+`scripts/port-prove-plan.py`. `stamp`, `tsproj`, `survey` and `modules`
+moved to the stage of their first user (docs/rust-port.md, the stage
+table and "Found while porting").
+1. Read docs/rust-port.md, "Next": stage 3 builds tree-sitter and its
+   grammars from the same C sources goose-treesitter vendors at
+   `59313e9da0b9`, so the trees are the Goose program's.
+2. Compare trees first (each grammar's snippets), then carry `syntax`,
+   `structural`, `stamp` and the code stamps of `change`.
+3. Its own branch and pull request from main, as each stage is.
+Rebuild the Goose program from the branch first (`scripts/build.sh`;
+Spread-Wings needs libcurl's headers) and pass it as `SWAN_OLD=bin/swan`.
 
 ## Decisions waiting on the owner
+- The Now in Android fix (convention plugins) is its own commit on the
+  session's branch, in the Goose program and carried into Rust. It waits
+  for the owner's word to go to main as its own pull request, as do the
+  port's stage 2 commits.
+- "Ask drex max when unsure" (the owner, 2026-11-20): no drex model or
+  service token reached the cloud session, so nothing was asked. Questions
+  for it: none came up for `cargo-projects`; the port is line by line.
 - Threads in the store. Measured, the same map written: `rayon` takes a
   further 14% off `index` on relate, SQLite's own sort threads 6% more
   (14% on rea). Held until stage 8 so the microVM suite can judge them;
@@ -69,6 +80,12 @@ the four trial repos and cobra.
   have the IDE judge the Rust in that window, attach `rust/Cargo.toml`
   there (the Cargo tool window). Until then a copy of `rust/` is opened as
   its own project, beside the trial repos.
+
+## Held for after the port
+The owner's direction of 2026-11-20 (DECISIONS.md): Spread-Wings in Swan,
+a file watcher such as `notify`, hidden files and git-ignored folders left
+out for privacy, and one report of every area left out and why; serena-rs
+as a reference at stage 5. docs/rust-port.md, "Held for after the port".
 
 ## Do not
 - Change `src/*.goose` on this branch except to fix a bug found by the port

@@ -714,3 +714,18 @@ program. A later bug found the same way takes the same path.
 
 **Not decided by this:** merging. The fix is its own pull request, opened
 on the owner's word; merging it needs his word too.
+
+## 2026-11-20T16:33Z — After the port: Spread-Wings in Swan, a watcher, privacy by default, and what was left out said plainly
+
+**Direction (the owner's):** once the port is done, adopt serena-rs's
+methods where they make Swan behave better; incorporate Spread-Wings into
+Swan; use a file watcher (such as the `notify` crate) so the map keeps up
+the way Graphify does; index everything except hidden files and what git
+ignores, to keep people's information private; and spell out the areas
+left untouched because of Swan's own rules, unless the owner trusts the
+repo to run.
+
+**What it means now:** nothing changes during the port, which carries Swan
+over as it is (its rule: a better design is its own change afterwards).
+docs/rust-port.md, "Held for after the port", has serena-rs and what of
+this already exists.
