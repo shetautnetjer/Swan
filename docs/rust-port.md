@@ -79,7 +79,7 @@ build and the Rust build of the same commit.
 | 0 | Skeleton: commands, usage text, exit codes, the compare script | `swan.goose` | 248 | usage and exit code for every wrong call |
 | 1 | The store: reading flattened SCIP into a map, refresh, questions | `swan_sys.c`, `db`, `scip`, `index`, `fresh`, `graph`, `query`, `writer` | 2,110 | `index`, `refresh`: table hashes. `query`: bytes, 13 of the 14 kinds (`pattern` reads source with tree-sitter: stage 3). Done 2026-11-20: `scripts/port-store.sh` |
 | 2 | Planning that runs nothing | `rustproj`, `gradle`, `pyplan` (and the toolchain helpers of `seal` that `rustproj` uses) | 934 | `cargo-projects`, `gradle-tasks`, `plan-python`: bytes. Done 2026-11-20: `scripts/port-plan.sh`. `stamp`, `tsproj`, `survey` and `modules` moved to the stage of their first user (2026-11-20, "Found while porting") |
-| 3 | Syntax | `syntax`, `structural`, `stamp` and the code stamps of `change` (`cosmetic_lang`, `code_hash`) | 1,080 + 237 + some of 280 | `syntax-index` rows; `query pattern` bytes; `stamp-bench`'s stamps.tsv and `stamp-worker` |
+| 3 | Syntax | `syntax`, `structural`, `stamp` and the code stamps of `change` (`cosmetic_lang`, `code_hash`); goose-treesitter's `treesitter.goose` (the matcher), with its `ts_shim.c`, the runtime and the grammars built as they are | 1,080 + 237 + some of 280 + 750 | the trees (`scripts/port-trees.sh`); `syntax-index` rows; `query pattern` bytes; `stamp-bench`'s stamps.tsv and `stamp-worker` |
 | 4 | The map | `seal`, `run`, `pipeline`, `pypatch`, `tspatch`, `scip`, `wings`, `tsproj`, `survey` | 3,681 + 387 | `swan map`: table hashes, the report, "reused" on the second run |
 | 5 | Language servers | `golsp.goose`, `proc.c`, `glue.c`, `lspindex`, `live` | 1,815 | `lsp-index` SCIP output; `lsp-ask` answers |
 | 6 | Checking and editing | `checkers`, `diag`, `broke`, `change`, `edit`, `modules` | 1,549 + 449 | `check`, `broke`, `format`, `test`, `diagnostics`: reports and rows |
@@ -312,6 +312,7 @@ folders are.
 | 2026-11-20T16:41Z | `gradle-tasks` carried: `rust/src/gradle.rs` (src/gradle.goose), sharing `scip::is_ident`. `scripts/port-plan.sh` now judges it on every repo, each case of fixtures/gradle-android and 31 made-up Gradle repos: 181 of 181 the same, with relate, tokio, ripgrep, cargo, bevy, cobra, nowinandroid, architecture-samples, okhttp and RxJava. `scripts/port-prove-plan.py`: 36 of 36 breaks caught (the first run 36 of 37; the one missed cannot change any answer, below). |
 | 2026-11-20T19:40Z | Fix, not the port's: Android through convention plugins (Now in Android). In `src/gradle.goose` first, then `rust/src/gradle.rs`; from here the Goose program judged is the fixed one. `scripts/port-plan.sh` 201 of 201 with 14 more made-up repos; `scripts/port-prove-plan.py` 56 of 56 (two breaks of before re-anchored, their text now in two places). |
 | 2026-11-20T20:19Z | Stage 2 done. `plan-python` carried: `rust/src/pyplan.rs` (src/pyplan.goose). `scripts/port-plan.sh` with 21 made-up Python repos, each at six values of k: 577 of 577 the same, with the 14 public repos (requests, flask, pytest and django among them; django 2,943 .py files, 239 pieces, 22 to 28 ms in both). `scripts/port-prove-plan.py`: 76 of 76. `stamp`, `tsproj`, `survey` and `modules` moved to stages 3, 4 and 6 (stage table). |
+| 2026-11-20T21:10Z | Stage 3 begun (branch `rust-stage-3`, on #75). Tree-sitter in Rust: `rust/build.rs` builds goose-treesitter's own C (its `ts_shim.c`, the runtime 0.25.10 and 17 grammars) from the Goose build's copy at the commit `src/swan.goose` imports, with the lists of that package's `treesitter.build`; `rust/src/treesitter.rs` calls the shim. `scripts/port-trees.sh` (dumpers `scripts/port-trees.goose` and `rust/src/bin/port-trees.rs`): 25,300 of 25,300 files the same tree, 46 million nodes, every grammar. Seen failing: a `.h` file taken for C++, and a column one too far in a changed shim, each caught. |
 
 ## Found while porting
 
@@ -422,21 +423,29 @@ folders are.
   repo in one run" both by its own return and by falling through, since
   nothing else is in the plan or the queue yet.
 
+- Stage 3: tree-sitter comes from the very C the Goose program builds:
+  `rust/build.rs` reads the goose-treesitter commit from the import line in
+  `src/swan.goose` and its file and include lists from that package's
+  `treesitter.build`, so the two cannot drift. The cost: until stage 8 the
+  Rust build needs the Goose build to have fetched the package (into
+  `.tools/goose-home`, or `SWAN_TREESITTER_SRC`). Stage 8 decides how the
+  Rust program gets these sources once Goose is not built (a submodule of
+  goose-treesitter, or the C copied in).
+- Stage 3: goose-treesitter's own `treesitter.goose` (the structural
+  matcher behind `query pattern`, 750 lines) is Goose to carry too; it
+  was not in the stage's list of sources.
+
 ## Next
 
-Stage 3, syntax: `src/syntax.goose` and `src/structural.goose` (behind
-`syntax-index` and `query pattern`), with `src/stamp.goose` and the code
-stamps of `src/change.goose` (`cosmetic_lang`, `code_hash`; behind
-`stamp-bench` and `stamp-worker`). Everything here reads trees from
-tree-sitter, so the trees must be the Goose program's: the runtime and
-grammars are those goose-treesitter builds at the commit `src/swan.goose`
-imports (`59313e9da0b9`): tree-sitter 0.25.10 (language version 15),
-TypeScript 0.23.2, JavaScript 0.25.0, Python 0.25.0, Rust 0.24.0, Java
-0.23.5, C 0.24.1, C++ 0.23.4, C# 0.23.5, Kotlin 1.1.0, Lua 0.5.0, PHP
-0.25.1, GDScript 6.1.0, WGSL 0.0.1, and CUDA, GLSL and HLSL copied in as
-sources with no version. First step: build those same C sources from that
-commit (a `build.rs` with the `cc` crate) rather than crates of the same
-version numbers, whose generated parsers can differ; and compare a tree
-dump of each grammar's test snippets before carrying any Goose. The judge
-for the stage sits beside `scripts/port-plan.sh` and is seen failing
-before it is trusted.
+Stage 3, syntax, on branch `rust-stage-3`. Done: the trees (above). Left,
+in this order, each judged against the Goose program and seen failing
+before it is trusted:
+1. goose-treesitter's matcher (`treesitter.goose`: `compile`, `search`,
+   `search_files`, bindings, `fill_template`, `rename_metavars`) and
+   `src/structural.goose`, behind `swan query <db> pattern`.
+2. `src/syntax.goose`, behind `swan syntax-index` (its rows).
+3. `src/stamp.goose` with `cosmetic_lang` and `code_hash` from
+   `src/change.goose`, behind `stamp-bench` and `stamp-worker`; the
+   workers as processes.
+Rebuild the Goose program first (`scripts/build.sh`), which also fetches
+the goose-treesitter copy `rust/build.rs` builds from.

@@ -609,13 +609,14 @@ tools/              modules.json, external npm tool manifest (the Node indexers 
 tests/               MCP smoke test, refresh-vs-fresh check, latency bench
 fixtures/tiny-ts/    a small repo with the tricky cases (re-export, rename, same-name method and function)
 skills/swan-code-check/  the agent skill for using Swan (single source; copies follow it, see its PROVENANCE.md)
-rust/                the port to Rust in progress (docs/rust-port.md); the Goose program above is what ships. So far the store: main.rs (commands), index.rs, scip.rs, fresh.rs, walk.rs, query.rs, graph.rs, diag.rs, db.rs, sys.rs and util.rs, each carried from the Goose file of its name; and from stage 2, rustproj.rs (`cargo-projects`), gradle.rs (`gradle-tasks`) and pyplan.rs (`plan-python`)
+rust/                the port to Rust in progress (docs/rust-port.md); the Goose program above is what ships. So far the store: main.rs (commands), index.rs, scip.rs, fresh.rs, walk.rs, query.rs, graph.rs, diag.rs, db.rs, sys.rs and util.rs, each carried from the Goose file of its name; and from stage 2, rustproj.rs (`cargo-projects`), gradle.rs (`gradle-tasks`) and pyplan.rs (`plan-python`); from stage 3 so far, treesitter.rs (tree-sitter through goose-treesitter's own C, which build.rs builds from the Goose build's copy) and bin/port-trees.rs
 scripts/port-compare.sh  one swan command run by the Goose program and by the Rust port: output, error text and exit code compared
 scripts/port-store.sh    the store's comparison: the same map (table hashes), the same refusals, the same staleness, the same answers
 scripts/port-tables.sh   a map's schema and tables as row counts and hashes
 scripts/port-prove.py    the store's comparison seen failing: nine copies of the Rust program, each broken in one place on purpose, each to be caught
 scripts/port-plan.sh     stage 2's comparison: the planning commands on the fixtures, made-up repos and any repos given (cargo-projects under three rustup homes)
 scripts/port-prove-plan.py  stage 2's comparison seen failing: copies of the Rust program broken on purpose, each to be caught
+scripts/port-trees.sh    stage 3's first comparison: every file with a grammar parsed by both programs (scripts/port-trees.goose, rust/src/bin/port-trees.rs), the trees compared by bytes
 ```
 
 ## License

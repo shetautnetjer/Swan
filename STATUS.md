@@ -1725,3 +1725,43 @@ output with bad bytes replaced.
 Limits: the cloud container, as for the commands before: not the trial
 repos, not the microVM suite. Stage 2 is on the session's branch with the
 rest of today's work; main needs the owner's word.
+
+## 2026-11-20T21:10Z: stage 3 of the port begun: tree-sitter in Rust, the same trees
+
+What was missing: the Rust program could not parse a file. Stage 3
+(syntax-index, query pattern, stamps) reads tree-sitter trees, and they
+must be the Goose program's to the byte.
+
+Changed: `rust/build.rs` builds goose-treesitter's own C, its `ts_shim.c`,
+tree-sitter 0.25.10 and the 17 grammars, from the copy the Goose build
+fetches, at the commit `src/swan.goose` imports and with the file and
+include lists of that package's `treesitter.build`. `rust/src/treesitter.rs`
+calls the shim (`parse`) and carries `language_of_path`. Two dumpers print
+a file's tree as its eight numbers a node: `scripts/port-trees.goose`
+(the Goose program's) and `rust/src/bin/port-trees.rs` (the Rust
+program's). `scripts/port-trees.sh` compares them. `cc` 1.11.2 (already
+in the lock file) is the one new build dependency. Nothing ships.
+
+Checked:
+- `scripts/port-trees.sh` on the fixtures, Swan's own wings/, native/ and
+  lsp/, and 25 public repos (shallow clones, read only; among them wgpu,
+  godot-demo-projects, laravel, cuda-samples, redis, shadcn-ui, django,
+  nowinandroid): 25,300 of 25,300 files the same tree, about 46 million
+  nodes; every grammar, from 86 Lua files to 7,142 Rust files.
+- Seen failing: two broken copies of the Rust dumper: `.h` files taken
+  for C++ (caught on the first header), and a changed shim that puts every
+  column one too far (caught on the first file).
+- `cargo test` 5 of 5, `--wrong-calls` 47 of 47.
+
+Cost: the build compiles the grammars once (about 20 s here); the dumper
+is 32 MB with every grammar in it.
+
+Limits:
+- The Rust build now needs the goose-treesitter copy the Goose build
+  fetches; how it gets these sources once Goose is gone is stage 8's
+  question (docs/rust-port.md, "Found while porting").
+- Only the trees: `query pattern`, `syntax-index` and the stamps are not
+  carried yet. The matcher, goose-treesitter's `treesitter.goose`, is Goose
+  to carry too.
+- Run in a cloud session; not the trial repos, not the microVM suite.
+
