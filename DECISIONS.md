@@ -729,3 +729,19 @@ repo to run.
 over as it is (its rule: a better design is its own change afterwards).
 docs/rust-port.md, "Held for after the port", has serena-rs and what of
 this already exists.
+
+## 2026-11-20T23:17Z — Stage 2 into main (#76); serena-rs stays a reference, not a part
+
+**Decision (the owner's):** "Ok merge": #76, stage 2 of the port, merged
+into main (squashed, `049fd7c`), with the microVM suite not run on it. #75
+had been merged into #74's branch instead of main; #76 carried the same
+tree to main, on the owner's choice.
+
+**Asked with it:** whether the next phase brings in serena-rs or improves
+its binary. As recorded, the port carries Swan as it is (stage 3 next), and
+serena-rs is a reference at stage 5 for the language-server client (its
+crate is MIT on crates.io). Taking its binary in would replace Swan's map
+with live language-server questions, which is the design after the port
+(the entry of 16:33Z), not the port. Work on serena-rs itself would be
+another project; nothing is planned there.
+

@@ -15,7 +15,7 @@ purpose are in [docs/rust-port.md](docs/rust-port.md). Read it first.
 | What ships | The Goose program, unchanged. `rust/` is the port |
 | Stage 0 | Done: 47 of 47 wrong calls answered as the Goose build answers them |
 | Stage 1, the store | Done: `index`, `refresh` and 13 of the 14 `query` kinds. The same tables, refusals, staleness and answers as the Goose build `fb8df2a4c199` on four trial repos (STATUS.md has the counts) |
-| Stage 2, planning | Done 2026-11-20: `cargo-projects`, `gradle-tasks`, `plan-python`. Pull request #76 (branch `rust-stage-2`, into main); not on main yet. STATUS.md has the counts |
+| Stage 2, planning | Done and on main (#76, merged 2026-11-20 on the owner's word): `cargo-projects`, `gradle-tasks`, `plan-python`. STATUS.md has the counts |
 | Stage 3, syntax | Begun on branch `rust-stage-3`: the trees are the same (`scripts/port-trees.sh`). Left: `query pattern`, `syntax-index`, the stamps |
 | Stages 4 to 8 | Not started. Every command of theirs exits 70 and names its stage; `query pattern` waits for stage 3 |
 
@@ -45,13 +45,13 @@ The trees are done: `rust/build.rs` builds goose-treesitter's own C, and
 breaks, like `scripts/port-plan.sh` and `scripts/port-prove-plan.py`.
 Rebuild the Goose program first (`scripts/build.sh`): it also fetches the
 goose-treesitter copy the Rust build compiles. Its own pull request when
-done, stacked on #76 (stage 2 into main).
+done, from main.
 
 ## Decisions waiting on the owner
-- Merging #76: stage 2 into main. #74 (the Now in Android fix) is in main;
-  #75 was merged into #74's branch rather than main, so #76 carries the
-  same tree to main (the owner chose this, 2026-11-20). The microVM suite
-  has not run on it.
+- The microVM suite has not run on main since #74 and #76 went in.
+- `plan-python`'s overflow on an enormous piece count (Graphify, #75, #76):
+  the same in Goose and Rust; a one-line fix to both (`sizes.len / 2 < k`)
+  as its own pull request, or not?
 - "Ask drex max when unsure" (the owner, 2026-11-20): no drex model or
   service token reached the cloud session, so nothing was asked. Questions
   for it: none came up for `cargo-projects`; the port is line by line.

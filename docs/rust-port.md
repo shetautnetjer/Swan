@@ -265,7 +265,12 @@ about sealing.
 
 Use: a reference at stage 5, when the language-server client
 (`lsp/golsp.goose`) is carried, to see which Rust libraries it uses and how.
-Its license is to be read before anything is borrowed.
+Read on 2026-11-20: its crates.io entry (0.1.7) says MIT, while its
+repository has no LICENSE file and its Cargo.toml names none, so anything
+borrowed keeps its copyright notice and the source is named. Its client
+(`crates/serena-lsp`) is built on `lsp-types` 0.95, `lsp-server` 0.7 and
+`tokio`: crates the port could use itself, whatever is taken from
+serena-rs.
 
 ### The owner's direction for after the port (noted 2026-11-20T16:33Z)
 
