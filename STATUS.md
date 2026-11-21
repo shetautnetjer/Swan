@@ -1816,9 +1816,19 @@ Swan sets up a repo's declared packages in the map folder, with no install
 code run, and lists what it could not set up. Its pass criteria are written
 before anything is built.
 
-Limits: one Python repo was measured. The TypeScript count is the
-experiment's step 2. drex, jev-cli, pstack and superpowers were not
-available in this session, so none was used.
+Then, on the owner's word to use Jev (through Composio), Jev judged the
+evidence "moderate: one repo" and named the edit loop as the likely miss.
+So two more repos were measured, empty interpreter against the declared
+packages: requests 166 to 11 errors (155 false, 93%), pytest 298 to 319
+(1 false, 22 hidden). On a clean interpreter flask is 261 to 111 (184 false,
+34 hidden). The machine's own `python3` held four of flask's packages and
+all of requests', so Swan's answer changes from machine to machine. In the
+edit loop, `swan broke` caught a broken flask call in 1.3 s but not a wrong
+argument to a werkzeug function. Jev then judged the evidence "strong:
+several repos, one language".
+
+Limits: Python only. The TypeScript count is the experiment's step 2.
+drex, pstack and superpowers were not available in this session.
 
 Needs the owner: whether Swan's own package setup, with code execution off,
 is inside AGENTS.md rule 1 or needs trust.

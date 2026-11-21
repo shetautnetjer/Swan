@@ -5,13 +5,14 @@ repo's bugs and errors as an IDE would, without filling its context, so it can
 fix code, place new code, and know what an edit touches. He asked for one next
 experiment.
 
-The tools he named were not available here. There is no "drex" command and no
-service token in this session. jev-cli is not installed; Graphify shows its
-`search` is a lexical chunk search with an optional semantic pass through a
-model provider, which would need that provider's key. Nor were "pstack" or a
-"superpowers" plugin available. The measurements below use Swan itself, with
-Graphify and ripgrep, on flask (`49943b5a9441`, 217 files). The Swan program
-is the Goose build of main's `src/` (`049fd7c`). Pyright is 1.1.414.
+There is no "drex" command and no service token in this session, and
+"pstack" and a "superpowers" plugin were not available either. Jev was
+used, as the owner then asked, through Composio: it is TypeSafe's judging
+model (jev-1.14.0), and it judged this report's evidence and choices (last
+section). The measurements use Swan itself, with Graphify and ripgrep, on
+flask (`49943b5a9441`, 217 files), requests (`3c7baaa05ab4`) and pytest
+(`9efd0121a439`). The Swan program is the Goose build of main's `src/`
+(`049fd7c`). Pyright is 1.1.414.
 
 ## What is now known, worst first
 
@@ -26,7 +27,7 @@ interpreter. It reported **111 errors**.
 
 | | errors |
 | --- | --- |
-| Without the packages (what Swan shows today) | 203 |
+| Without the packages (what Swan showed on this machine, whose `python3` had four of the six) | 203 |
 | With them | 111 |
 | False: gone once the packages are there (82 unresolved imports, 22 unknown attributes, 16 others) | **120 of 203 (59%)** |
 | Hidden: only seen once the packages are there (15 wrong argument types, 4 unchecked `None`, 5 overrides that do not fit werkzeug's classes, 4 imports of optional packages) | **28 of 111 (25%)** |
@@ -41,6 +42,36 @@ python-dotenv and cryptography, which flask's extras name.
 So an agent asking "what is broken here?" gets an answer that is mostly
 wrong, and that misses a quarter of the true answer. This is the owner's
 point about the environment, with a number on it.
+
+Two more repos, each run twice: with an empty interpreter (a fresh machine)
+and with one that holds only the packages the repo declares.
+
+| Repo (pyright mode) | Errors, nothing installed | Errors, declared packages | False | Hidden |
+| --- | --- | --- | --- | --- |
+| flask (basic) | 261 | 111 | 184 (70%) | 34 |
+| requests (strict) | 166 | 11 | 155 (93%) | 0 |
+| pytest (basic, with its `dev` extras) | 298 | 319 | 1 | 22 |
+
+The harm differs by repo, but all three mislead. Requests' strict settings
+turn every unknown type into an error, so a missing package floods the
+list. In pytest the missing packages mostly hide errors. 20 of its 22
+hidden errors are general type errors.
+
+The machine decides the answer, too. With no virtualenv, Swan falls back to
+the machine's `python3`. On this machine that interpreter's user
+site-packages already held all of requests' packages, and four of flask's
+six (click, jinja2, markupsafe, blinker). So `swan check` showed 11 errors
+for requests here and would show 166 on a clean machine. For flask it
+showed 203 here (the first table) and would show 261. The same repo and
+the same Swan give different answers on different machines.
+
+The errors an agent hears about after an edit have the same hole. Two
+breaking edits were made to flask's `src/flask/helpers.py`, then `swan
+broke` (the `what_broke` tool) was asked. It reported the flask call with a
+missing argument, in 1.3 s, and left out the 7 false errors already in the
+file. It said nothing about `secure_filename(5)`, a number passed to a
+werkzeug function that takes text. Pyright reports both once werkzeug is
+installed. An agent that misuses a library gets no warning.
 
 Swan already reads a repo's own `.venv` when it has one, for the map. But
 `swan check` drops it unless the repo is trusted (`src/checkers.goose`:
@@ -95,10 +126,12 @@ out areas it didn't touch".
 
 **Pass criteria, written before building.**
 
-1. flask: of the 120 false errors, at most 5 remain, each named in the
-   report as a package not set up (the docs-only `pallets_sphinx_themes`
-   is expected). The 24 hidden type errors appear, and so do the 4 optional
-   imports unless the extras are set up. The 83 others are unchanged.
+1. flask, from a clean interpreter: of the 184 false errors, at most 5
+   remain, each named in the report as a package not set up (the docs-only
+   `pallets_sphinx_themes` is expected). The 34 hidden ones appear (the
+   optional imports only if the extras are set up). The 77 others are
+   unchanged. requests and pytest meet the same three numbers from their
+   tables.
 2. One TypeScript repo (express or shadcn-ui, from those already cloned):
    its errors are counted with and without the packages before anything is
    built, and the same three numbers are met.
@@ -109,6 +142,8 @@ out areas it didn't touch".
 4. Nothing is written into the repo: `git status` clean after map and check.
 5. Time and disk are recorded. The map of flask may not more than double
    (16 s now), and the cached packages are counted separately.
+6. The answer no longer depends on the machine: the same errors with and
+   without packages in the machine's own `python3`.
 
 **What it needs from the owner.** Rule 1 says no package manager runs on a
 repo nobody trusted. This experiment runs Swan's own uv or npm, on the
@@ -118,7 +153,7 @@ does, is the owner's call, before anything is built.
 
 **Why this one first.** It is the gap that makes the other answers wrong.
 A summary of the problems list (gap 2) is worth building right after, but
-summarising a list that is 59% false would only make the wrong answer
+summarising a list that is 59 to 93% false would only make the wrong answer
 shorter. Gaps 3 and 5 are small fixes. Gap 4 is large and is better aimed
 once the errors are true.
 
@@ -133,5 +168,28 @@ once the errors are true.
   check` runs pyright (`src/checkers.goose`), with the interpreter changed.
 - Errors were compared by file, 0-based line and rule. The map stores
   pyright's 0-based lines, and the answers add one.
+- requests and pytest, and flask's clean row: the same pyright run, once
+  with an empty `uv venv` and once with one holding the declared packages
+  (pytest's with its `dev` extras too), wheels only.
+- The edit test: two functions appended to `src/flask/helpers.py`, `swan
+  broke` asked before and after, the file put back with `git checkout`.
 - Answer sizes are the byte counts of `swan query <db> diag ""`,
   `callers Flask/make_response` and `callees Flask/make_response`.
+
+## Checked with Jev
+
+Jev (jev-1.14.0, through Composio, about 2,900 tokens over two calls) was
+given the measurements as they stood and asked to judge them. Its answers
+are evidence, not a decision.
+
+| Question | Before requests, pytest and the edit test | After |
+| --- | --- | --- |
+| How well do the numbers support the claim? | "Moderate: one repo, clear numbers" (2 of 4) | "Strong: several repos, one language" (2.95 of 4) |
+| Which experiment next? | sealed dependencies, 0.99 | still first, 0.6 |
+| How good are the pass criteria? | 3.76 of 4 | not asked again |
+| Is it inside rule 1? | inside 0.66, needs trust 0.25, the owner must decide 0.09 | not asked again |
+| What does the analysis most likely miss? | the edit loop 0.49, errors at run time 0.28 | TypeScript not measured 0.43, no proof yet that installing runs no code 0.38 |
+
+The edit-loop measurement above was made because of the first answer. The
+two holes in the second answer are pass criteria 2 and 3, to be met before
+the experiment counts.
