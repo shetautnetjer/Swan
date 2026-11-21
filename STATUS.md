@@ -1832,3 +1832,24 @@ drex, pstack and superpowers were not available in this session.
 
 Needs the owner: whether Swan's own package setup, with code execution off,
 is inside AGENTS.md rule 1 or needs trust.
+
+## 2026-11-21T12:19Z: what the build adds to an index, and what VirusTotal knows
+
+What was asked: does Swan need to run a repo's build to index it, and could a
+virus check stand in for trust.
+
+Measured, with rust-analyzer 0.3.3089's `analysis-stats` (expressions whose
+type it could not work out), build scripts and proc macros on, then off:
+- Swan's own Rust port (`rust/`, 6,757 lines): 5 of 26,062 on, 95 off
+  (0.4%), 61 s on and 9 s off.
+- A made-up crate using serde's derive and a build-generated file: 0 of 47
+  on, 8 of 43 off (17%).
+
+VirusTotal, through Composio, looked up by SHA-256 (nothing uploaded):
+werkzeug-3.1.3's wheel, serde_derive-1.0.229 and serde_json-1.0.154 were all
+known, and 0 engines flagged any (66, 57 and 59 undetected). OSV.dev, which
+lists known-malicious packages, could not be reached from this environment.
+
+Limits: Java, Kotlin, C# and C/C++ were not measured (their tools are not
+fetched here). VirusTotal's free API allows about 4 lookups a minute, and
+it only knows files someone has sent it.

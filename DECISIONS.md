@@ -729,3 +729,29 @@ repo to run.
 over as it is (its rule: a better design is its own change afterwards).
 docs/rust-port.md, "Held for after the port", has serena-rs and what of
 this already exists.
+
+## 2026-11-21T12:19Z: indexing should not need trust; the build is optional (the owner's direction)
+
+The owner, on reading that a repo's missing packages make most of Swan's
+errors false, and that trust stood in the way: "There is something
+fundamentally wrong with needing trust". "I don't think I need to run a
+build. That would be found out during testing not during an index for
+coding writes linting finding callers and functions." Where a better index
+needs the build, the risk should be understood and written in the README,
+with free VirusTotal tools to hand. "Most software with swan people will
+most likely be building themselves or running reverse engineering
+stacks." JetBrains' MCP and Serena never asked him for trust to search.
+
+What this means, to be confirmed with the owner before AGENTS.md rule 1
+changes:
+- Reading, indexing, searching, linting and callers never need trust.
+- The packages a repo declares may be fetched by Swan, with install
+  scripts off, and handed to the tools as folders, never started.
+- Running the build to index better is a choice, with its risk written
+  down, not a gate on accuracy.
+
+Measured for it (STATUS.md, same date): on Swan's own Rust port, leaving
+the build steps off loses 95 of 26,062 expressions (0.4%) and indexes in
+9 s instead of 61. A made-up crate built on a derive and generated code
+loses 8 of 43 (17%). VirusTotal knew three public packages by hash (the
+werkzeug wheel, serde_derive, serde_json), and no engine flagged them.
