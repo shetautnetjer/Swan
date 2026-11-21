@@ -755,3 +755,13 @@ the build steps off loses 95 of 26,062 expressions (0.4%) and indexes in
 9 s instead of 61. A made-up crate built on a derive and generated code
 loses 8 of 43 (17%). VirusTotal knew three public packages by hash (the
 werkzeug wheel, serde_derive, serde_json), and no engine flagged them.
+
+## 2026-11-21T12:28Z: AGENTS.md rule 1 rewritten, on the owner's yes
+
+Asked whether to rewrite rule 1 so that reading, indexing, searching,
+linting and finding callers never need trust, with packages downloaded,
+install scripts off, and the build an option off by default, the owner
+said "Yes". Rule 1 now says so, and the README says where Swan is going
+and that, until it is built, the build-running tools still wait for
+`swan trust`. Building the package download is the next change, on its
+own branch.

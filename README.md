@@ -554,6 +554,20 @@ for a user who needs only one language. See DECISIONS.md.
   question to those servers answers the same. The MCP server cannot trust
   a repo by itself. Test runners (`run_tests`) run the repo's code by
   design and are not held back.
+- Where this is going (the owner's direction, 2026-11-21, DECISIONS.md):
+  reading, indexing, searching, linting and finding callers will need no
+  trust. Swan will download the packages a repo declares, with install
+  scripts off, and hand them to its tools without starting them. Without
+  them, most of the errors it shows are false: 70% for flask and 93% for
+  requests on a clean machine, and real ones are hidden
+  (docs/agent-gaps-2026-11-20.md). Running the build becomes an option,
+  off by default, for what it adds: on Swan's own Rust, 0.4% of
+  expressions are understood only with it, and indexing takes 61 s with it
+  against 9 s without. It adds more where code is generated: 17% in a
+  made-up crate built on a derive. The risk is the repo's build files,
+  which are programs. Before running them, a VirusTotal lookup of the
+  downloaded packages and any binaries in the repo, by hash, is offered.
+  Until that is built, the tools above still wait for `swan trust`.
 - The CUDA fallback does not check device
   compilation. What each tried
   indexer misses is in `docs/parity-and-languages.md`.
