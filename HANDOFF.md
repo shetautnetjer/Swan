@@ -53,8 +53,10 @@ done, from main.
 ## Decisions waiting on the owner
 - The next experiment after the port's stage 3, proposed in
   docs/agent-gaps-2026-11-20.md (branch `ccr-6c949a09-uhlhfn`): "sealed
-  dependencies". On flask, 120 of 203 errors are false and 28 real ones
-  hidden while the repo's packages are not installed. May Swan set the
+  dependencies". Without a repo's packages, 70% of flask's errors, 93% of
+  requests' are false, and real ones are hidden (34 in flask, 22 in pytest).
+  Jev, through Composio, judged it the next experiment and the evidence
+  strong for Python. May Swan set the
   packages up itself, into the map folder, wheels only and with install
   scripts off? AGENTS.md rule 1 keeps package managers off untrusted repos,
   so this is the owner's call.
