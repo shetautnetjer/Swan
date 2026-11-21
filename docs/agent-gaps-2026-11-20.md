@@ -157,6 +157,37 @@ summarising a list that is 59 to 93% false would only make the wrong answer
 shorter. Gaps 3 and 5 are small fixes. Gap 4 is large and is better aimed
 once the errors are true.
 
+## What runs, and what trust is for
+
+The owner asked whether running Swan runs a repo's code. Searching and
+indexing do not. Tree-sitter, scip-python, scip-typescript and pyright read
+files. What runs a repo's code is a short list, and it is what `swan trust`
+gates (`tools/modules.json` marks it `runs_repo_code`, and
+`src/pipeline.goose`'s `build_trusted` checks it):
+- Rust's build scripts and macros, through rust-analyzer and `cargo
+  clippy`. The map already runs them sealed without trust, offline.
+- Gradle, Maven and MSBuild builds, and the Java, Kotlin, C# and Go
+  servers that run them.
+- The repo's own `.venv` interpreter.
+- Tests (`run_tests`), which run the repo's code by design.
+
+All of them run inside Swan's seal (`src/seal.goose`): no writes outside
+the map folder, and no network. Trust only loosens the seal, giving the
+network and write access to the repo and its build caches. None of the
+accuracy lost above comes from this list. It comes from packages that
+are not there, and getting packages needs none of the repo's code.
+
+One way code would run, found by testing. A `.pth` file in an installed
+Python package runs when an interpreter starts, and `swan check` starts
+one, because it gives pyright `--pythonpath`. With a made-up package
+holding such a file, `--pythonpath` reported the package's type error and
+the file ran. Given the same package as a folder (pyright's
+`extraPaths`), pyright reported the same error and nothing ran. So sealed
+dependencies hands the language tools the packages' folders and never
+starts an interpreter on them. A TypeScript language server can likewise
+load plugins that a `tsconfig.json` names from `node_modules`, which is
+the same kind of check for step 2.
+
 ## How it was measured
 
 - `bin/swan map <flask> <map>`, `bin/swan check <flask> <map>`, then the
