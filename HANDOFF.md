@@ -50,6 +50,13 @@ Rebuild the Goose program first (`scripts/build.sh`): it also fetches the
 goose-treesitter copy the Rust build compiles. Its own pull request when
 done, from main.
 
+## For Aya
+A handoff covering this work and the gap analysis, with the next steps in
+order, is in the owner's Google Drive, folder "Handoff": "Swan handoff
+for Aya (2026-11-21)". AGENTS.md rule 1 was rewritten on the owner's yes,
+on branch `ccr-6c949a09-uhlhfn`: indexing needs no trust, and the build is
+the owner's choice.
+
 ## Decisions waiting on the owner
 - The next experiment after the port's stage 3, proposed in
   docs/agent-gaps-2026-11-20.md (branch `ccr-6c949a09-uhlhfn`): "sealed
