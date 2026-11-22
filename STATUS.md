@@ -2188,3 +2188,59 @@ Limits:
 - Two of the first 16 "differences" of this part were the judge's own
   (its pattern, and a Python list it watched on repos that have Python).
 - The suite was not run for this piece: no Goose source changed.
+
+## 2026-11-22T09:21Z: stage 4: TypeScript's config, tsc's list and the projects of a repo in the Rust map
+
+What was missing: the Rust map stopped after the content stamps.
+
+Changed: `rust/src/pipeline.rs` carries the map to line 1449 of
+src/pipeline.goose. It asks tsc whether the repo's tsconfig can be read,
+and says so and writes Swan's own config when it cannot; makes sure of the
+indexer's patch (`ensure_scip_typescript_patch`, now in `tspatch.rs`);
+works out how many places TypeScript may split into; asks tsc for its
+files and their roots, or uses the list it kept, under a key of the files'
+names and the configs' contents; and gives each file to the config that
+owns it (`rust/src/tsproj.rs`, new, from src/tsproj.goose). With it came
+what a child is given to run with (`child_env`), `jobs_limit`,
+`ts_root_listing` and `lang_fingerprint`. Then the Rust map stops, as
+before, with exit 70.
+
+The judge was reworked to stay quick with tsc in it: cases run side by
+side, each from a made-up home of its own; the Goose program's answers are
+kept case by case, so a change to how the judge compares maps nothing
+again; tsc can be a made-up program that says what a case needs.
+
+What the prover found. Its first run on this part caught 203 of 214. Eight
+of the eleven were one hole: a Rust program that did not ask tsc where the
+Goose program does passed, because the judge accepted standard error that
+was only the start of the Goose program's. The steps a part accounts for
+are compared whole now. Two were cases that did not single their rule out,
+and one was no break at all (docs/rust-port.md, "Found while porting").
+
+Seen in Swan itself, and carried as it is (for the owner, after the port):
+a repo with no tsconfig of its own never has its TypeScript split or
+layered. tsc does not name the files of Swan's own config, whose `include`
+is an absolute path, so the list is asked for on every map and never used.
+
+Checked, Goose program built from this branch against the Rust program:
+
+| Judge | Result |
+|---|---|
+| `port-map.sh` | 229 of 229 the same in the part of a map that is carried; twelve seconds with the Goose program's answers kept, three minutes without |
+| The new cases | 131: real configs (read, not read, empty, a missing type library, another name); when tsc is asked at all (jobs, the floor of files, the places Python, cargo, Java, C and CUDA take); the indexer's patch in a home (missing, marked, stale mark, no indexer, half an indexer, turned off); the kept lists (again, clean, an older Swan's, another key, and seven repos changed after a first map); the projects of a repo (named folders, a chain of configs, ones tsc cannot read, a file two configs list, two configs in one folder, Swan's own config at the root, the limit of 64); 29 sets of answers from a made-up tsc; 15 of what a child is given |
+| `port-prove-map.py` | 256 of 256 breaks caught: 254 in a run of them all, and the two it missed by the case added for them (the other 254 were not run again after that case went in) |
+| Earlier judges | `port-json.sh` 159 of 159, `port-run.sh` 53 of 53, `port-patch.sh` 105 of 105, `port-syntax.sh` 57 of 57, `port-stamp.sh` 82 of 82, `port-pattern.sh` 182 of 182, `port-plan.sh` 443 of 443, `port-trees.sh` 95 of 95 files, `cargo test` 9 and 2 passed |
+
+Limits:
+- A map is still not made by the Rust program.
+- What this part works out for the parts to come is not judged yet: the
+  fingerprint of TypeScript's files, the words scip-typescript is started
+  with, how many chunks beyond "none, one or more", which files are left
+  to the root. The prover lists these.
+- This machine has no clang++ on /usr/local/bin:/usr/bin:/bin and has
+  Swan's JDK; on one that differs, the cases of the stand-in clang++ and of
+  the JDK say something else (both programs alike) and their breaks may
+  not be caught.
+- Cases that leave the number of jobs to the machine need 6 GB of memory
+  free to ask tsc at all.
+- The suite was not run for this piece: no Goose source changed.

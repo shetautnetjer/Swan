@@ -39,11 +39,12 @@
 // declaration. `swan scip-typescript-patch <file> [--revert]` applies or
 // undoes it by hand.
 //
-// Carried over from src/tspatch.goose: the sites and the file they patch.
-// Making sure of the patch before a map plans TypeScript
-// (ensure_scip_typescript_patch) comes with the map itself.
+// Carried over from src/tspatch.goose: the sites, the file they patch, and
+// making sure of the patch before a map plans TypeScript.
 
 use crate::pypatch::sites_patch_file;
+use crate::sys;
+use crate::util::{find, trim};
 
 const TSPATCH_MARK: &[u8] = b"function swanOrdinal(";
 
@@ -60,4 +61,42 @@ const TSPATCH_SITES: [&[u8]; 4] = [
 
 pub fn tspatch_file(path: &[u8], revert: bool) -> &'static [u8] {
     sites_patch_file(path, &TSPATCH_SITES, TSPATCH_MARK, revert)
+}
+
+// Before a map plans TypeScript: make sure Swan's copy of scip-typescript
+// names the properties of object literals by their place. True when it does
+// (several processes may then index parts of one project); false when it
+// could not be patched, with a line in the report. The answer is kept in a
+// marker beside the file, with the size it was left at, so later maps read
+// neither again.
+pub fn ensure_scip_typescript_patch(home: &[u8], report: &mut Vec<u8>) -> bool {
+    let dist = [home, b"/tools/node_modules/@sourcegraph/scip-typescript/dist/src"].concat();
+    let path = [&dist[..], b"/FileIndexer.js"].concat();
+    let size = sys::file_size(&path);
+    if size <= 0 {
+        return false;
+    }
+    let marker = [&dist[..], b"/.swan-stable-names"].concat();
+    let wanted = sys::env(b"SWAN_SCIP_TYPESCRIPT_PATCH") != b"0";
+    let mut seen: Vec<u8> = Vec::new();
+    if wanted && sys::read_file(&marker, &mut seen) && trim(&seen) == format!("{size} stable").as_bytes() {
+        return true;
+    }
+    let mut text: Vec<u8> = Vec::new();
+    sys::read_file(&path, &mut text);
+    let mut stable = find(&text, TSPATCH_MARK) >= 0;
+    if !stable && wanted && tspatch_file(&path, false) == b"patched" {
+        // The words are the Goose program's, its file's name included.
+        report.extend_from_slice(b"scip-typescript: applied Swan's stable names for the properties of object literals (src/tspatch.goose)\n");
+        stable = true;
+    }
+    if stable {
+        let mut now: Vec<u8> = Vec::new();
+        if sys::read_file(&path, &mut now) {
+            sys::write_file(&marker, format!("{} stable", now.len()).as_bytes());
+        }
+    } else {
+        report.extend_from_slice(b"scip-typescript: Swan's stable names are not applied to this indexer; TypeScript runs as one process, without layers, so that each declaration keeps one name\n");
+    }
+    stable
 }

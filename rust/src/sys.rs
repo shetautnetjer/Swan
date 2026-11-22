@@ -263,6 +263,12 @@ pub fn env(name: &[u8]) -> Vec<u8> {
     std::env::var_os(OsStr::from_bytes(name)).map(|v| v.into_vec()).unwrap_or_default()
 }
 
+/// An environment variable's value, where the variable is set at all (Goose's
+/// `env` says so apart from the value: one set to nothing is still set).
+pub fn env_set(name: &[u8]) -> Option<Vec<u8>> {
+    std::env::var_os(OsStr::from_bytes(name)).map(|v| v.into_vec())
+}
+
 /// Goose's write_stderr: the bytes as they are, no line end added.
 pub fn write_stderr(text: &[u8]) {
     use std::io::Write;

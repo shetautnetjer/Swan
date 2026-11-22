@@ -149,6 +149,11 @@ step added to the judge gets a break added there.
   `swan_run: cannot run mkdir: Invalid argument`); the Rust program says
   `No such file or directory`. Exit 127 in both, and the judge compares
   only that each says something.
+- **A line of /proc/meminfo with no unit.** How many indexers run at once
+  is held down by `MemAvailable:`, read up to the space before "kB". With
+  no space there the Goose program stops (it cuts the line where no space
+  is); the Rust program passes the line over and lets memory allow eight.
+  The kernel always writes the unit.
 - **Stamping on threads** (`SWAN_STAMP_MODE=threads`). The stamp lines come
   back in the order the workers finish, in both programs, so `stamps.tsv`
   holds the same lines in an order that changes from run to run. How many
@@ -261,6 +266,17 @@ The port carries Swan over as it is; a better design is its own change once
 the port passes, with its own measurement (rules above). These are written
 down so they are not lost.
 
+### TypeScript with no tsconfig of its own is never split (seen 2026-11-22)
+
+Swan's own config for such a repo has `"include": ["<repo>/**/*"]`, an
+absolute path. tsc 6.0.3 `--showConfig` then prints no `"files"`, so
+`ts_root_listing` finds no roots: tsc is asked twice on every map, nothing
+is kept, and TypeScript runs whole, with no chunks and no layers (a code
+edit indexes the whole program again). Tried by hand: the same config with
+`"include": ["../repo/**/*"]`, a relative path, does get its files named.
+A change for after the port, with its own check and a measure on a real
+repo that has JavaScript or TypeScript and no tsconfig.
+
 ### serena-rs, a Rust rewrite of Serena (noted 2026-11-20T16:33Z)
 
 [flobsx/serena-rs](https://github.com/flobsx/serena-rs), published as the
@@ -342,6 +358,7 @@ folders are.
 | 2026-11-22T07:26Z | Reading JSON carried: `rust/src/json.rs`, from Goose's `stdlib/json.goose`. `scripts/port-json.sh`: 159 of 159 texts read the same by both (150 made up, of which 67 are JSON; 9 files of the repo). `scripts/port-prove-json.py`: 23 of 23 breaks caught. |
 | 2026-11-22T07:26Z | The opening of `swan map` carried: `rust/src/seal.rs`, `wings.rs` (where spread-wings is), `survey.rs` (running it, and the report's lines), `Walk::refresh` (what git ignores) and, in `pipeline.rs`, the languages a repo holds, trust, an older map and a clean one. The Rust map then stops with exit 70. `scripts/port-map.sh`: 72 of 72 the same in the carried part, each program in a made-up home. `scripts/port-prove-map.py`: 74 of 74 breaks caught. |
 | 2026-11-22T07:49Z | The content stamps of `swan map` carried (src/pipeline.goose to line 1163): `Stamps` in `pipeline.rs`, with `index_lines` in `change.rs`; `stamp_known` and `line_of_path`, carried at stage 3, are reached now. `scripts/port-map.sh`: 98 of 98 in the carried part, 26 of them for the stamps. `scripts/port-prove-map.py`: 99 of 99 breaks caught, the first time it was run. #78 (stage 3) merged into main on the owner's word; main merged into `rust-stage-4`. |
+| 2026-11-22T09:21Z | `swan map` carried as far as the projects TypeScript is split into (src/pipeline.goose to line 1449, and src/tsproj.goose whole as `tsproj.rs`): the config probe, Swan's own tsconfig, `ensure_scip_typescript_patch` (`tspatch.rs`), `child_env`, `jobs_limit`, `ts_root_listing`, `lang_fingerprint`, the kept lists and their key, `ts_other_projects`. `scripts/port-map.sh` reworked (cases side by side, a home each, a made-up tsc, steps compared whole): 229 of 229, 131 of them new. `scripts/port-prove-map.py`: 256 of 256 breaks caught: 254 in a run of them all, and the two it missed by the case added for them (the other 254 were not run again after that case went in). |
 
 ## Found while porting
 
@@ -553,6 +570,57 @@ folders are.
 - Stage 4: with nothing to index the Goose program says "no language found
   to index" and exits 1. The Rust map stops just before that, so it is the
   next thing to carry.
+- Stage 4: the prover's first run on TypeScript's part caught 203 of 214,
+  and the eleven showed three things. Eight breaks made the Rust program
+  leave tsc unasked, and went unseen: the judge took the Rust program's
+  standard error for good when it was only the start of the Goose
+  program's, so saying less passed. The steps the carried part accounts
+  for are now compared whole (`STEPS`). Two made-up answers of tsc did not
+  single their rule out (a path that was real already; a spaced line
+  another line stood in for). One break was no break: a list of files with
+  a bad one in it is never read to its end, so "bad" and "ended" are never
+  both true. The second run, on both TypeScript parts, caught 254 of
+  256: the two were rules for Swan's own config at the root holding
+  files, which the real tsc never gives it (below), and a made-up tsc now
+  does.
+- Stage 4: that run also judged up to 32 broken copies at once in each of
+  six parts, every judge with its own cases side by side: a load of over a
+  thousand on 32 cores. Nothing was caught wrongly that could be seen, and
+  the prover now judges an eighth of the cores' worth at once
+  (`PORT_PROVE_JUDGES`).
+- Stage 4: seen in the Goose program while making the cases, and carried
+  as it is: for a repo with no tsconfig of its own (or one tsc cannot
+  read) Swan asks tsc for its files on every map and never uses the
+  answer. Swan's own config names the repo by an absolute path, and tsc
+  6.0.3's `--showConfig` names a config's files only when its `include` is
+  a relative path, so no roots are found, no list is kept, and TypeScript
+  runs as one job with no layers. Of the judge's 204 maps by the Goose
+  program, the 32 that kept a list all had a tsconfig of their own. See
+  "Held for after the port".
+- Stage 4: also seen and carried as it is: where the root's config and one
+  it names both list a file, `tsc --listFilesOnly` stops with TS6305 and
+  the root's list is not taken; and a file that a later part stamps though
+  no walk reaches it (in a hidden folder, or not there at all) has its
+  text kept then, which the judge counts apart (`LATER_TEXTS`).
+- Stage 4: the map judge runs its cases side by side now, each from a
+  made-up home of its own, and keeps what the Goose program said case by
+  case: 229 cases take about twelve seconds once the Goose program's
+  answers are kept (three minutes the first time), where the 98 before
+  took eight one after another and would have taken minutes with tsc in
+  them. A home is links to the checkout's tools. The first design would
+  have let a map write its mark through a hard link into the checkout's
+  own copy of the indexer; a home now gets files of its own for whatever a
+  map writes before any map runs, and only map folders are made writable
+  when a run is cleared away.
+- Stage 4: tsc can be a made-up program in a case's home, as spread-wings
+  already could: it says what the case needs (an exit code, a list with
+  none of the repo's files, a config with a backslash in it, another
+  answer for each config below the root) and, asked, what it was given to
+  run with, which is how `child_env` is judged.
+- Stage 4: seen while making a case, in the Goose program and so in the
+  port: Python planned for more places than a repo has top-level packages
+  comes out as one piece (seven packages: seven pieces for six places, one
+  for eight). Not looked into; `plan-python` is carried as it is.
 - Stage 4: the map judge's pattern for a part's lines goes to awk as a
   variable, where `\(` loses its backslash: "file(s)" was read as a group
   and 16 of 93 cases came out different with the two programs saying the
@@ -609,9 +677,18 @@ trusted:
      are kept, and a second map says which files changed only in comments
      or layout and which must be indexed again because their indexed text
      is unknown.
-   - Left, in order: the jobs of each language (TypeScript with `tsproj`,
-     Python's pieces, Rust, Java, C#, the language servers, `syntax-index`)
-     and "no language found";
+   - Done 2026-11-22: TypeScript as far as its projects. A repo's tsconfig that
+     tsc cannot read is said and Swan's own config written; the indexer's
+     patch is made sure of (`ensure_scip_typescript_patch`); how many
+     places TypeScript may split into is worked out from the other
+     languages and `$SWAN_JOBS`; tsc is asked for its files and their
+     roots, or the kept list is used; and each file is given to the config
+     that owns it (`tsproj.rs`, from `src/tsproj.goose`). With it: what a
+     child is given to run with (`child_env`), `jobs_limit`,
+     `ts_root_listing`, `lang_fingerprint`.
+   - Left, in order: the rest of TypeScript (the chunks, the layers, its
+     jobs), then Python's pieces, Rust, Java, C#, the language servers,
+     `syntax-index`, and "no language found";
      running them, at most so many at once; the flattener; `index` or
      `refresh`; the end of the report. The three `ensure_` functions of
      the patches come with TypeScript's and Python's jobs.

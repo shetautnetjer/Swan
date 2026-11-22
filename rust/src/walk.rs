@@ -116,6 +116,11 @@ impl Walk {
         }
     }
 
+    // The folders git ignores that a walk would reach, one per line.
+    pub fn ignored(&self) -> &[u8] {
+        &self.ignored
+    }
+
     // Whether a walk leaves this folder out.
     pub fn skips(&self, full: &[u8]) -> bool {
         let r = &self.repo[..];

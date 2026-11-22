@@ -4,29 +4,38 @@
 # own, and the two are compared:
 #   - what the Rust program says is what the Goose program says in the part
 #     of the map that is carried (it stops with exit 70 where the carrying
-#     has got to): the lines of the report that part writes (OPENING below),
-#     all of them and no others, and the start of standard error; when it
-#     ends another way, all that is said and the exit code;
+#     has got to): the lines of the report that part writes (OPENING below)
+#     and the accounts of the steps it runs (STEPS below), all of them and
+#     no others; when it ends another way, all that is said and the exit
+#     code;
 #   - the files of the map folder that the carried part writes or removes
-#     (WRITTEN below) are there or not in both, with the same bytes, and the
-#     texts it keeps (texts/) are the Goose program's: the same for a new
-#     map; for a map over an older one, at least those, since the Goose
-#     program drops the ones no record names when it ends. When the Rust
-#     program ends as the Goose program does, the whole folder.
+#     (WRITTEN below; CACHED too, but for a clean map, which holds those
+#     back until it ends and must not have them yet) are there or not in
+#     both, with the same bytes, and
+#     the texts it keeps (texts/) are the Goose program's: the same for a new
+#     map (but for those a later part keeps, of files no walk reaches); for
+#     a map over an older one, at least those, since the Goose program drops
+#     the ones no record names when it ends. When the Rust program ends as
+#     the Goose program does, the whole folder;
+#   - the TypeScript indexer in its home is left as the Goose program
+#     leaves it: patched or not, marked or not.
 # The repos are made up here to hold the corners of what is carried: what
 # git ignores, which languages a repo holds, a virtualenv, the survey (with
 # a made-up spread-wings that says what each case needs), an older map and
 # a clean one, the content stamps (enough files to start workers, a second
-# map, an edit of a comment only, a file whose indexed text is unknown).
-# Some fixtures are mapped too.
+# map, an edit of a comment only, a file whose indexed text is unknown),
+# and TypeScript's config, tsc's list of files and the projects of a repo
+# (with the real tsc, and with a made-up one that says what each case
+# needs). Some fixtures are mapped too.
 #
 #   scripts/port-map.sh
 #
-# The Goose program runs every indexer for each repo, which takes a minute
-# or two in all, so what it said and wrote is kept in build/port-map/ and
-# used again while the Goose program and this script are the same. Nothing
-# is written outside build/port-map/, and the seal is never loosened but
-# for the made-up repos this script trusts by name.
+# The Goose program runs every indexer for each repo, which takes some
+# minutes in all, so what it said and wrote is kept in build/port-map/ and
+# used again while the Goose program, the made-up repos and the case are
+# the same. The Rust program's cases run side by side, PORT_MAP_JOBS at a
+# time (default 8). Nothing is written outside build/port-map/, and the seal
+# is never loosened but for the made-up repos this script trusts by name.
 #
 # SWAN_OLD (default bin/swan), SWAN_NEW (default build/rust/release/swan).
 # Prints one "DIFFERENT (<case>)" block for each disagreement, then "the
@@ -43,46 +52,62 @@ new=${SWAN_NEW:-build/rust/release/swan}
 for f in bin/eggshell bin/spread-wings bin/swan-flatten; do [ -x "$f" ] || { echo "port-map: no $f (scripts/build.sh)"; exit 2; }; done
 command -v sqlite3 >/dev/null || { echo "port-map: sqlite3 is needed"; exit 2; }
 
-# Everything of one Goose program and one state of this script lives in one
-# folder, at the same path every run: the made-up repos, the Goose program's
-# home and what it said of each case.
-key=$( { sha256sum <"$old"; sha256sum <"$0"; } | sha256sum | cut -c1-16)
-base="$here/build/port-map/$key"
-mkdir -p "$base"
-# What an earlier Goose program or state of this script left is of no use.
-find "$here/build/port-map" -mindepth 1 -maxdepth 1 -type d ! -name "$key" ! -name 'run.*' -mmin +30 -exec rm -rf {} + 2>/dev/null
-work=$(mktemp -d "$here/build/port-map/run.XXXXXX")
-trap 'chmod -R u+rwx "${work:?}" 2>/dev/null; rm -rf "${work:?}"' EXIT
-r="$base/repos"
-
 put() { mkdir -p "$(dirname "$1")"; cat >"$1"; }
+TSI='tools/node_modules/@sourcegraph/scip-typescript/dist/src'
 
-# ---- the two homes ----
-# The Goose program maps for real, so its home holds the indexers: links to
-# this checkout's, except the files a map may patch, which are copies.
-if [ ! -e "$base/old/home/ready" ]; then
-    rm -rf "${base:?}/old"
-    mkdir -p "$base/old/home/bin"
-    cp bin/eggshell bin/spread-wings bin/swan-flatten "$base/old/home/bin/"
-    cp "$old" "$base/old/home/bin/swan"
-    ln -s "$here/.tools" "$base/old/home/.tools"
-    cp -al "$here/tools" "$base/old/home/tools"
-    for f in scip-python/dist/pyright-internal.js scip-python/dist/scip-python.js scip-python/dist/.swan-reach-patch \
-             scip-python/dist/.swan-site-patch scip-typescript/dist/src/FileIndexer.js scip-typescript/dist/src/.swan-stable-names; do
-        [ -e "tools/node_modules/@sourcegraph/$f" ] && cp --remove-destination "tools/node_modules/@sourcegraph/$f" "$base/old/home/tools/node_modules/@sourcegraph/$f"
+# ---- the homes ----
+# Each program maps from a made-up home of its own: its programs in bin/,
+# and tools/ as this checkout's, by links, but for what a map may change
+# (the TypeScript indexer's package, whose FileIndexer.js it patches) and
+# what a case may swap for a made-up one (tsc, in node_modules/.bin): those
+# are the home's own. The Goose program has one home, kept; the Rust program
+# gets a new one for every case, so that its cases can run side by side.
+# home_of <folder> <the folder its programs are in>
+home_of() {
+    local h=$1 e
+    mkdir -p "$h/bin" "$h/tools/node_modules/@sourcegraph"
+    ln "$2"/* "$h/bin/"
+    ln -s "$here/.tools" "$h/.tools"
+    for e in "$here"/tools/*; do [ "${e##*/}" = node_modules ] || ln -s "$e" "$h/tools/"; done
+    for e in "$here"/tools/node_modules/* "$here"/tools/node_modules/.[!.]*; do
+        case "${e##*/}" in .bin | @sourcegraph) ;; *) ln -s "$e" "$h/tools/node_modules/" ;; esac
     done
-    : >"$base/old/home/ready"
-fi
-# The Rust program needs, so far, only what its home's bin/ holds.
-mkdir -p "$work/new/home/bin"
-cp bin/eggshell bin/spread-wings bin/swan-flatten "$work/new/home/bin/"
-cp "$new" "$work/new/home/bin/swan"
-ln -s "$here/.tools" "$work/new/home/.tools"
-ln -s "$here/tools" "$work/new/home/tools"
+    cp -a "$here/tools/node_modules/.bin" "$h/tools/node_modules/.bin"
+    for e in "$here"/tools/node_modules/@sourcegraph/*; do [ "${e##*/}" = scip-typescript ] || ln -s "$e" "$h/tools/node_modules/@sourcegraph/"; done
+    cp -al "$here/tools/node_modules/@sourcegraph/scip-typescript" "$h/tools/node_modules/@sourcegraph/scip-typescript"
+    home_as_installed "$h"
+}
+# As Swan's installer leaves a home: the indexer patched and marked so, and
+# the real tsc. The files are the home's own, never a link to the checkout's.
+home_as_installed() {
+    rm -f "$1/$TSI/FileIndexer.js" "$1/$TSI/.swan-stable-names" "$1/tools/node_modules/.bin/tsc"
+    rm -rf "$1/tools/node_modules/.bin/tsc-says"
+    cp "$base/ts-indexer.patched" "$1/$TSI/FileIndexer.js"
+    printf '%s stable' "$(stat -c %s "$base/ts-indexer.patched")" >"$1/$TSI/.swan-stable-names"
+    ln -s ../typescript/bin/tsc "$1/tools/node_modules/.bin/tsc"
+}
+# What a case may do to a home before a map (HOME_PREP="<function> [word]").
+home_plain() { rm -f "$1/$TSI/FileIndexer.js" "$1/$TSI/.swan-stable-names"; cp "$base/ts-indexer.plain" "$1/$TSI/FileIndexer.js"; }
+home_plain_marked() { home_plain "$1"; printf '%s stable' "$(stat -c %s "$base/ts-indexer.plain")" >"$1/$TSI/.swan-stable-names"; }
+home_unmarked() { rm -f "$1/$TSI/.swan-stable-names"; }
+home_mark() { rm -f "$2/$TSI/.swan-stable-names"; printf "$1" "$(stat -c %s "$base/ts-indexer.patched")" >"$2/$TSI/.swan-stable-names"; }
+home_no_indexer() { rm -f "$1/$TSI/FileIndexer.js" "$1/$TSI/.swan-stable-names"; }
+home_empty_indexer() { home_no_indexer "$1"; : >"$1/$TSI/FileIndexer.js"; }
+home_half_indexer() { home_no_indexer "$1"; head -c $(($(stat -c %s "$base/ts-indexer.plain") / 2)) "$base/ts-indexer.plain" >"$1/$TSI/FileIndexer.js"; }
+# home_tsc <what it says> <home>: a made-up tsc, which says what $r/tsc/<name>/ holds.
+home_tsc() {
+    rm -f "$2/tools/node_modules/.bin/tsc"
+    cp "$r/tsc/tsc" "$2/tools/node_modules/.bin/tsc"
+    cp -r "$r/tsc/$1" "$2/tools/node_modules/.bin/tsc-says"
+}
+# How the indexer was left: its bytes, and its mark.
+home_state() {
+    if [ -e "$1/$TSI/FileIndexer.js" ]; then sha256sum <"$1/$TSI/FileIndexer.js"; else echo "no indexer"; fi
+    if [ -e "$1/$TSI/.swan-stable-names" ]; then cat "$1/$TSI/.swan-stable-names"; echo; else echo "no mark"; fi
+}
 
 # ---- made-up repos, made once ----
-if [ ! -e "$r/ready" ]; then
-    rm -rf "${r:?}"
+make_repos() {
     # A file of each kind a map tells apart.
     for f in a.ts b.js c.py d.rs E.java f.kt g.cu h.c i.h j.go k.goose l.lua m.glsl n.gd O.cs p.php q.wgsl r.hlsl s.sh t.pyi u.hxx; do printf '\n' | put "$r/langs/$f"; done
     printf 'all:\n' | put "$r/langs/Makefile"
@@ -233,90 +258,459 @@ EOF
 echo "usage: spread-wings index <repo> <graph.db>"
 exit 0
 EOF
+    # ---- TypeScript: its config, and what tsc lists ----
+    # A config of the repo's own, with a file outside what it includes.
+    printf '{"compilerOptions":{"strict":true},"include":["src"]}\n' | put "$r/ts-config/tsconfig.json"
+    printf 'export const a = 1;\n' | put "$r/ts-config/src/a.ts"
+    printf 'import { a } from "./a";\nexport const b = a + 1;\n' | put "$r/ts-config/src/b.ts"
+    printf 'export const outside = 1;\n' | put "$r/ts-config/tools/gen.ts"
+    # Roots that import a file the config does not include.
+    printf '{"include":["src"]}\n' | put "$r/ts-outside/tsconfig.json"
+    printf 'import { l } from "../lib/l";\nexport const a = l;\n' | put "$r/ts-outside/src/a.ts"
+    printf 'export const l = 1;\n' | put "$r/ts-outside/lib/l.ts"
+    # Configs tsc cannot read: one that extends a package that is not there
+    # (with sources, and alone), and one that takes in no file.
+    printf '{"extends":"@nowhere/tsconfig/base.json","include":["src"]}\n' | put "$r/ts-config-bad/tsconfig.json"
+    printf 'export const a = 1;\n' | put "$r/ts-config-bad/src/a.ts"
+    printf '{"extends":"@nowhere/tsconfig/base.json"}\n' | put "$r/ts-config-bad-only/tsconfig.json"
+    printf '{"include":["nothing"]}\n' | put "$r/ts-config-empty/tsconfig.json"; printf 'export const a = 1;\n' | put "$r/ts-config-empty/a.ts"
+    # A type library that is not installed: tsc complains and lists the files all the same.
+    printf '{"compilerOptions":{"types":["node"]},"include":["src"]}\n' | put "$r/ts-types-missing/tsconfig.json"
+    printf 'export const a = 1;\n' | put "$r/ts-types-missing/src/a.ts"
+    # More than one project: a tsconfig.json below the root, and a root that names another config.
+    printf '{"include":["src"]}\n' | put "$r/ts-nested/tsconfig.json"; printf 'export const a = 1;\n' | put "$r/ts-nested/src/a.ts"
+    printf '{"include":["*.ts"]}\n' | put "$r/ts-nested/packages/x/tsconfig.json"; printf 'export const x = 1;\n' | put "$r/ts-nested/packages/x/x.ts"
+    printf '{"extends":"./tsconfig.json"}\n' | put "$r/ts-nested/packages/x/tsconfig.build.json"
+    printf '{"include":["src"],"references":[{"path":"./tsconfig.lib.json"}]}\n' | put "$r/ts-refs/tsconfig.json"
+    printf '{"compilerOptions":{"composite":true},"include":["lib"]}\n' | put "$r/ts-refs/tsconfig.lib.json"
+    printf 'export const a = 1;\n' | put "$r/ts-refs/src/a.ts"; printf 'export const l = 1;\n' | put "$r/ts-refs/lib/l.ts"
+    # Configs of another name, at the root and below it, make no second project.
+    printf '{"include":["src"]}\n' | put "$r/ts-other-name/tsconfig.json"; printf '{"include":["src"]}\n' | put "$r/ts-other-name/tsconfig.app.json"
+    printf '{"include":["*.ts"]}\n' | put "$r/ts-other-name/conf/tsconfig.app.json"; printf 'export const a = 1;\n' | put "$r/ts-other-name/src/a.ts"
+    # JavaScript alone, and a file of every ending that counts, with one that does not.
+    printf 'export const a = 1;\n' | put "$r/js-only/index.js"; printf 'export const u = 1;\n' | put "$r/js-only/lib/util.mjs"
+    for f in a.ts b.tsx c.mts d.cts e.js f.jsx g.mjs h.cjs not.tsz; do printf 'export {};\n' | put "$r/ts-endings/$f"; done
+    # What git ignores is left out of Swan's own config, whatever its name holds.
+    printf 'export const a = 1;\n' | put "$r/ts-ign/a.ts"
+    for d in out "with space" 'q"d'; do printf 'export const g = 1;\n' | put "$r/ts-ign/$d/gen.ts"; done
+    printf 'out/\nwith space/\nq"d/\n' >"$r/ts-ign/.gitignore"; git -C "$r/ts-ign" init -q
+    # TypeScript beside each language that takes a place of its own when indexers run side by side.
+    for d in ts-cargo ts-java ts-c ts-cuda ts-c-cuda ts-rs ts-kt ts-py-seven; do printf 'export const a = 1;\n' | put "$r/$d/a.ts"; done
+    cp "$r/langs/Cargo.toml" "$r/langs/d.rs" "$r/ts-cargo/"
+    printf 'class E {}\n' >"$r/ts-java/E.java"
+    printf 'int h(void) { return 0; }\n' >"$r/ts-c/h.c"; printf '\n' >"$r/ts-cuda/g.cu"
+    printf 'int h(void) { return 0; }\n' >"$r/ts-c-cuda/h.c"; printf '\n' >"$r/ts-c-cuda/g.cu"
+    printf 'fn f() {}\n' >"$r/ts-rs/d.rs"; printf 'fun f() {}\n' >"$r/ts-kt/f.kt"
+    # Seven packages: one piece each when Python is planned for six places, one in all when for eight.
+    for i in 0 1 2 3 4 5 6; do : | put "$r/ts-py-seven/p$i/__init__.py"; printf 'def f%s(x):\n    return x\n' "$i" >"$r/ts-py-seven/p$i/m.py"; done
+    # Repos the Goose program maps once and that are changed after (make_before).
+    for d in ts-edit-config ts-edit-pkg ts-edit-nested ts-edit-code ts-edit-touch ts-edit-more ts-edit-gone; do
+        printf '{"include":["src"]}\n' | put "$r/$d/tsconfig.json"; printf '{"name":"e","version":"1.0.0"}\n' | put "$r/$d/package.json"
+        printf 'export const a = 1;\n' | put "$r/$d/src/a.ts"; printf 'export const b = 1;\n' | put "$r/$d/src/b.ts"
+    done
+    printf '{"include":["*.ts"]}\n' | put "$r/ts-edit-nested/packages/x/tsconfig.json"; printf 'export const x = 1;\n' | put "$r/ts-edit-nested/packages/x/x.ts"
+    # For the made-up tsc: sources with no config, the same with one, and a
+    # repo for each thing that changes what a child is given. (Its answers
+    # for the other projects are made further down, once it is there.)
+    for d in ts-fake ts-fake-config; do
+        printf 'export const a = 1;\n' | put "$r/$d/a.ts"; printf 'export const b = 1;\n' | put "$r/$d/b.ts"; printf 'export const c = 1;\n' | put "$r/$d/sub/c.ts"
+    done
+    ln -s a.ts "$r/ts-fake/link.ts"
+    printf '{"include":["*.ts","sub"]}\n' >"$r/ts-fake-config/tsconfig.json"
+    for d in ts-env ts-env-java ts-env-kt ts-env-c ts-env-cuda ts-env-cs ts-env-venv ts-env-all; do
+        printf '{}\n' | put "$r/$d/tsconfig.json"; printf 'export const a = 1;\n' | put "$r/$d/a.ts"
+    done
+    printf 'class E {}\n' >"$r/ts-env-java/E.java"; printf 'fun f() {}\n' >"$r/ts-env-kt/f.kt"
+    printf 'int h(void) { return 0; }\n' >"$r/ts-env-c/h.c"; printf '\n' >"$r/ts-env-cuda/g.cu"; printf 'class O {}\n' >"$r/ts-env-cs/O.cs"
+    printf 'home = /usr/bin\n' | put "$r/ts-env-venv/.venv/pyvenv.cfg"
+    printf 'class E {}\n' >"$r/ts-env-all/E.java"; printf 'int h(void) { return 0; }\n' >"$r/ts-env-all/h.c"; printf 'class O {}\n' >"$r/ts-env-all/O.cs"
+    printf 'home = /usr/bin\n' | put "$r/ts-env-all/.venv/pyvenv.cfg"
+    mkdir -p "$r/clangbin"; printf '#!/bin/sh\n' >"$r/clangbin/clang++"; chmod +x "$r/clangbin/clang++"
+    # The made-up tsc. It says what the files in tsc-says/ beside it hold, for
+    # the config it is asked about and for what it is asked (--showConfig,
+    # --listFilesOnly): the file named for the config's folder and name
+    # (show-x@tsconfig.json) if there is one, else the one for the repo's own
+    # config or for the one Swan writes in the map folder (show-repo,
+    # show-own). @REPO@ stands for the repo and @CFG@ for the config's
+    # folder. With a file named env there, it first says what it was given
+    # to run with; with one named needs-env, it answers only when it was
+    # given what a child of the map is given.
+    put "$r/tsc/tsc" <<'EOF'
+#!/bin/sh
+d=${0%/*}/tsc-says
+cfg=$2
+dir=${cfg%/*}
+case "$cfg" in
+    */tsproject/tsconfig.json) kind=own; repo=$(sed -n 's|.*"include":\["\(.*\)/\*\*/\*"\],"exclude".*|\1|p' "$cfg") ;;
+    *) kind=repo; repo=$dir ;;
+esac
+case "$3" in --showConfig) what=show ;; --listFilesOnly) what=list ;; *) exit 64 ;; esac
+if [ -e "$d/needs-env" ] && [ -z "${NODE_OPTIONS:-}" ]; then echo "made-up tsc: nothing given to run with" >&2; exit 9; fi
+if [ -e "$d/env" ] && [ "$what-$kind" = show-repo ]; then
+    printf 'PATH=%s NODE_OPTIONS=%s VIRTUAL_ENV=%s JAVA_HOME=%s\n' "$PATH" "${NODE_OPTIONS-unset}" "${VIRTUAL_ENV-unset}" "${JAVA_HOME-unset}"
+fi
+say=$what-$kind
+[ -e "$d/$what-${dir##*/}@${cfg##*/}" ] && say=$what-${dir##*/}@${cfg##*/}
+[ -e "$d/$say" ] && sed -e "s|@REPO@|$repo|g" -e "s|@CFG@|$dir|g" "$d/$say"
+[ -e "$d/$say.err" ] && cat "$d/$say.err" >&2
+exit "$(cat "$d/$say.code" 2>/dev/null || echo 0)"
+EOF
+    chmod +x "$r/tsc/tsc"
+    says() { put "$r/tsc/$1/$2"; }
+    : | says env env; echo 1 | says env show-repo.code
+    # says_own <name> <exit of the list> <exit of the config>: the usual list
+    # and config, for a repo with no config of its own; a case then changes one.
+    says_own() {
+        printf '@REPO@/a.ts\n@REPO@/b.ts\n@REPO@/sub/c.ts\n' | says "$1" list-own
+        printf '{\n    "files": [\n        "@REPO@/b.ts",\n        "@REPO@/a.ts"\n    ]\n}\n' | says "$1" show-own
+        echo "$2" | says "$1" list-own.code; echo "$3" | says "$1" show-own.code
+    }
+    says_own roots-good 0 0
+    says_own show-fails 0 1
+    says_own list-exit1 1 0
+    says_own list-exit2 2 0
+    says_own list-exit3 3 0
+    says_own list-exit1-none 1 0; printf '/nowhere/a.ts\n' | says list-exit1-none list-own
+    says_own list-exit1-prefix 1 0; printf '@REPO@-other/a.ts\n' | says list-exit1-prefix list-own
+    says_own list-none 0 0; printf '/nowhere/a.ts\n' | says list-none list-own
+    says_own show-none-listed 0 0; printf '{\n    "files": [\n        "@REPO@/zzz.ts"\n    ]\n}\n' | says show-none-listed show-own
+    says_own show-no-files 0 0; printf '{\n    "include": [\n        "x"\n    ]\n}\n' | says show-no-files show-own
+    says_own show-nospace 0 0; printf '{\n    "files":[\n        "@REPO@/a.ts"\n    ]\n}\n' | says show-nospace show-own
+    says_own show-empty-files 0 0; printf '{\n    "files": [\n    ]\n}\n' | says show-empty-files show-own
+    says_own show-unclosed 0 0; printf '{\n    "files": [\n        "@REPO@/a.ts",\n        "@REPO@/b.ts"' | says show-unclosed show-own
+    says_own show-short 0 0; printf '{\n    "files": [\n        "@REPO@/a.ts",\n        ""\n    ]\n}\n' | says show-short show-own
+    says_own show-unquoted 0 0; printf '{\n    "files": [\n        "@REPO@/b.ts",\n        @REPO@/a.ts"\n    ]\n}\n' | says show-unquoted show-own
+    says_own show-unquoted-end 0 0; printf '{\n    "files": [\n        "@REPO@/b.ts",\n        "@REPO@/a.ts\n    ]\n}\n' | says show-unquoted-end show-own
+    says_own show-backslash 0 0
+    says show-backslash show-own <<'EOF'
+{
+    "files": [
+        "@REPO@/b.ts",
+        "C:\\repo\\a.ts"
+    ]
+}
+EOF
+    # Roots in the config's order, however tsc reached them; a path given
+    # three ways; one real file listed under two names; names that are not
+    # listed, or are nowhere.
+    says roots-order list-own <<'EOF'
+/nowhere/lib.es5.d.ts
+@REPO@/sub/c.ts
+  @REPO@/b.ts 	
+@REPO@/a.ts
+@CFG@/tsconfig.json
+
+@REPO@/link.ts
+EOF
+    says roots-order show-own <<'EOF'
+{
+    "compilerOptions": {
+        "allowJs": true
+    },
+    "files": [
+        "./tsconfig.json",
+        "@REPO@/b.ts",
+        "tsconfig.json",
+        "@REPO@/a.ts",
+        "@REPO@/sub/c.ts",
+        "@REPO@/not-listed.ts",
+        "/nowhere/else.ts"
+    ],
+    "include": [
+        "x"
+    ]
+}
+EOF
+    # The repo's own config: what is said of one tsc cannot read, and the
+    # roots of one it can, given from the config's folder.
+    probe() { printf "$2" | says "$1" show-repo; echo "$3" | says "$1" show-repo.code; }
+    probe probe-first-line 'error TS5083: Cannot read file.\nsecond line\n' 1
+    probe probe-leading-newline '\nA line\nB line\n' 1
+    probe probe-no-newline 'only words' 2
+    probe probe-spaces '   spaced out \t \nmore\n' 1
+    probe probe-silent '' 1
+    probe probe-stderr '' 1; printf 'words on standard error\n' | says probe-stderr show-repo.err
+    probe probe-ok '{\n    "files": [\n        "./a.ts",\n        "sub/c.ts",\n        "sub/../b.ts",\n        "./gone.ts"\n    ]\n}\n' 0
+    printf '@REPO@/b.ts\n@REPO@/gone.ts\n@REPO@/sub/c.ts\n@REPO@/a.ts\n/nowhere/lib.d.ts\n' | says probe-ok list-repo
+    # ---- TypeScript: the other projects of a repo ----
+    # A root that names two folders, each a project.
+    printf '{"files":[],"references":[{"path":"./app"},{"path":"./node"}]}\n' | put "$r/ts-proj-dirs/tsconfig.json"
+    printf '{"compilerOptions":{"composite":true},"include":["*.ts"]}\n' | put "$r/ts-proj-dirs/app/tsconfig.json"; printf 'export const a = 1;\n' | put "$r/ts-proj-dirs/app/a.ts"
+    printf '{"compilerOptions":{"composite":true},"include":["*.ts"]}\n' | put "$r/ts-proj-dirs/node/tsconfig.json"; printf 'export const n = 1;\n' | put "$r/ts-proj-dirs/node/n.ts"
+    # A config that names a config that names a third: each is followed.
+    printf '{"include":["src"],"references":[{"path":"./tsconfig.a.json"}]}\n' | put "$r/ts-proj-chain/tsconfig.json"
+    printf '{"compilerOptions":{"composite":true},"include":["a"],"references":[{"path":"./deep/tsconfig.b.json"}]}\n' | put "$r/ts-proj-chain/tsconfig.a.json"
+    printf '{"compilerOptions":{"composite":true},"include":["b"]}\n' | put "$r/ts-proj-chain/deep/tsconfig.b.json"
+    printf 'export const s = 1;\n' | put "$r/ts-proj-chain/src/s.ts"; printf 'export const a = 1;\n' | put "$r/ts-proj-chain/a/a.ts"; printf 'export const b = 1;\n' | put "$r/ts-proj-chain/deep/b/b.ts"
+    # Configs tsc cannot read: one of two below the root, and the only one.
+    printf '{"include":["src"]}\n' | put "$r/ts-proj-unread/tsconfig.json"; printf 'export const s = 1;\n' | put "$r/ts-proj-unread/src/s.ts"
+    printf '{"include":["*.ts"]}\n' | put "$r/ts-proj-unread/packages/good/tsconfig.json"; printf 'export const g = 1;\n' | put "$r/ts-proj-unread/packages/good/g.ts"
+    printf '{"extends":"@nowhere/tsconfig/base.json"}\n' | put "$r/ts-proj-unread/packages/bad/tsconfig.json"; printf 'export const b = 1;\n' | put "$r/ts-proj-unread/packages/bad/b.ts"
+    printf '{"include":["src"]}\n' | put "$r/ts-proj-all-unread/tsconfig.json"; printf 'export const s = 1;\n' | put "$r/ts-proj-all-unread/src/s.ts"
+    printf '{"extends":"@nowhere/tsconfig/base.json"}\n' | put "$r/ts-proj-all-unread/packages/bad/tsconfig.json"; printf 'export const b = 1;\n' | put "$r/ts-proj-all-unread/packages/bad/b.ts"
+    # A file more than one config lists goes to the nearest above it.
+    printf '{"include":["**/*.ts"]}\n' | put "$r/ts-proj-overlap/tsconfig.json"; printf 'export const s = 1;\n' | put "$r/ts-proj-overlap/src/s.ts"
+    printf '{"include":["**/*.ts"]}\n' | put "$r/ts-proj-overlap/packages/tsconfig.json"; printf 'export const p = 1;\n' | put "$r/ts-proj-overlap/packages/p.ts"
+    printf '{"include":["*.ts"]}\n' | put "$r/ts-proj-overlap/packages/x/tsconfig.json"; printf 'export const x = 1;\n' | put "$r/ts-proj-overlap/packages/x/x.ts"
+    # Two configs in one folder that list the same file: tsconfig.json has it,
+    # whichever of the two is asked first.
+    printf '{"include":["src"]}\n' | put "$r/ts-proj-same-folder/tsconfig.json"; printf 'export const s = 1;\n' | put "$r/ts-proj-same-folder/src/s.ts"
+    printf '{"include":["*.ts"],"references":[{"path":"./tsconfig.app.json"}]}\n' | put "$r/ts-proj-same-folder/app/tsconfig.json"
+    printf '{"compilerOptions":{"composite":true},"include":["*.ts"]}\n' | put "$r/ts-proj-same-folder/app/tsconfig.app.json"; printf 'export const a = 1;\n' | put "$r/ts-proj-same-folder/app/a.ts"
+    cp -r "$r/ts-proj-same-folder" "$r/ts-proj-same-folder-ref-first"
+    printf '{"include":["src"],"references":[{"path":"./app/tsconfig.app.json"}]}\n' >"$r/ts-proj-same-folder-ref-first/tsconfig.json"
+    printf '{"include":["*.ts"]}\n' >"$r/ts-proj-same-folder-ref-first/app/tsconfig.json"
+    # Swan's own config at the root (the repo's cannot be read, or there is
+    # none): a config below takes every file it lists.
+    printf '{"extends":"@nowhere/tsconfig/base.json"}\n' | put "$r/ts-proj-own-base/tsconfig.json"; printf 'export const s = 1;\n' | put "$r/ts-proj-own-base/src/s.ts"
+    printf '{"include":["*.ts"]}\n' | put "$r/ts-proj-own-base/packages/x/tsconfig.json"; printf 'export const x = 1;\n' | put "$r/ts-proj-own-base/packages/x/x.ts"
+    printf 'export const s = 1;\n' | put "$r/ts-proj-no-root/src/s.ts"; printf 'export const t = 1;\n' | put "$r/ts-proj-no-root/src/t.ts"
+    printf '{"files":["x.ts","../../src/s.ts"]}\n' | put "$r/ts-proj-no-root/packages/x/tsconfig.json"; printf 'export const x = 1;\n' | put "$r/ts-proj-no-root/packages/x/x.ts"
+    # A config the root names in a folder no walk enters; a root that names
+    # itself; a root and a config beside it (named from below) that list
+    # the same file; two
+    # configs in a folder with no tsconfig.json that list the same file; two
+    # projects that list a file outside both.
+    printf '{"include":["src"],"references":[{"path":"./.cfg"}]}\n' | put "$r/ts-proj-hidden-ref/tsconfig.json"; printf 'export const s = 1;\n' | put "$r/ts-proj-hidden-ref/src/s.ts"
+    printf '{"compilerOptions":{"composite":true},"include":["*.ts"]}\n' | put "$r/ts-proj-hidden-ref/.cfg/tsconfig.json"; printf 'export const h = 1;\n' | put "$r/ts-proj-hidden-ref/.cfg/h.ts"
+    printf '{"include":["src"],"references":[{"path":"./tsconfig.json"}]}\n' | put "$r/ts-proj-self-ref/tsconfig.json"; printf 'export const s = 1;\n' | put "$r/ts-proj-self-ref/src/s.ts"
+    printf '{"include":["src"]}\n' | put "$r/ts-proj-root-same/tsconfig.json"; printf '{"include":["src"]}\n' | put "$r/ts-proj-root-same/tsconfig.app.json"
+    printf 'export const s = 1;\n' | put "$r/ts-proj-root-same/src/s.ts"; printf 'export const p = 1;\n' | put "$r/ts-proj-root-same/pkg/p.ts"
+    printf '{"include":["*.ts"],"references":[{"path":"../tsconfig.app.json"}]}\n' | put "$r/ts-proj-root-same/pkg/tsconfig.json"
+    printf '{"include":["src"],"references":[{"path":"./app/tsconfig.one.json"},{"path":"./app/tsconfig.two.json"}]}\n' | put "$r/ts-proj-two-refs/tsconfig.json"
+    printf 'export const s = 1;\n' | put "$r/ts-proj-two-refs/src/s.ts"; printf 'export const a = 1;\n' | put "$r/ts-proj-two-refs/app/a.ts"
+    for n in one two; do printf '{"compilerOptions":{"composite":true},"include":["*.ts"]}\n' >"$r/ts-proj-two-refs/app/tsconfig.$n.json"; done
+    printf '{"include":["src"]}\n' | put "$r/ts-proj-outside/tsconfig.json"; printf 'export const s = 1;\n' | put "$r/ts-proj-outside/src/s.ts"
+    printf 'export const shared = 1;\n' | put "$r/ts-proj-outside/shared/s.ts"
+    for n in a b; do printf '{"files":["../../shared/s.ts","%s.ts"]}\n' "$n" | put "$r/ts-proj-outside/packages/$n/tsconfig.json"; printf 'export const p = 1;\n' >"$r/ts-proj-outside/packages/$n/$n.ts"; done
+    # As many configs as are asked, and one more (for the made-up tsc).
+    printf 'export const a = 1;\n' | put "$r/ts-proj-64/a.ts"
+    for i in $(seq 10 73); do printf '{}\n' | put "$r/ts-proj-64/p$i/tsconfig.json"; printf 'export const x = 1;\n' >"$r/ts-proj-64/p$i/x.ts"; done
+    cp -r "$r/ts-proj-64" "$r/ts-proj-66"
+    for i in 74 75; do printf '{}\n' | put "$r/ts-proj-66/p$i/tsconfig.json"; printf 'export const x = 1;\n' >"$r/ts-proj-66/p$i/x.ts"; done
+    printf '@REPO@/a.ts\n' | says projects-many list-own; printf '{\n    "files": [\n        "@REPO@/a.ts"\n    ]\n}\n' | says projects-many show-own
+    printf '{"files":["./x.ts"]}\n' | says projects-many show-repo
+    printf '{"files":["./x.ts"],"references":[{"path":"../p11"},{"path":"../p12/tsconfig.json"}]}\n' | says projects-many show-p10@tsconfig.json
+    # Swan's own config at the root, with roots (which only a made-up tsc
+    # gives it): a config below takes a file inside its folder, and one
+    # outside that it lists.
+    printf 'export const s = 1;\n' | put "$r/ts-proj-own-fake/src/s.ts"; printf 'export const t = 1;\n' | put "$r/ts-proj-own-fake/src/t.ts"
+    printf '{}\n' | put "$r/ts-proj-own-fake/packages/x/tsconfig.json"; printf 'export const x = 1;\n' | put "$r/ts-proj-own-fake/packages/x/x.ts"
+    printf '@REPO@/src/s.ts\n@REPO@/src/t.ts\n@REPO@/packages/x/x.ts\n' | says projects-own list-own
+    printf '{\n    "files": [\n        "@REPO@/src/s.ts",\n        "@REPO@/src/t.ts",\n        "@REPO@/packages/x/x.ts"\n    ]\n}\n' | says projects-own show-own
+    printf '{"files":["./x.ts","../../src/s.ts"]}\n' | says projects-own show-repo
+    # What tsc says of a config, each way it can be wrong (for the made-up tsc).
+    printf '{}\n' | put "$r/ts-proj-fake/tsconfig.json"; printf 'export const a = 1;\n' | put "$r/ts-proj-fake/a.ts"
+    for d in n1 n2 n3 n4 n5 n6 n7; do printf '{}\n' | put "$r/ts-proj-fake/$d/tsconfig.json"; printf 'export const x = 1;\n' >"$r/ts-proj-fake/$d/x.ts"; done
+    printf '{}\n' >"$r/ts-proj-fake/n1/tsconfig.extra.json"; mkdir -p "$r/ts-proj-fake/empty-dir"; ln -s a.ts "$r/ts-proj-fake/alink.ts"
+    : | says projects needs-env
+    printf '@REPO@/alink.ts\n@REPO@/n1/x.ts\n@REPO@/n6/x.ts\n' | says projects list-repo
+    says projects show-repo <<'EOF'
+{
+    "files": [
+        "./alink.ts",
+        "./n1/x.ts",
+        "./n6/x.ts"
+    ]
+}
+EOF
+    # n1: its file, and the configs it names: a folder, a file, and ones that
+    # are not there, not named, or not names at all.
+    says projects show-n1@tsconfig.json <<'EOF'
+{"files": ["./x.ts", "x.ts"],
+ "references": [{"path": "./tsconfig.extra.json"}, {"path": "./missing.json"}, {"path": ""}, {"nopath": 1}, 7, {"path": 5},
+                {"path": "../empty-dir"}, {"path": "@CFG@/../n7"}]}
+EOF
+    printf '{"files": ["x.ts", "../n5/x.ts"]}\n' | says projects show-n1@tsconfig.extra.json
+    printf 'error TS5083: Cannot read file.\n' | says projects show-n2@tsconfig.json
+    printf '{"files": ["./x.ts"]}\n' | says projects show-n3@tsconfig.json; echo 1 | says projects show-n3@tsconfig.json.code
+    printf '{"files": "./x.ts"}\n' | says projects show-n4@tsconfig.json
+    printf '{"files": ["", 5, null, {"a": "./x.ts"}, "./x.ts", "./gone.ts"]}\n' | says projects show-n5@tsconfig.json
+    printf '{"files": ["./x.ts", "../a.ts", "/nowhere/z.ts"], "references": "none"}\n' | says projects show-n6@tsconfig.json
+    printf '["./x.ts"]\n' | says projects show-n7@tsconfig.json
+}
+
+# The Goose program maps these once, as they are made, and they are changed
+# after: a later map of each starts from what was kept of the earlier state.
+BEFORE="ts-edit-config ts-edit-pkg ts-edit-nested ts-edit-code ts-edit-touch ts-edit-more ts-edit-gone"
+make_before() {
+    local d
+    for d in $BEFORE; do
+        home_as_installed "$base/old/home"
+        (cd "$base/old" && env "${UNSET[@]}" home/bin/swan map "$r/$d" "$base/before/$d" >/dev/null 2>&1 </dev/null)
+        [ -e "$base/before/$d/tsc-files.txt" ] || { echo "port-map: the Goose program kept no list of tsc's files for $d"; exit 2; }
+    done
+    printf '{"compilerOptions":{"strict":true},"include":["src"]}\n' >"$r/ts-edit-config/tsconfig.json"
+    printf '{"name":"e","version":"1.0.1"}\n' >"$r/ts-edit-pkg/package.json"
+    printf '{"include":["*.ts"],"exclude":["none"]}\n' >"$r/ts-edit-nested/packages/x/tsconfig.json"
+    printf 'export const a = 2;\n' >"$r/ts-edit-code/src/a.ts"
+    touch "$r/ts-edit-touch/tsconfig.json" "$r/ts-edit-touch/package.json" "$r/ts-edit-touch/src/a.ts"
+    printf 'export const c = 1;\n' >"$r/ts-edit-more/src/c.ts"
+    rm "$r/ts-edit-gone/src/b.ts"
+}
+
+# Everything of one Goose program and one set of made-up repos lives in one
+# folder, at the same path every run: the repos, the Goose program's home
+# and what it said of each case.
+key=$( { sha256sum <"$old"; declare -f make_repos make_before home_of home_as_installed | sha256sum; } | sha256sum | cut -c1-16)
+base="$here/build/port-map/$key"
+mkdir -p "$base"
+# What an earlier Goose program or set of repos left is of no use.
+find "$here/build/port-map" -mindepth 1 -maxdepth 1 -type d ! -name "$key" ! -name 'run.*' -mmin +30 -exec rm -rf {} + 2>/dev/null
+work=$(mktemp -d "$here/build/port-map/run.XXXXXX")
+# A home holds links to this checkout's files: only the map folders are
+# made writable before all is removed. PORT_MAP_KEEP=1 leaves the folder.
+trap '[ -n "${PORT_MAP_KEEP:-}" ] || { chmod -R u+rwx "${work:?}"/c/*/maps 2>/dev/null; rm -rf "${work:?}"; }' EXIT
+r="$base/repos"
+# What a map must not be handed down from whoever runs this.
+UNSET=(-u SWAN_SPREAD_WINGS -u SWAN_TRUST_BUILD -u SWAN_SANDBOX -u SWAN_JOBS -u SWAN_TS_LAYER_MIN -u SWAN_SCIP_TYPESCRIPT_PATCH
+       -u SWAN_NODE_HEAP_MB -u SWAN_STAMP_JOBS -u SWAN_STAMP_MIN -u SWAN_STAMP_MODE -u JAVA_HOME -u VIRTUAL_ENV -u NODE_OPTIONS)
+# The indexer's file without Swan's patch and with it, as the Goose program makes them.
+if [ ! -e "$base/ts-indexer.patched" ]; then
+    rm -rf "${base:?}/tsi"; mkdir -p "$base/tsi"
+    cp "$TSI/FileIndexer.js" "$base/tsi/FileIndexer.js"
+    "$old" scip-typescript-patch "$base/tsi/FileIndexer.js" --revert >/dev/null 2>&1
+    cp "$base/tsi/FileIndexer.js" "$base/ts-indexer.plain"
+    "$old" scip-typescript-patch "$base/tsi/FileIndexer.js" >/dev/null 2>&1
+    cmp -s "$base/ts-indexer.plain" "$base/tsi/FileIndexer.js" && { echo "port-map: the Goose program does not patch $TSI/FileIndexer.js"; exit 2; }
+    mv "$base/tsi/FileIndexer.js" "$base/ts-indexer.patched"
+fi
+if [ ! -e "$r/ready" ]; then
+    rm -rf "${r:?}" "${base:?}/before" "${base:?}/said" "${base:?}/old"
+    make_repos
     : >"$r/ready"
 fi
+if [ ! -e "$base/old/home/ready" ]; then
+    rm -rf "${base:?}/old"; mkdir -p "$base/old/programs"
+    cp bin/eggshell bin/spread-wings bin/swan-flatten "$base/old/programs/"; cp "$old" "$base/old/programs/swan"
+    home_of "$base/old/home" "$base/old/programs"
+    : >"$base/old/home/ready"
+fi
+if [ ! -e "$base/before/ready" ]; then rm -rf "${base:?}/before"; mkdir -p "$base/before"; make_before; : >"$base/before/ready"; fi
+mkdir -p "$work/programs" "$work/verdict"
+cp bin/eggshell bin/spread-wings bin/swan-flatten "$work/programs/"; cp "$new" "$work/programs/swan"
 
 # ---- running a case ----
 # What the carried part of a map writes into the map folder. A case of the
 # plain repo that starts from a folder with files in it (WATCH) also watches
 # three it removes or leaves, which no later part makes again for a repo
 # with no Python.
-WRITTEN="git-ignored.txt git-ignored-all.txt survey.json scip-started"
+WRITTEN="git-ignored.txt git-ignored-all.txt survey.json scip-started tsproject/tsconfig.json"
+# What it keeps to use again. A clean map holds these back until it ends.
+CACHED="tsc-files.txt tsc-program.txt tsc-projects.txt"
 # The lines of the report the carried part writes: the Goose program's
 # report starts with these, and the Rust program's is these and no more.
-# The last is the made-up spread-wings' own complaint, which runs over
-# several lines inside "projects: not surveyed (...)".
-OPENING='^(languages:|not mapped, git ignores |projects: |node: dependencies are not installed |map schema |clean rebuild: cached |line [0-9]+ of what went wrong|stamps: |cosmetic edits: [0-9]+ file.s. changed only |reindexing [0-9]+ file.s. whose indexed text is unknown)'
+# Two are the ends of what a made-up program said over more than one line:
+# spread-wings inside "projects: not surveyed (...)", tsc inside
+# "typescript: the repo's tsconfig.json cannot be read (...)".
+OPENING='^(languages:|not mapped, git ignores |projects: |node: dependencies are not installed |map schema |clean rebuild: cached |line [0-9]+ of what went wrong|stamps: |cosmetic edits: [0-9]+ file.s. changed only |reindexing [0-9]+ file.s. whose indexed text is unknown|typescript: the repo.s tsconfig.json cannot be read |.*[)]; indexing with Swan.s own config$|scip-typescript: applied Swan.s stable names |scip-typescript: Swan.s stable names are not applied |typescript: [0-9]+ more tsconfig )'
+# The steps the carried part runs and gives an account of on standard
+# error: the Goose program's standard error starts with these (each with
+# whatever its step said when it failed), and the Rust program's is these
+# and no more. A program that leaves a step out says less, and that is a
+# difference like any other.
+STEPS='^(mkdir|tsc --listFilesOnly|tsc --showConfig): '
 WATCHED="python-files.tsv python-pieces.tsv other.txt"
-total=0; bad=0
+PAR=${PORT_MAP_JOBS:-8}
+total=0
 tidy() { sed -E -e 's/ in [0-9]+ ms$//' -e 's/^(.*): [0-9]+ ms$/\1: N ms/' -e 's/^(.*): exit (-?[0-9]+) after [0-9]+ ms$/\1: exit \2 after N ms/' -e "s|$2|<its folder>|g" -e 's/^goose runtime error: //' -e '$s/ \([^()]*\.goose:[0-9]+\)$//' "$1"; }
+# The prep_ and home_ functions there are so far: the Goose program maps a
+# case again when one of them changes.
+preps() { declare -f $(compgen -A function | grep -E '^(prep_|home_|mtime_ns$)') | sha256sum | cut -c1-16; }
 # case_of <name> <repo> [--clean] [NAME=value...]: both programs map the
 # repo into maps/<name> of their own folder. PREP names a function that
-# fills that folder first.
+# fills that folder first, HOME_PREP one that changes the home ("<function>
+# [word]"), DEPENDS the case whose kept map PREP copies.
 case_of() {
     local name=$1 repo=$2; shift 2
     local clean=()
     if [ "${1:-}" = --clean ]; then clean=(--clean); shift; fi
     total=$((total + 1))
     local kept="$base/said/$name"
-    if [ ! -e "$kept/code" ]; then
+    local sig="$repo|${clean[*]:-}|$*|${PREP:-}|${HOME_PREP:-}|${LISTED:-}|${DEPENDS:+$(stat -c %Y "$base/said/$DEPENDS/code")}|$(preps)"
+    if [ ! -e "$kept/code" ] || [ "$(cat "$kept/sig" 2>/dev/null)" != "$sig" ]; then
         rm -rf "${kept:?}" "${base:?}/old/maps/$name"
         mkdir -p "$kept" "$base/old/maps"
+        home_as_installed "$base/old/home"
+        [ -n "${HOME_PREP:-}" ] && $HOME_PREP "$base/old/home"
         [ -n "${PREP:-}" ] && "$PREP" "$base/old/maps/$name"
         if [ -n "${LISTED:-}" ]; then mkdir -p "$base/old/home/data"; printf '%s\n' "$LISTED" >"$base/old/home/data/trusted-repos"; fi
-        (cd "$base/old" && env -u SWAN_SPREAD_WINGS -u SWAN_TRUST_BUILD -u SWAN_SANDBOX "$@" home/bin/swan map "$repo" "maps/$name" "${clean[@]}" >"$kept/out" 2>"$kept/err" </dev/null; echo $? >"$kept/code.tmp")
+        (cd "$base/old" && env "${UNSET[@]}" "$@" home/bin/swan map "$repo" "maps/$name" "${clean[@]}" >"$kept/out" 2>"$kept/err" </dev/null; echo $? >"$kept/code.tmp")
         rm -rf "${base:?}/old/home/data"
+        home_state "$base/old/home" >"$kept/home"
+        printf '%s' "$sig" >"$kept/sig"
         mv "$kept/code.tmp" "$kept/code"
     fi
-    rm -rf "${work:?}/new/maps/$name"; mkdir -p "$work/new/maps"
-    [ -n "${PREP:-}" ] && "$PREP" "$work/new/maps/$name"
-    if [ -n "${LISTED:-}" ]; then mkdir -p "$work/new/home/data"; printf '%s\n' "$LISTED" >"$work/new/home/data/trusted-repos"; fi
-    (cd "$work/new" && env -u SWAN_SPREAD_WINGS -u SWAN_TRUST_BUILD -u SWAN_SANDBOX "$@" home/bin/swan map "$repo" "maps/$name" "${clean[@]}" >"$work/out" 2>"$work/err" </dev/null); local code=$?
-    rm -rf "${work:?}/new/home/data"
-    local old_code; old_code=$(cat "$kept/code")
-    tidy "$kept/out" "$base/old" >"$work/old.out"; tidy "$kept/err" "$base/old" >"$work/old.err"
-    tidy "$work/out" "$work/new" >"$work/new.out"; tidy "$work/err" "$work/new" >"$work/new.err"
-    local why=""
-    if [ "$code" = 70 ]; then
-        # The carried part: what it printed, less the line end print adds,
-        # is the opening of what the Goose program printed, whole; and its
-        # standard error, less the line that says where the carrying stops,
-        # starts the Goose program's.
-        head -c -1 "$work/new.out" >"$work/new.out.cut"
-        grep -v '^swan (rust): map is not carried over yet' "$work/new.err" >"$work/new.err.cut"
-        awk -v opening="$OPENING" '$0 !~ opening { exit } { print }' "$work/old.out" >"$work/old.out.cut"
-        cmp -s "$work/new.out.cut" "$work/old.out.cut" || why="the opening of its report is not the Goose program's"
-        [ -n "$why" ] || [ -s "$work/new.err.cut" ] || why="it says nothing on standard error"
-        [ -n "$why" ] || cmp -s "$work/new.err.cut" <(head -c "$(stat -c %s "$work/new.err.cut")" "$work/old.err") || why="its standard error so far is not the Goose program's"
-    else
-        cmp -s "$work/new.out" "$work/old.out" || why="standard output differs"
-        [ -n "$why" ] || cmp -s "$work/new.err" "$work/old.err" || why="standard error differs"
-        [ -n "$why" ] || [ "$code" = "$old_code" ] || why="exit code differs: Goose $old_code, Rust $code"
-    fi
-    local n="$work/new/maps/$name" o="$base/old/maps/$name" f
-    if [ -z "$why" ] && [ "$code" = 70 ]; then
-        for f in $WRITTEN ${WATCH:+$WATCHED}; do
-            if { [ -e "$n/$f" ] && [ ! -e "$o/$f" ]; } || { [ ! -e "$n/$f" ] && [ -e "$o/$f" ]; }; then
-                why="the map folder's $f is there for one program only"; break
-            fi
-            if [ -e "$n/$f" ] && ! cmp -s "$n/$f" "$o/$f"; then why="the map folder's $f differs"; break; fi
-        done
-        # The kept texts: the Goose program's, and for a new map no others.
-        if [ -z "$why" ] && [ -d "$o/texts" ]; then
-            for f in "$o"/texts/*; do
-                [ -e "$f" ] || continue
-                cmp -s "$f" "$n/texts/${f##*/}" || { why="the kept text ${f##*/} is not the Goose program's, or is not there"; break; }
-            done
-            if [ -z "$why" ] && [ -z "${PREP:-}" ] && [ "$(ls "$o/texts" | wc -l)" != "$(ls "$n/texts" 2>/dev/null | wc -l)" ]; then why="more texts are kept than the Goose program keeps"; fi
+    while [ "$(jobs -rp | wc -l)" -ge "$PAR" ]; do wait -n; done
+    (
+        w="$work/c/$name"; n="$w/maps/$name"; o="$base/old/maps/$name"
+        mkdir -p "$w/maps"
+        home_of "$w/home" "$work/programs"
+        [ -n "${HOME_PREP:-}" ] && $HOME_PREP "$w/home"
+        [ -n "${PREP:-}" ] && "$PREP" "$n"
+        if [ -n "${LISTED:-}" ]; then mkdir -p "$w/home/data"; printf '%s\n' "$LISTED" >"$w/home/data/trusted-repos"; fi
+        (cd "$w" && env "${UNSET[@]}" "$@" home/bin/swan map "$repo" "maps/$name" "${clean[@]}" >"$w/out" 2>"$w/err" </dev/null); code=$?
+        rm -rf "${w:?}/home/data"
+        old_code=$(cat "$kept/code")
+        tidy "$kept/out" "$base/old" >"$w/old.out"; tidy "$kept/err" "$base/old" >"$w/old.err"
+        tidy "$w/out" "$w" >"$w/new.out"; tidy "$w/err" "$w" >"$w/new.err"
+        why=""
+        if [ "$code" = 70 ]; then
+            # The carried part: what it printed, less the line end print adds,
+            # is the opening of what the Goose program printed, whole; and its
+            # standard error, less the line that says where the carrying stops,
+            # is the Goose program's as far as the steps that are carried.
+            head -c -1 "$w/new.out" >"$w/new.out.cut"
+            grep -v '^swan (rust): map is not carried over yet' "$w/new.err" >"$w/new.err.cut"
+            awk -v opening="$OPENING" '$0 !~ opening { exit } { print }' "$w/old.out" >"$w/old.out.cut"
+            cmp -s "$w/new.out.cut" "$w/old.out.cut" || why="the opening of its report is not the Goose program's"
+            [ -n "$why" ] || [ -s "$w/new.err.cut" ] || why="it says nothing on standard error"
+            awk -v steps="$STEPS" '/^.+: (N ms|exit -?[0-9]+ after N ms)$/ && $0 !~ steps { exit } { print }' "$w/old.err" >"$w/old.err.cut"
+            [ -n "$why" ] || cmp -s "$w/new.err.cut" "$w/old.err.cut" || why="its standard error is not the Goose program's for the steps that are carried"
+        else
+            cmp -s "$w/new.out" "$w/old.out" || why="standard output differs"
+            [ -n "$why" ] || cmp -s "$w/new.err" "$w/old.err" || why="standard error differs"
+            [ -n "$why" ] || [ "$code" = "$old_code" ] || why="exit code differs: Goose $old_code, Rust $code"
         fi
-    elif [ -z "$why" ] && { [ -d "$n" ] || [ -d "$o" ]; }; then
-        diff -r -x swan.db.lock "$n" "$o" >"$work/d" 2>&1 || why="the map folders differ: $(head -2 "$work/d" | tr '\n' ' ' | sed "s|$work/new|<Rust>|g; s|$base/old|<Goose>|g" | cut -c1-200)"
-    fi
-    if [ -n "$why" ]; then
-        bad=$((bad + 1)); echo "DIFFERENT ($name)"; echo "    $why"
-        echo "    Goose (exit $old_code):"; head -5 "$work/old.out" | cut -c1-200 | sed 's/^/      /'; head -3 "$work/old.err" | cut -c1-200 | sed 's/^/      ! /'
-        echo "    Rust (exit $code):"; head -5 "$work/new.out" | cut -c1-200 | sed 's/^/      /'; head -3 "$work/new.err" | cut -c1-200 | sed 's/^/      ! /'
-    fi
+        if [ -z "$why" ] && [ "$code" = 70 ]; then
+            for f in $WRITTEN ${WATCH:+$WATCHED} $([ ${#clean[@]} = 0 ] && echo "$CACHED"); do
+                if { [ -e "$n/$f" ] && [ ! -e "$o/$f" ]; } || { [ ! -e "$n/$f" ] && [ -e "$o/$f" ]; }; then
+                    why="the map folder's $f is there for one program only"; break
+                fi
+                # The same bytes, each program's own folder apart.
+                if [ -e "$n/$f" ] && ! cmp -s <(sed "s|$w|<its folder>|g" "$n/$f") <(sed "s|$base/old|<its folder>|g" "$o/$f"); then why="the map folder's $f differs"; break; fi
+            done
+            # A clean map holds back what it keeps until its rows are published.
+            if [ -z "$why" ] && [ ${#clean[@]} != 0 ]; then
+                for f in $CACHED; do [ ! -e "$n/$f" ] || { why="a clean map wrote $f before it ended"; break; }; done
+            fi
+            # The kept texts: the Goose program's, and for a new map no others.
+            # The Goose program keeps more where a later part stamps a file no
+            # walk reaches (one in a hidden folder, one that is not there):
+            # LATER_TEXTS says how many, and so many may be missing.
+            if [ -z "$why" ] && [ -d "$o/texts" ]; then
+                later=0
+                for f in "$o"/texts/*; do
+                    [ -e "$f" ] || continue
+                    if [ ! -e "$n/texts/${f##*/}" ]; then later=$((later + 1)); continue; fi
+                    cmp -s "$f" "$n/texts/${f##*/}" || { why="the kept text ${f##*/} is not the Goose program's"; break; }
+                done
+                [ -n "$why" ] || [ "$later" = "${LATER_TEXTS:-0}" ] || why="$later of the texts the Goose program keeps are not kept, where ${LATER_TEXTS:-0} are a later part's"
+                if [ -z "$why" ] && [ -z "${PREP:-}" ] && [ "$(ls "$o/texts" | wc -l)" != "$(($(ls "$n/texts" 2>/dev/null | wc -l) + later))" ]; then why="more texts are kept than the Goose program keeps"; fi
+            fi
+        elif [ -z "$why" ] && { [ -d "$n" ] || [ -d "$o" ]; }; then
+            diff -r -x swan.db.lock "$n" "$o" >"$w/d" 2>&1 || why="the map folders differ: $(head -2 "$w/d" | tr '\n' ' ' | sed "s|$w|<Rust>|g; s|$base/old|<Goose>|g" | cut -c1-200)"
+        fi
+        if [ -z "$why" ] && ! home_state "$w/home" | cmp -s - "$kept/home"; then
+            why="the indexer in its home is not left as the Goose program leaves it (Goose: $(tr '\n' ' ' <"$kept/home" | cut -c1-12,65-90); Rust: $(home_state "$w/home" | tr '\n' ' ' | cut -c1-12,65-90))"
+        fi
+        if [ -n "$why" ]; then
+            echo "DIFFERENT ($name)"; echo "    $why"
+            echo "    Goose (exit $old_code):"; head -6 "$w/old.out" | cut -c1-230 | sed 's/^/      /'; head -4 "$w/old.err" | cut -c1-200 | sed 's/^/      ! /'
+            echo "    Rust (exit $code):"; head -6 "$w/new.out" | cut -c1-230 | sed 's/^/      /'; head -4 "$w/new.err" | cut -c1-200 | sed 's/^/      ! /'
+        fi
+        [ -n "${PORT_MAP_KEEP:-}" ] || { chmod -R u+rwx "$w/maps" 2>/dev/null; rm -rf "${w:?}"; }
+    ) >"$work/verdict/$(printf '%04d' "$total")" 2>&1 &
 }
 
 # ---- what a repo holds ----
@@ -367,7 +761,8 @@ case_of sw-empty-name "$r/plain" SWAN_SPREAD_WINGS=
 # A map of plain, made by the Goose program, to start from.
 if [ ! -e "$base/plain-map/swan.db" ]; then
     rm -rf "${base:?}/plain-map"
-    (cd "$base/old" && home/bin/swan map "$r/plain" "$base/plain-map" >/dev/null 2>&1 </dev/null)
+    home_as_installed "$base/old/home"
+    (cd "$base/old" && env "${UNSET[@]}" home/bin/swan map "$r/plain" "$base/plain-map" >/dev/null 2>&1 </dev/null)
     [ -e "$base/plain-map/swan.db" ] || { echo "port-map: the Goose program made no map of the plain repo"; exit 2; }
 fi
 prep_plain() { cp -r "$base/plain-map" "$1"; }
@@ -401,7 +796,8 @@ case_of cos-threads "$r/cos" SWAN_STAMP_JOBS=2 SWAN_STAMP_MIN=1 SWAN_STAMP_MODE=
 # A map of cos, made by the Goose program, to start from.
 if [ ! -e "$base/cos-map/swan.db" ]; then
     rm -rf "${base:?}/cos-map"
-    (cd "$base/old" && home/bin/swan map "$r/cos" "$base/cos-map" >/dev/null 2>&1 </dev/null)
+    home_as_installed "$base/old/home"
+    (cd "$base/old" && env "${UNSET[@]}" home/bin/swan map "$r/cos" "$base/cos-map" >/dev/null 2>&1 </dev/null)
     [ -e "$base/cos-map/indexed-texts.tsv" ] || { echo "port-map: the Goose program made no map of the cos repo"; exit 2; }
 fi
 mtime_ns() { stat -c '%.9Y' "$1" | tr -d .; }
@@ -434,16 +830,153 @@ PREP=prep_cos case_of cos-same-time "$r/cos-same-time"
 PREP=prep_cos case_of cos-same-size "$r/cos-same-size"
 PREP=prep_cos_unknown case_of cos-unknown-clean "$r/cos" --clean
 PREP=prep_cos_unknown case_of cos-code-unknown "$r/cos-code"
-PREP=prep_py_many case_of py-many-again "$r/py-many"
+DEPENDS=py-many PREP=prep_py_many case_of py-many-again "$r/py-many"
 PREP=prep_cos_moved_known case_of cos-comment-moved-known "$r/cos-comment"
 PREP=prep_cos_moved_lost case_of cos-comment-moved-lost "$r/cos-comment"
 PREP=prep_cos_moved_other_time case_of cos-comment-moved-other-time "$r/cos-comment"
 PREP=prep_cos_moved_now case_of cos-comment-moved-now "$r/cos-comment"
+# ---- TypeScript: its config, the indexer's patch, tsc's list of files ----
+case_of ts-config "$r/ts-config"
+case_of ts-config-one-job "$r/ts-config" SWAN_JOBS=1
+case_of ts-outside "$r/ts-outside"
+case_of ts-config-bad "$r/ts-config-bad"
+case_of ts-config-bad-only "$r/ts-config-bad-only"
+case_of ts-config-empty "$r/ts-config-empty"
+case_of ts-types-missing "$r/ts-types-missing"
+case_of ts-nested "$r/ts-nested"
+case_of ts-nested-one-job "$r/ts-nested" SWAN_JOBS=1
+case_of ts-refs "$r/ts-refs"
+case_of ts-refs-one-job "$r/ts-refs" SWAN_JOBS=1
+case_of ts-other-name-one-job "$r/ts-other-name" SWAN_JOBS=1
+case_of ts-other-name "$r/ts-other-name"
+case_of js-only "$r/js-only"
+case_of ts-ign "$r/ts-ign"
+case_of ts-clean "$r/ts-config" --clean
+# When tsc is asked at all: with places to split into, or with files enough
+# (200, or $SWAN_TS_LAYER_MIN) or projects enough to make one chunk worth it.
+case_of plain-one-job "$r/plain" SWAN_JOBS=1
+case_of plain-two-jobs "$r/plain" SWAN_JOBS=2
+case_of plain-jobs-zero "$r/plain" SWAN_JOBS=0
+case_of plain-jobs-word "$r/plain" SWAN_JOBS=many
+case_of plain-layer-1 "$r/plain" SWAN_JOBS=1 SWAN_TS_LAYER_MIN=1
+case_of endings-layer-8 "$r/ts-endings" SWAN_JOBS=1 SWAN_TS_LAYER_MIN=8
+case_of endings-layer-9 "$r/ts-endings" SWAN_JOBS=1 SWAN_TS_LAYER_MIN=9
+case_of endings-layer-zero "$r/ts-endings" SWAN_JOBS=1 SWAN_TS_LAYER_MIN=0
+case_of endings-layer-word "$r/ts-endings" SWAN_JOBS=1 SWAN_TS_LAYER_MIN=few
+# The places other languages take: Python's pieces (planned for six places
+# at most), one for a cargo project, one for Java, one for C and CUDA.
+case_of cos-two-jobs "$r/cos" SWAN_JOBS=2
+case_of cos-three-jobs "$r/cos" SWAN_JOBS=3
+for d in ts-cargo ts-java ts-c ts-cuda ts-rs ts-kt; do case_of "$d-two-jobs" "$r/$d" SWAN_JOBS=2; done
+case_of ts-cargo-three-jobs "$r/ts-cargo" SWAN_JOBS=3
+case_of ts-c-cuda-three-jobs "$r/ts-c-cuda" SWAN_JOBS=3
+case_of ts-py-seven-eight-jobs "$r/ts-py-seven" SWAN_JOBS=8
+case_of ts-py-seven-nine-jobs "$r/ts-py-seven" SWAN_JOBS=9
+# The indexer's patch: put in where it is missing, and marked; a mark is
+# believed while it names the file's size; an indexer that cannot be
+# patched, or is not to be, is said so and TypeScript runs whole.
+HOME_PREP=home_plain case_of patch-plain "$r/plain"
+HOME_PREP=home_plain_marked case_of patch-plain-marked "$r/plain"
+HOME_PREP=home_unmarked case_of patch-unmarked "$r/plain"
+HOME_PREP='home_mark 9%s\040stable' case_of patch-mark-other-size "$r/plain"
+HOME_PREP='home_mark %s\040stale' case_of patch-mark-other-words "$r/plain"
+HOME_PREP='home_mark \040%s\040stable\n' case_of patch-mark-spaced "$r/plain"
+HOME_PREP=home_no_indexer case_of patch-no-indexer "$r/plain"
+HOME_PREP=home_empty_indexer case_of patch-empty-indexer "$r/plain"
+HOME_PREP=home_half_indexer case_of patch-half-indexer "$r/plain"
+HOME_PREP=home_half_indexer case_of patch-half-nested "$r/ts-nested" SWAN_JOBS=1
+case_of patch-off "$r/plain" SWAN_SCIP_TYPESCRIPT_PATCH=0
+HOME_PREP=home_plain case_of patch-off-plain "$r/plain" SWAN_SCIP_TYPESCRIPT_PATCH=0
+HOME_PREP=home_plain_marked case_of patch-off-plain-marked "$r/plain" SWAN_SCIP_TYPESCRIPT_PATCH=0
+HOME_PREP=home_plain case_of patch-on-plain "$r/plain" SWAN_SCIP_TYPESCRIPT_PATCH=1
+HOME_PREP=home_plain case_of patch-00-plain "$r/plain" SWAN_SCIP_TYPESCRIPT_PATCH=00
+HOME_PREP=home_plain case_of patch-plain-no-typescript "$r/rs-only"
+# tsc's list is kept, and asked for again when a file comes or goes or a
+# config changes, and not when only code does.
+prep_ts_config() { cp -r "$base/old/maps/ts-config" "$1"; }
+prep_ts_old_list() { prep_ts_config "$1"; sed -i '1s/ roots$//' "$1/tsc-files.txt"; }
+prep_ts_longer_key() { prep_ts_config "$1"; sed -i '1s/ roots$/ roots and more/' "$1/tsc-files.txt"; }
+prep_ts_other_program() { prep_ts_config "$1"; sed -i '1s/^/9/' "$1/tsc-program.txt"; }
+prep_ts_no_program() { prep_ts_config "$1"; rm -f "$1/tsc-program.txt"; }
+prep_ts_no_list() { prep_ts_config "$1"; rm -f "$1/tsc-files.txt"; }
+prep_before() { cp -r "$base/before/${1##*/}" "$1"; }
+DEPENDS=ts-config PREP=prep_ts_config case_of ts-config-again "$r/ts-config"
+DEPENDS=ts-config PREP=prep_ts_config case_of ts-config-again-clean "$r/ts-config" --clean
+DEPENDS=ts-config PREP=prep_ts_config case_of ts-config-again-one-job "$r/ts-config" SWAN_JOBS=1
+DEPENDS=ts-config PREP=prep_ts_old_list case_of ts-config-old-list "$r/ts-config"
+DEPENDS=ts-config PREP=prep_ts_longer_key case_of ts-config-longer-key "$r/ts-config"
+DEPENDS=ts-config PREP=prep_ts_other_program case_of ts-config-other-program "$r/ts-config"
+DEPENDS=ts-config PREP=prep_ts_no_program case_of ts-config-no-program "$r/ts-config"
+DEPENDS=ts-config PREP=prep_ts_no_list case_of ts-config-no-list "$r/ts-config"
+for d in $BEFORE; do PREP=prep_before case_of "$d" "$r/$d"; done
+# What tsc says, from a made-up tsc: which of its answers are taken, and
+# which of the files it lists are roots.
+for s in roots-order roots-good show-fails show-none-listed show-no-files show-nospace show-empty-files show-unclosed show-short show-unquoted show-unquoted-end show-backslash \
+         list-exit1 list-exit2 list-exit3 list-exit1-none list-exit1-prefix list-none; do
+    HOME_PREP="home_tsc $s" case_of "tsc-$s" "$r/ts-fake"
+done
+for s in probe-first-line probe-leading-newline probe-no-newline probe-spaces probe-silent probe-stderr probe-ok; do
+    HOME_PREP="home_tsc $s" case_of "tsc-$s" "$r/ts-fake-config"
+done
+# What a child is given to run with, said by the made-up tsc: Swan's own
+# programs first on PATH, a JDK where there is Java or Kotlin, a stand-in
+# clang++ where there is C and no clang++, .NET where there is C#, the
+# repo's virtualenv once it is trusted, and room for Node.
+P=/usr/local/bin:/usr/bin:/bin
+env_case() { local name=$1 repo=$2; shift 2; HOME_PREP="home_tsc env" case_of "env-$name" "$r/$repo" "$@"; }
+env_case plain ts-env "PATH=$P"
+env_case heap ts-env "PATH=$P" SWAN_NODE_HEAP_MB=123
+env_case heap-empty ts-env "PATH=$P" SWAN_NODE_HEAP_MB=
+env_case java ts-env-java "PATH=$P"
+env_case java-home ts-env-java "PATH=$P" JAVA_HOME=/opt/made-up-jdk
+env_case java-home-empty ts-env-java "PATH=$P" JAVA_HOME=
+env_case java-home-no-java ts-env "PATH=$P" JAVA_HOME=/opt/made-up-jdk
+env_case kt ts-env-kt "PATH=$P"
+env_case c ts-env-c "PATH=$P"
+env_case c-clang ts-env-c "PATH=$P:$r/clangbin"
+env_case cuda ts-env-cuda "PATH=$P"
+env_case cs ts-env-cs "PATH=$P"
+env_case venv ts-env-venv "PATH=$P"
+env_case venv-trusted ts-env-venv "PATH=$P" SWAN_TRUST_BUILD=1
+env_case all ts-env-all "PATH=$P" SWAN_TRUST_BUILD=1
+# ---- TypeScript: the other projects of a repo ----
+# Which config owns each file: the nearest above it that lists it; in one
+# folder, its tsconfig.json. What tsc cannot read is counted and said.
+case_of ts-proj-dirs "$r/ts-proj-dirs"
+case_of ts-proj-dirs-one-job "$r/ts-proj-dirs" SWAN_JOBS=1
+case_of ts-proj-dirs-clean "$r/ts-proj-dirs" --clean
+case_of ts-proj-chain "$r/ts-proj-chain"
+case_of ts-proj-unread "$r/ts-proj-unread"
+case_of ts-proj-all-unread "$r/ts-proj-all-unread"
+case_of ts-proj-overlap "$r/ts-proj-overlap"
+case_of ts-proj-same-folder "$r/ts-proj-same-folder"
+case_of ts-proj-same-folder-ref-first "$r/ts-proj-same-folder-ref-first"
+case_of ts-proj-root-same "$r/ts-proj-root-same"
+case_of ts-proj-own-base "$r/ts-proj-own-base"
+case_of ts-proj-no-root "$r/ts-proj-no-root"
+LATER_TEXTS=1 case_of ts-proj-hidden-ref "$r/ts-proj-hidden-ref"
+case_of ts-proj-self-ref "$r/ts-proj-self-ref"
+case_of ts-proj-two-refs "$r/ts-proj-two-refs"
+case_of ts-proj-outside "$r/ts-proj-outside"
+HOME_PREP="home_tsc projects-many" case_of ts-proj-64 "$r/ts-proj-64"
+HOME_PREP="home_tsc projects-many" case_of ts-proj-66 "$r/ts-proj-66"
+LATER_TEXTS=1 HOME_PREP="home_tsc projects" case_of ts-proj-fake "$r/ts-proj-fake"
+HOME_PREP="home_tsc projects-own" case_of ts-proj-own-fake "$r/ts-proj-own-fake"
+# The answer is kept under the key of tsc's list, and asked for again without it.
+prep_ts_dirs() { cp -r "$base/old/maps/ts-proj-dirs" "$1"; }
+prep_ts_dirs_other_key() { prep_ts_dirs "$1"; sed -i '1s/^/9/' "$1/tsc-projects.txt"; }
+prep_ts_dirs_no_projects() { prep_ts_dirs "$1"; rm -f "$1/tsc-projects.txt"; }
+DEPENDS=ts-proj-dirs PREP=prep_ts_dirs case_of ts-proj-dirs-again "$r/ts-proj-dirs"
+DEPENDS=ts-proj-dirs PREP=prep_ts_dirs_other_key case_of ts-proj-dirs-other-key "$r/ts-proj-dirs"
+DEPENDS=ts-proj-dirs PREP=prep_ts_dirs_no_projects case_of ts-proj-dirs-no-projects "$r/ts-proj-dirs"
 # ---- fixtures ----
 for f in tiny-ts tiny-py tiny-go tiny-rs tiny-java tiny-lua tiny-game go-modules; do
     [ -d "fixtures/$f" ] && case_of "fixture-$f" "$here/fixtures/$f"
 done
 
+wait
+bad=0
+for v in "$work"/verdict/*; do [ -s "$v" ] && { bad=$((bad + 1)); cat "$v"; }; done
 if [ $bad = 0 ]; then echo "the same: $total of $total"; exit 0; fi
 echo "DIFFERENT: $bad of $total"
 exit 1

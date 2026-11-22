@@ -11,13 +11,17 @@ use std::collections::{HashMap, HashSet};
 use crate::change::{code_hash, cosmetic_lang, index_lines, line_of_path};
 use crate::db::Db;
 use crate::index::SCHEMA_VERSION;
+use crate::pyplan::plan_python;
 use crate::query::meta_value;
 use crate::run::{run_step, swan_home};
+use crate::seal::{sealed_run, sealed_step};
 use crate::stamp::prestamp;
 use crate::survey::{survey_ignored, survey_report, survey_run};
 use crate::sys;
 use crate::treesitter;
-use crate::util::{contains_line, ends_with, find, hash, parse_int, print, push_int, split, starts_with};
+use crate::tspatch::ensure_scip_typescript_patch;
+use crate::tsproj::ts_other_projects;
+use crate::util::{contains_line, ends_with, find, hash, hash_combine, json_string, parse_int, print, push_int, split, starts_with, trim};
 use crate::walk::Walk;
 
 // What a repo holds, found by walking it.
@@ -33,6 +37,7 @@ struct Langs {
     kt: bool,       // Kotlin: tree-sitter only for now, no SCIP indexer runs
     syn: bool,      // Go, shell, Make, Ruby or Lua: `swan syntax-index` maps them
     other: Vec<u8>, // languages with no indexer here, only search and live errors: "lua glsl ..."
+    tsconfig: bool,
     cargo: bool,
     venv: Vec<u8>, // a virtualenv inside the repo, if any
 }
@@ -67,7 +72,11 @@ fn other_add(other: &mut Vec<u8>, lang: &[u8], room: usize) {
 }
 
 fn detect(walk: &Walk, repo: &[u8]) -> Langs {
-    let mut l = Langs { cargo: sys::file_exists(&[repo, b"/Cargo.toml"].concat()), ..Default::default() };
+    let mut l = Langs {
+        tsconfig: sys::file_exists(&[repo, b"/tsconfig.json"].concat()),
+        cargo: sys::file_exists(&[repo, b"/Cargo.toml"].concat()),
+        ..Default::default()
+    };
     for v in [&b".venv"[..], b"venv"] {
         if l.venv.is_empty() && sys::file_exists(&[repo, b"/", v, b"/pyvenv.cfg"].concat()) {
             l.venv = [repo, b"/", v].concat();
@@ -117,6 +126,238 @@ fn detect(walk: &Walk, repo: &[u8]) -> Langs {
         }
     });
     l
+}
+
+// A JDK for the indexers: $JAVA_HOME, else the one Swan fetched.
+fn java_home(home: &[u8]) -> Vec<u8> {
+    let jh = sys::env(b"JAVA_HOME");
+    if !jh.is_empty() {
+        return jh;
+    }
+    let dir = [home, b"/.tools/jdk"].concat();
+    if let Some(names) = sys::list_dir(&dir) {
+        for name in names {
+            if starts_with(&name, b"jdk-") {
+                return [&dir[..], b"/", &name[..]].concat();
+            }
+        }
+    }
+    Vec::new()
+}
+
+fn has_clang(path: &[u8]) -> bool {
+    path.split(|&c| c == b':').any(|d| sys::file_exists(&[d, b"/clang++"].concat()))
+}
+
+// The environment children get: a repo virtualenv first on PATH, and room
+// for scip-python and pyright on big repos.
+fn child_env(l: &Langs, extra: &[&[u8]], first: &[u8]) -> Vec<Vec<u8>> {
+    let home = swan_home();
+    let mut vars: Vec<Vec<u8>> = Vec::new();
+    let mut path: Vec<u8> = Vec::new();
+    if !first.is_empty() {
+        path.extend_from_slice(first);
+        path.push(b':');
+    }
+    if !l.venv.is_empty() {
+        path.extend_from_slice(&l.venv);
+        path.extend_from_slice(b"/bin:");
+    }
+    // Package-local Node/Bun, when installed. Trust-gated virtualenvs retain
+    // their existing precedence; the runtime directory belongs to Swan.
+    path.extend_from_slice(&home);
+    path.extend_from_slice(b"/.tools/runtime/bin:");
+    let mut jh: Vec<u8> = Vec::new();
+    if l.java || l.kt {
+        jh = java_home(&home);
+        if !jh.is_empty() {
+            path.extend_from_slice(&jh);
+            path.extend_from_slice(b"/bin:");
+        }
+    }
+    let p0 = sys::env(b"PATH");
+    if (l.c || l.cuda) && !has_clang(&p0) {
+        // scip-clang asks `clang++` only where clang's builtin headers are;
+        // .tools/llvm has those headers and a stand-in that answers.
+        path.extend_from_slice(&home);
+        path.extend_from_slice(b"/.tools/llvm/bin:");
+    }
+    // scip-dotnet runs `dotnet restore` by name.
+    if find(&l.other, b"csharp") >= 0 {
+        path.extend_from_slice(&home);
+        path.extend_from_slice(b"/.tools/dotnet:");
+    }
+    path.extend_from_slice(&p0);
+    vars.push([&b"PATH="[..], &path].concat());
+    if !l.venv.is_empty() {
+        vars.push([&b"VIRTUAL_ENV="[..], &l.venv].concat());
+    }
+    if !jh.is_empty() {
+        vars.push([&b"JAVA_HOME="[..], &jh].concat());
+    }
+    let heap = sys::env_set(b"SWAN_NODE_HEAP_MB").unwrap_or_else(|| b"16000".to_vec());
+    vars.push([&b"NODE_OPTIONS=--max-old-space-size="[..], &heap].concat());
+    for e in extra {
+        vars.push(e.to_vec());
+    }
+    vars
+}
+
+// How many indexers run at once: $SWAN_JOBS, else half the cores, at most 8
+// (scip-python can take several GB each).
+fn jobs_limit() -> i64 {
+    if let Some(n) = parse_int(&sys::env(b"SWAN_JOBS")) {
+        if n > 0 {
+            return n;
+        }
+    }
+    // Half the cores, at most 8, and no more than the free memory holds at
+    // about 3 GB a job (scip-python reached 10 GB on a big repo), so a big
+    // map pushes the desktop into swap less.
+    let mut by_mem: i64 = 8;
+    let mut info: Vec<u8> = Vec::new();
+    if sys::read_file(b"/proc/meminfo", &mut info) {
+        for line in info.split(|&c| c == b'\n') {
+            if starts_with(line, b"MemAvailable:") {
+                let rest = trim(&line[13..]);
+                // The kernel always writes "<n> kB"; a line without the
+                // space stops the Goose program, and is passed over here.
+                let space = find(rest, b" ");
+                if space >= 0 {
+                    if let Some(kb) = parse_int(trim(&rest[..space as usize])) {
+                        by_mem = kb / (3 * 1024 * 1024);
+                    }
+                }
+            }
+        }
+    }
+    1.max(8.min(sys::cpu_count() / 2).min(by_mem))
+}
+
+// tsc's root files, from `tsc --showConfig`. --listFilesOnly lists every
+// file in the program, the roots and all they import, wherever those are
+// (rea's scripts/*.mts, outside its tsconfig's include); scip-typescript
+// indexes only the roots, so a chunk of anything more would map files a
+// whole run leaves out. Returns the listing's lines that are roots, or
+// nothing when the config's file list cannot be read (TypeScript then runs
+// whole, as before).
+fn ts_root_listing(listing: &[u8], show: &[u8], cfg_dir: &[u8]) -> Vec<u8> {
+    let mut kept: Vec<u8> = Vec::new();
+    let at = find(show, b"\"files\": [");
+    if at < 0 {
+        return kept;
+    }
+    let mut all: Vec<u8> = Vec::new();
+    let mut done = false;
+    let mut bad = false;
+    for (n, line) in show[at as usize..].split(|&c| c == b'\n').enumerate() {
+        if done || bad {
+            break;
+        }
+        if n == 0 {
+            continue;
+        }
+        let mut t = trim(line);
+        if starts_with(t, b"]") {
+            done = true;
+            continue;
+        }
+        if ends_with(t, b",") {
+            t = &t[..t.len() - 1];
+        }
+        if t.len() < 3 || t[0] != b'"' || t[t.len() - 1] != b'"' || find(t, b"\\") >= 0 {
+            bad = true;
+            continue;
+        }
+        let rel = &t[1..t.len() - 1];
+        let p = if rel[0] == b'/' {
+            rel.to_vec()
+        } else if starts_with(rel, b"./") {
+            [cfg_dir, b"/", &rel[2..]].concat()
+        } else {
+            [cfg_dir, b"/", rel].concat()
+        };
+        all.extend_from_slice(&sys::realpath(&p).unwrap_or(p));
+        all.push(b'\n');
+    }
+    if !(done && !bad && !all.is_empty()) {
+        return kept;
+    }
+    // In the config's order, not the listing's (the order tsc reached
+    // files): scip-typescript numbers anonymous types in the order it
+    // meets them, so one chunk in another order names them differently
+    // from a whole run.
+    let mut given: Vec<&[u8]> = Vec::new();
+    let mut listed: HashMap<Vec<u8>, usize> = HashMap::new();
+    for raw in listing.split(|&c| c == b'\n') {
+        let f = trim(raw);
+        if f.is_empty() {
+            continue;
+        }
+        // One real path listed twice is found under its later line.
+        let real = sys::realpath(f).unwrap_or_else(|| f.to_vec());
+        if !real.is_empty() {
+            listed.insert(real, given.len());
+        }
+        given.push(f);
+    }
+    for r in all.split(|&c| c == b'\n') {
+        if r.is_empty() {
+            continue;
+        }
+        if let Some(&i) = listed.get(r) {
+            kept.extend_from_slice(given[i]);
+            kept.push(b'\n');
+        }
+    }
+    kept
+}
+
+// One fingerprint for every file with these endings (and the named build
+// files at the root): a whole-language index is reused while it is
+// unchanged. `stamp` gives a file's content stamp.
+fn lang_fingerprint(walk: &Walk, repo: &[u8], endings: &[&[u8]], roots: &[&[u8]], mut stamp: impl FnMut(&[u8]) -> u64) -> u64 {
+    let mut h: u64 = 0;
+    walk.each_file(repo, |full, name| {
+        if endings.iter().any(|e| ends_with(name, e)) {
+            h = hash_combine(h, hash_combine(hash(full), stamp(full)));
+        }
+    });
+    for r in roots {
+        let p = [repo, b"/", r].concat();
+        if sys::file_exists(&p) {
+            h = hash_combine(h, hash_combine(hash(&p), stamp(&p)));
+        }
+    }
+    h
+}
+
+fn contains_line_prefix(lines: &[u8], p: &[u8]) -> bool {
+    lines.split(|&c| c == b'\n').any(|l| starts_with(l, p))
+}
+
+fn count_lines(s: &[u8]) -> i64 {
+    s.iter().filter(|&&c| c == b'\n').count() as i64
+}
+
+// What a map keeps to use again (tsc's lists, the chunks, the fingerprints).
+// A clean map holds them back until its rows are published, so that one
+// that fails or is stopped leaves nothing a later map would trust.
+struct Cache {
+    clean: bool,
+    out: Vec<u8>,
+    #[allow(dead_code)] // written out where a clean map publishes, still to be carried
+    pending: Vec<(Vec<u8>, Vec<u8>)>,
+}
+
+impl Cache {
+    fn write(&mut self, name: &[u8], contents: &[u8]) {
+        if self.clean {
+            self.pending.push((name.to_vec(), contents.to_vec()));
+        } else {
+            sys::write_file(&[&self.out[..], b"/", name].concat(), contents);
+        }
+    }
 }
 
 // Some indexers and checkers run the repo's own build files: cargo's build
@@ -298,6 +539,8 @@ pub fn map_main(repo_arg: &[u8], out_arg: &[u8], report: &mut Vec<u8>, clean: bo
 // The public wrapper holds the writer lock for every shared output: cached
 // indexer files, flattened rows, schema replacement and final database update.
 fn map_main_locked(repo: &[u8], out: &[u8], report: &mut Vec<u8>, clean: bool) -> bool {
+    let home = swan_home();
+    let bin = [&home[..], b"/tools/node_modules/.bin/"].concat();
     let trusted = build_trusted(repo);
     // Before any walk of the repo: the folders git ignores are left out.
     let mut walk = Walk::default();
@@ -391,6 +634,7 @@ fn map_main_locked(repo: &[u8], out: &[u8], report: &mut Vec<u8>, clean: bool) -
     // the database or its lock: readers keep their snapshot until atomic publish.
     // Defer replacement metadata until publication, so failure/interruption
     // cannot make a later ordinary map trust unfinished indexer output.
+    let mut cache = Cache { clean, out: out.to_vec(), pending: Vec::new() };
     if clean {
         for name in [
             &b"index-manifest.tsv"[..],
@@ -536,7 +780,218 @@ fn map_main_locked(repo: &[u8], out: &[u8], report: &mut Vec<u8>, clean: bool) -
         push_int(report, forced.iter().filter(|&&c| c == b'\n').count() as i64);
         report.extend_from_slice(b" file(s) whose indexed text is unknown\n");
     }
-    let _ = force_ts; // read by TypeScript's jobs, still to be carried
+
+    // A repo's tsconfig that tsc cannot read (it extends a shared config
+    // from an npm package that is not installed, such as
+    // "@sindresorhus/tsconfig", or names a missing file) failed the whole
+    // TypeScript index. Swan's own config is used instead, and says so.
+    let tsc = [&bin[..], b"tsc"].concat();
+    if l.tsconfig {
+        let config = [repo, b"/tsconfig.json"].concat();
+        let env = child_env(&l, &[], b"");
+        let env: Vec<&[u8]> = env.iter().map(|e| &e[..]).collect();
+        let mut po: Vec<u8> = Vec::new();
+        let mut pe: Vec<u8> = Vec::new();
+        if sealed_run(&[&tsc, b"-p", &config, b"--showConfig"], repo, out, trusted, &env, 60000, &mut po, &mut pe) != 0 {
+            let first = find(&po, b"\n");
+            report.extend_from_slice(b"typescript: the repo's tsconfig.json cannot be read (");
+            report.extend_from_slice(trim(if first > 0 { &po[..first as usize] } else { &po }));
+            report.extend_from_slice(b"); indexing with Swan's own config\n");
+            l.tsconfig = false;
+            if !l.ts && !l.js {
+                l.ts = true;
+            }
+        }
+    }
+    if l.tsconfig || l.ts || l.js {
+        let target = [out, b"/index-typescript.scip"].concat();
+        let mut a: Vec<Vec<u8>> = vec![[&bin[..], b"scip-typescript"].concat(), b"index".to_vec(), b"--output".to_vec(), target.clone()];
+        if !l.tsconfig {
+            // A tsconfig of our own, outside the repo; allowJs takes in .js/.mjs/.cjs.
+            let dir = [out, b"/tsproject"].concat();
+            sys::make_dir(&dir);
+            let mut cfg: Vec<u8> = Vec::new();
+            cfg.extend_from_slice(b"{\"compilerOptions\":{\"allowJs\":true,\"checkJs\":false,\"noEmit\":true,");
+            cfg.extend_from_slice(b"\"module\":\"esnext\",\"moduleResolution\":\"bundler\",\"target\":\"es2022\"},\"include\":[");
+            json_string(&mut cfg, &[repo, b"/**/*"].concat());
+            cfg.extend_from_slice(b"],\"exclude\":[");
+            json_string(&mut cfg, &[repo, b"/**/node_modules"].concat());
+            for d in walk.ignored().split(|&c| c == b'\n') {
+                if !d.is_empty() {
+                    cfg.push(b',');
+                    json_string(&mut cfg, &[repo, b"/", d].concat());
+                }
+            }
+            cfg.extend_from_slice(b"]}\n");
+            sys::write_file(&[&dir[..], b"/tsconfig.json"].concat(), &cfg);
+            a.push(b"--cwd".to_vec());
+            a.push(repo.to_vec());
+            a.push(dir);
+        }
+        // The indexer first (src/tspatch.rs): several processes may index
+        // parts of one project only once it names the properties of object
+        // literals by their place. What it is (its size) is part of every TypeScript
+        // fingerprint, so the indexes are made again when it changes.
+        let ts_stable = ensure_scip_typescript_patch(&home, report);
+        let ts_indexer = hash(&[&b"scip-typescript\t"[..], sys::file_size(&[&home[..], b"/tools/node_modules/@sourcegraph/scip-typescript/dist/src/FileIndexer.js"].concat()).to_string().as_bytes()].concat());
+        let ts_endings: [&[u8]; 8] = [b".ts", b".tsx", b".mts", b".cts", b".js", b".jsx", b".mjs", b".cjs"];
+        let ts_fp = hash_combine(lang_fingerprint(&walk, repo, &ts_endings, &[b"tsconfig.json", b"package.json"], |f| stamps.stamp(f)), ts_indexer);
+        // What tsc would compile, to split it.
+        let base = if l.tsconfig { [repo, b"/tsconfig.json"].concat() } else { [out, b"/tsproject/tsconfig.json"].concat() };
+        // Split only into the slots other languages leave free: chunks cost
+        // more work in all (each loads the shared code), so they pay only
+        // when TypeScript is the long pole.
+        let others = (if l.py { count_lines(&plan_python(&walk, repo, jobs_limit().min(6))) } else { 0 })
+            + (if l.cargo { 1 } else { 0 })
+            + (if l.java { 1 } else { 0 })
+            + (if l.c || l.cuda { 1 } else { 0 });
+        let ts_k = jobs_limit() - others;
+        // tsc's list changes only when files come or go or the config
+        // changes, so it is kept with a key of those and asked again only then.
+        let mut names_key: u64 = 0;
+        let mut ts_count: i64 = 0;
+        let mut ts_nested: Vec<u8> = Vec::new(); // every tsconfig.json below the repo's root, one per line
+        walk.each_file(repo, |full, name| {
+            for e in ts_endings {
+                if ends_with(name, e) {
+                    names_key = hash_combine(names_key, hash(full));
+                    ts_count += 1;
+                }
+            }
+            // Every other tsconfig counts too (src/tsproj.goose): which files
+            // each owns is asked again when one changes.
+            let at_root = full.len() == repo.len() + 1 + name.len();
+            if starts_with(name, b"tsconfig") && ends_with(name, b".json") && !(at_root && name == b"tsconfig.json") {
+                names_key = hash_combine(names_key, hash_combine(hash(full), stamps.stamp(full)));
+                if name == b"tsconfig.json" {
+                    ts_nested.extend_from_slice(full);
+                    ts_nested.push(b'\n');
+                }
+            }
+        });
+        // More than one project is possible when a tsconfig.json lies below
+        // the root or the root's own references others.
+        let mut base_text: Vec<u8> = Vec::new();
+        if l.tsconfig {
+            sys::read_file(&base, &mut base_text);
+        }
+        let ts_multi = ts_stable && (!ts_nested.is_empty() || find(&base_text, b"\"references\"") >= 0);
+        // With no slots to split into, a big project still runs as one
+        // chunk (all of tsc's files, the same index the whole-language run
+        // makes), so that a code edit can be indexed as a layer of just the
+        // changed files and their users instead of the whole project again.
+        // $SWAN_TS_LAYER_MIN files or more (default 200); small projects
+        // index in a few seconds anyway.
+        let mut layer_min: i64 = 200;
+        if let Some(n) = parse_int(&sys::env(b"SWAN_TS_LAYER_MIN")) {
+            if n > 0 {
+                layer_min = n;
+            }
+        }
+        let plan_k = if !ts_stable {
+            0
+        } else if ts_k >= 2 {
+            ts_k
+        } else if ts_count >= layer_min || ts_multi {
+            1
+        } else {
+            0
+        };
+        for r in [&b"tsconfig.json"[..], b"package.json"] {
+            let pth = [repo, b"/", r].concat();
+            if sys::file_exists(&pth) {
+                names_key = hash_combine(names_key, hash_combine(hash(&pth), stamps.stamp(&pth)));
+            }
+        }
+        let mut listing: Vec<u8> = Vec::new();
+        let mut cached: Vec<u8> = Vec::new();
+        sys::read_file(&[out, b"/tsc-files.txt"].concat(), &mut cached);
+        // "roots": the kept list holds tsc's root files only (ts_root_listing);
+        // a list kept by an earlier Swan, of every program file, is not used.
+        let key_line = format!("{names_key} roots\n").into_bytes();
+        let mut listed = false;
+        // Every file tsc compiles, the roots and what they import, kept
+        // beside the roots (tsc-program.txt): see `shared` below.
+        let mut program: Vec<u8> = Vec::new();
+        if plan_k >= 1 && starts_with(&cached, &key_line) {
+            let mut kept_program: Vec<u8> = Vec::new();
+            sys::read_file(&[out, b"/tsc-program.txt"].concat(), &mut kept_program);
+            if starts_with(&kept_program, &key_line) {
+                listing.extend_from_slice(&cached[key_line.len()..]);
+                program.extend_from_slice(&kept_program[key_line.len()..]);
+                listed = true;
+            }
+        }
+        if plan_k >= 1 && !listed {
+            // tsc exits 1 when a type library is missing (a repo without its
+            // node_modules: "Cannot find type definition file for 'node'")
+            // yet still lists every file; scip-typescript indexes such a repo
+            // the same way. Only tsc's own "errors reported" exits (1, 2)
+            // count, not a timeout or a crash, which could cut the list
+            // short, and a listing with none of the repo's files (a broken
+            // config) is not used.
+            let env = child_env(&l, &[], b"");
+            let env: Vec<&[u8]> = env.iter().map(|e| &e[..]).collect();
+            let code = sealed_step(b"tsc --listFilesOnly", &[&tsc, b"-p", &base, b"--listFilesOnly"], repo, out, trusted, &env, 600000, &mut listing);
+            if code == 0 || ((code == 1 || code == 2) && contains_line_prefix(&listing, &[repo, b"/"].concat())) {
+                let mut show: Vec<u8> = Vec::new();
+                if sealed_step(b"tsc --showConfig", &[&tsc, b"-p", &base, b"--showConfig"], repo, out, trusted, &env, 600000, &mut show) == 0 {
+                    let cfg_dir = if l.tsconfig { repo.to_vec() } else { [out, b"/tsproject"].concat() };
+                    let roots = ts_root_listing(&listing, &show, &cfg_dir);
+                    program.extend_from_slice(&listing);
+                    listing = roots;
+                    listed = !listing.is_empty();
+                }
+                if listed {
+                    cache.write(b"tsc-files.txt", &[&key_line[..], &listing].concat());
+                    cache.write(b"tsc-program.txt", &[&key_line[..], &program].concat());
+                }
+            }
+        }
+        // The other projects (src/tsproj.rs): "config \t file" for each
+        // file a config other than the root's owns. Kept, like tsc's list,
+        // until a file comes or goes or a tsconfig changes.
+        let mut ts_others: Vec<u8> = Vec::new();
+        if plan_k >= 1 && ts_multi {
+            let mut kept_projects: Vec<u8> = Vec::new();
+            sys::read_file(&[out, b"/tsc-projects.txt"].concat(), &mut kept_projects);
+            if starts_with(&kept_projects, &key_line) {
+                ts_others.extend_from_slice(&kept_projects[key_line.len()..]);
+            } else {
+                let env = child_env(&l, &[], b"");
+                let env: Vec<&[u8]> = env.iter().map(|e| &e[..]).collect();
+                let mut note: Vec<u8> = Vec::new();
+                ts_others = ts_other_projects(repo, out, trusted, &tsc, &env, &base, &listing, &ts_nested, &mut note);
+                report.extend_from_slice(&note);
+                cache.write(b"tsc-projects.txt", &[&key_line[..], &ts_others].concat());
+            }
+            if !ts_others.is_empty() {
+                // The root's own files are the ones no other config took.
+                let mut taken: HashSet<u64> = HashSet::new();
+                for line in ts_others.split(|&c| c == b'\n') {
+                    let tab = find(line, b"\t");
+                    if tab > 0 {
+                        taken.insert(hash(&line[tab as usize + 1..]));
+                    }
+                }
+                let mut mine: Vec<u8> = Vec::new();
+                for raw in listing.split(|&c| c == b'\n') {
+                    let f = trim(raw);
+                    if !f.is_empty() {
+                        let real = sys::realpath(f).unwrap_or_else(|| f.to_vec());
+                        if !taken.contains(&hash(&real)) {
+                            mine.extend_from_slice(f);
+                            mine.push(b'\n');
+                        }
+                    }
+                }
+                listing = mine;
+                listed = true;
+            }
+        }
+        // Read by the planning of TypeScript's chunks, still to be carried.
+        let _ = (&a, &target, ts_fp, force_ts, listed, &listing, &ts_others);
+    }
 
     // Carried this far (docs/rust-port.md, "Next"): what was said so far is
     // printed, and the jobs, the indexers and the rows they give are not run.

@@ -17,7 +17,7 @@ purpose are in [docs/rust-port.md](docs/rust-port.md). Read it first.
 | Stage 1, the store | Done: `index`, `refresh` and 13 of the 14 `query` kinds. The same tables, refusals, staleness and answers as the Goose build `fb8df2a4c199` on four trial repos (STATUS.md has the counts) |
 | Stage 2, planning | Done and on main (#76, merged 2026-11-20 on the owner's word): `cargo-projects`, `gradle-tasks`, `plan-python`. STATUS.md has the counts |
 | Stage 3, syntax | Done and on main (#78, merged 2026-11-22 on the owner's word): the trees, `query pattern`, `syntax-index`, `stamp-bench` and `stamp-worker`. STATUS.md has the counts |
-| Stage 4, the map | Under way on branch `rust-stage-4` (from main, pushed): `scip-python-patch`, `scip-typescript-patch`, `trust` and `doctor` carried, with what runs a step and reads JSON; of `swan map`, its opening and its content stamps. The Rust map then stops with exit 70. Left: the rest of the map |
+| Stage 4, the map | Under way on branch `rust-stage-4` (from main, pushed): `scip-python-patch`, `scip-typescript-patch`, `trust` and `doctor` carried, with what runs a step and reads JSON; of `swan map`, its opening, its content stamps, and TypeScript as far as the projects it is split into. The Rust map then stops with exit 70. Left: the rest of the map |
 | Stages 5 to 8 | Not started. Every command of theirs exits 70 and names its stage |
 
 ## What passed, and how to see it again
@@ -43,8 +43,8 @@ SWAN_OLD=bin/swan scripts/port-run.sh                                # stage 4: 
 SWAN_OLD=$PWD/bin/swan scripts/port-prove-run.py                     # stage 4: 39 of 39 breaks caught
 scripts/port-json.sh                                                 # stage 4: 159 of 159 texts
 scripts/port-prove-json.py                                           # stage 4: 23 of 23 breaks caught
-SWAN_OLD=bin/swan scripts/port-map.sh                                # stage 4: 98 of 98 in the carried part; a minute and a half the first time, 8 s after
-SWAN_OLD=$PWD/bin/swan scripts/port-prove-map.py                     # stage 4: 99 of 99 breaks caught (about 22 min; thirds can run side by side)
+SWAN_OLD=bin/swan scripts/port-map.sh                                # stage 4: 229 of 229 in the carried part; 3 min the first time, 12 s after
+SWAN_OLD=$PWD/bin/swan scripts/port-prove-map.py                     # stage 4: 256 of 256 breaks caught (over an hour in one go; see below for parts side by side)
 ```
 `$TRIES` is the folder of trial repo copies the swan-change-loop skill
 names, with the Goose program's maps of them under `maps/`. `port-store.sh`
@@ -62,31 +62,60 @@ so the merge keeps this branch's tree as it was.
 
 Done in stage 4 (docs/rust-port.md, "Next", has the order): the two indexer
 patches; running a step, with `trust` and `doctor`; reading JSON; and a
-map as far as its content stamps (src/pipeline.goose line 1163: the
-opening, the stamps, cosmetic edits found, files to index again).
+map as far as the projects TypeScript is split into (src/pipeline.goose
+line 1449: the opening, the stamps, cosmetic edits found, files to index
+again, the repo's tsconfig or Swan's own, the indexer's patch, tsc's files
+and roots, which config owns each file).
 `rust/src/pipeline.rs` ends there with what the map has said so far and
 exit 70.
 
 How the map is carried and judged, a part at a time:
 - Carry the next part of `map_main_locked` (src/pipeline.goose, from line
-  1268: TypeScript's jobs; the closures defined from line 961 to 1266 that
-  the later parts call are `add_job`, `add_lang_job`, `note_indexed`,
+  1450: TypeScript's chunks, `plan_ts` and `same_file_set`, then the
+  layers and its jobs; the closures defined from line 961 to 1266 that the
+  later parts call are `add_job`, `add_lang_job`, `note_indexed`,
   `kept_texts` and `finish_cosmetic`, none carried yet), move the place the
-  Rust map stops, and add to
-  `scripts/port-map.sh` the lines of the report that part writes
-  (`OPENING`) and the files it writes (`WRITTEN`). The judge wants exactly
-  those lines, so a part that says nothing more needs no change there.
+  Rust map stops, and add to `scripts/port-map.sh` the lines of the report
+  that part writes (`OPENING`), the steps it accounts for on standard
+  error (`STEPS`) and the files it writes (`WRITTEN`, or `CACHED` for what
+  a clean map holds back). The judge wants exactly those lines and steps,
+  no more and no fewer.
 - Give each rule of the part a case only it gets right, then
   `scripts/port-prove-map.py` with a break for each. Its first run on the
-  opening caught 69 of 74; the five showed what the judge did not ask.
-- The judge keeps the Goose program's side in `build/port-map/<hash>/` (the
-  hash is of the Goose program and of the judge itself), so each edit of
-  the judge costs one minute of the Goose program mapping every case.
-  Made-up repos and homes must stay there and not in /tmp: the seal gives
-  a step its own /tmp.
+  opening caught 69 of 74, and on TypeScript's part 203 of 214: each time
+  the misses showed what the judge did not ask. Run it as six parts side
+  by side: `PORT_MAP_JOBS=4 PORT_PROVE_JUDGES=2 CARGO_BUILD_JOBS=6
+  scripts/port-prove-map.py $(seq 1 43)` and so on, about twenty minutes
+  in all on 32 cores. More judges at once than that and the machine is
+  swamped.
+- The judge keeps the Goose program's side in `build/port-map/<hash>/`.
+  The hash is of the Goose program and of the functions that make the
+  repos and the homes (`make_repos`, `make_before`, `home_of`,
+  `home_as_installed`): change one and the Goose program maps every case
+  again, three minutes. Each case also has a signature (its repo, its
+  settings, the `prep_` and `home_` functions there are when it is
+  reached), so a new case, or a change to how the judge compares, maps
+  nothing again. Add `prep_` functions after the cases that are already
+  there, or those cases are mapped again. Made-up repos and homes must
+  stay in `build/` and not in /tmp: the seal gives a step its own /tmp.
+- Cases run side by side (`PORT_MAP_JOBS`, 8), each Rust run from a home
+  of its own under `build/port-map/run.*/c/<case>/`; `PORT_MAP_KEEP=1`
+  leaves those folders to look at. A home is links to the checkout's
+  `tools/`, with files of its own for what a map writes (so far the
+  TypeScript indexer's `FileIndexer.js` and its mark) and for what a case
+  swaps (`tsc`). Never write through one of the links, and never `chmod
+  -R` a home: the links are to the checkout's own files.
+- `HOME_PREP="home_tsc <name>"` gives a case a made-up tsc that says what
+  `repos/tsc/<name>/` holds; `HOME_PREP=home_plain` and the like set how
+  the indexer's patch stands. After each case the judge also compares how
+  the indexer was left. `CACHED` files are compared except for a clean
+  map, which must not have written them yet. `LATER_TEXTS=<n>` on a case
+  says how many texts the Goose program keeps that only a later part
+  writes.
 
-Next in the map's own order: the jobs of each language, and "no language
-found to index" after them (exit 1 from the Goose program); running them;
+Next in the map's own order: the rest of TypeScript (chunks, layers, its
+jobs), the jobs of the other languages, and "no language found to index"
+after them (exit 1 from the Goose program); running them;
 the flattener; `index` or `refresh`; the end of the report, where
 content-stamps.tsv is written and `finish_cosmetic` moves rows
 (`shift_cosmetic` of src/change.goose and `mark_edited` of src/edit.goose
@@ -100,15 +129,18 @@ before the jobs:
   on 2026-11-22 and he said "continue" without choosing; Jev leaned the
   same way, weakly (59 to 40). Say which in docs/rust-port.md before
   building on it.
-- **The patches.** The three `ensure_` functions of pypatch and tspatch
-  patch Swan's own copy of an indexer before a map. The Rust program's
-  made-up home links to the checkout's `tools/` today; it needs copies of
-  the six files a map may write, as the Goose program's home has, before
-  the Rust map reaches them.
-- **Left out of the opening until the part that reads them**: the
-  virtualenv of a repo that is not trusted (the Goose program keeps it as
-  `venv_read` for the Python step), and four things `detect` notes
-  (tsconfig, Maven and Gradle files at the top of the repo).
+- **The patches.** `ensure_scip_typescript_patch` is carried, and both
+  homes hold their own `FileIndexer.js` and mark. The two `ensure_`
+  functions of pypatch come with Python's step: give `home_of` the home's
+  own copies of `scip-python/dist/pyright-internal.js`, `scip-python.js`
+  and their two marks first (the scip-python package is one link to the
+  checkout's today), and compare them in `home_state`.
+- **Left out until the part that reads them**: the virtualenv of a repo
+  that is not trusted (the Goose program keeps it as `venv_read` for the
+  Python step), two things `detect` notes (Maven and Gradle files at the
+  top of the repo), and what TypeScript's part has worked out and not yet
+  used (`a`, `target`, `ts_fp`, `force_ts`, `listed`, `listing`,
+  `ts_others`: named in one `let _` where the Rust map stops).
 - **What trust adds to the seal** (the network, folders to write in) is
   first shown by an indexer that builds; nothing carried so far shows it.
 
@@ -167,6 +199,12 @@ porting", has the call.
   its own project, beside the trial repos.
 
 ## Held for after the port
+Seen 2026-11-22 while carrying TypeScript, in the Goose program and so in the
+port: a repo with no tsconfig of its own never has its TypeScript split or
+layered, because tsc does not name the files of Swan's own config
+(docs/rust-port.md, "Held for after the port"). A fix is its own branch
+after the port, with a check and a measure on a real repo.
+
 The owner's direction of 2026-11-20 (DECISIONS.md): Spread-Wings in Swan,
 a file watcher such as `notify`, hidden files and git-ignored folders left
 out for privacy, and one report of every area left out and why; serena-rs

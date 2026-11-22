@@ -30,6 +30,7 @@ mod survey;
 mod syntax;
 mod sys;
 mod treesitter;
+mod tsproj;
 mod tspatch;
 mod util;
 mod walk;
