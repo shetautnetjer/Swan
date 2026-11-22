@@ -360,6 +360,7 @@ folders are.
 | 2026-11-22T07:49Z | The content stamps of `swan map` carried (src/pipeline.goose to line 1163): `Stamps` in `pipeline.rs`, with `index_lines` in `change.rs`; `stamp_known` and `line_of_path`, carried at stage 3, are reached now. `scripts/port-map.sh`: 98 of 98 in the carried part, 26 of them for the stamps. `scripts/port-prove-map.py`: 99 of 99 breaks caught, the first time it was run. #78 (stage 3) merged into main on the owner's word; main merged into `rust-stage-4`. |
 | 2026-11-22T09:21Z | `swan map` carried as far as the projects TypeScript is split into (src/pipeline.goose to line 1449, and src/tsproj.goose whole as `tsproj.rs`): the config probe, Swan's own tsconfig, `ensure_scip_typescript_patch` (`tspatch.rs`), `child_env`, `jobs_limit`, `ts_root_listing`, `lang_fingerprint`, the kept lists and their key, `ts_other_projects`. `scripts/port-map.sh` reworked (cases side by side, a home each, a made-up tsc, steps compared whole): 229 of 229, 131 of them new. `scripts/port-prove-map.py`: 256 of 256 breaks caught: 254 in a run of them all, and the two it missed by the case added for them (the other 254 were not run again after that case went in). |
 | 2026-11-22T16:48Z | `swan map` carried to the end of TypeScript (src/pipeline.goose to line 1739): `plan_ts`, `same_file_set`, `dependents_of_changes`, the jobs' list (`Jobs`: `add_job`, `add_lang_job`), the plan (`TsPlan`), what the chunks share, the layers. Goose's sort carried as `rust/src/gsort.rs`: `scripts/port-sort.sh` 7,718 of 7,718 lists, `scripts/port-prove-sort.py` 30 of 30 (29 of 31 on its first run). `scripts/port-map.sh`: 317 of 317, 88 of them new. `scripts/port-prove-map.py` has 371 breaks, 115 new, all fitting the source, and has not run on this tree: the session was ended on the owner's word first. HANDOFF.md has it as the next thing. |
+| 2026-11-22T18:10Z | The map's prover run on the tree of `7fc1276`, all 371 breaks in six parts side by side, 66 minutes: the unbroken program 317 of 317 in every part, 370 of 371 breaks caught on the first run. The one let through was no break ("Found while porting") and is taken out: 370 of 370. The 88 cases for TypeScript's chunks and layers are shown to catch what they were made for. |
 
 ## Found while porting
 
@@ -672,6 +673,13 @@ folders are.
   the virtualenv of a repo that is not trusted (the Goose program keeps it
   aside as `venv_read` for the Python step), and four of the things
   `detect` notes (tsconfig, Maven and Gradle files at the top).
+- Stage 4: the one break of 371 that the map's judge let through was no
+  break. Where the files of earlier layers are counted, an empty name is
+  passed over, and so is a name counted already. The second check passes
+  over an empty name by itself: every list ends in a line end, and what
+  follows the last line end is an empty line, so an empty name is always
+  "counted already". The program without the first check does the same.
+  The prover names it under "Not among the breaks".
 
 ## Next
 

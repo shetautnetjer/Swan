@@ -61,7 +61,12 @@ Not among the breaks, because the carried part of a map cannot show them:
   survey is never run trusted, and git's answer is the same with it;
 - the room for 255 bytes of other languages' names, and for 65,000 bytes
   of ignored folders;
-- the map's lock held by another writer.
+- the map's lock held by another writer;
+- an empty name in an earlier layer's list counted as a file: the check
+  that no name is counted twice finds an empty name in every list (a list
+  ends in a line end, and what follows it is an empty line), so the
+  program without the check for an empty name behaves the same. It was
+  break 306 of 371, and the one the judge let through on 2026-11-22.
 """
 import os
 import shutil
@@ -994,9 +999,6 @@ BREAKS = [
     ('pipeline.rs', 'a file in two earlier layers is counted twice',
      '                        if !f.is_empty() && !contains_line(&covered, f) {',
      '                        if !f.is_empty() {'),
-    ('pipeline.rs', 'an empty name in an earlier layer counts as a file',
-     '                        if !f.is_empty() && !contains_line(&covered, f) {',
-     '                        if !contains_line(&covered, f) {'),
     ('pipeline.rs', 'the files of the earlier layers do not count',
      '                    for f in line[tab + 1..].split(|&c| c == b\',\') {',
      '                    for f in line[..0].split(|&c| c == b\',\') {'),

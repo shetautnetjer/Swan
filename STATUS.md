@@ -2328,3 +2328,36 @@ Limits:
 - The machine's limits are as before (no clang++ on the plain PATH, Swan's
   JDK, 6 GB free for the cases that leave the number of jobs to it).
 - The suite was not run for this piece: no Goose source changed.
+
+## 2026-11-22T18:10Z: stage 4: the map's prover run on TypeScript's chunks and layers
+
+The entry before this one said the map's prover had not run. It has now, on
+the tree of `7fc1276`: `scripts/port-prove-map.py`, all 371 breaks, six
+parts side by side.
+
+| | |
+|---|---|
+| The unbroken program, in each of the six parts | the same: 317 of 317 |
+| Breaks caught on the first run | 370 of 371 |
+| The one let through | break 306, "an empty name in an earlier layer counts as a file" |
+| Time | 66 minutes on 32 cores (3 to build the copies, 63 to judge them) |
+
+The one let through is no break. Where the files of earlier layers are
+counted, two checks stand side by side: the name is not empty, and the name
+is not counted already. The second passes over an empty name by itself,
+because every list of names ends in a line end and what follows the last
+line end is an empty line. So the program without the first check does the
+same in every case there can be. The break is taken out and named in the
+prover's docstring under "Not among the breaks": 370 of 370.
+
+So the 88 cases added for the chunks and layers are shown to catch what
+they were made for. Nothing of the Rust program changed, and nothing of the
+judge.
+
+Limits:
+- A map is still not made by the Rust program.
+- A full run of the prover is an hour now, not the 40 minutes the handoff
+  said: a judge is 317 cases, and twelve judges at once hold the load at
+  twice the cores. No step ran past its deadline: the unbroken program
+  passed in all six parts under that load.
+- The suite was not run for this piece: no Goose source changed.

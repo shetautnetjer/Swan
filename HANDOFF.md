@@ -46,7 +46,7 @@ scripts/port-prove-json.py                                           # stage 4: 
 scripts/port-sort.sh                                                 # stage 4: 7,718 of 7,718 lists, under a second
 scripts/port-prove-sort.py                                           # stage 4: 30 of 30 breaks caught (under a minute)
 SWAN_OLD=bin/swan scripts/port-map.sh                                # stage 4: 317 of 317 in the carried part; 4.5 min the first time, seconds after
-SWAN_OLD=$PWD/bin/swan scripts/port-prove-map.py                     # stage 4: 371 breaks, NOT YET RUN on this tree (256 of 256 at `8dd4821`, before 115 were added; see "Next action")
+SWAN_OLD=$PWD/bin/swan scripts/port-prove-map.py                     # stage 4: 370 of 370 breaks caught (an hour on 32 cores, six parts side by side)
 ```
 `$TRIES` is the folder of trial repo copies the swan-change-loop skill
 names, with the Goose program's maps of them under `maps/`. `port-store.sh`
@@ -68,7 +68,7 @@ tree as committed:
 |---|---|
 | Goose's sort (`rust/src/gsort.rs`) | Done and proven: `scripts/port-sort.sh` 7,718 of 7,718 lists, `scripts/port-prove-sort.py` 30 of 30 |
 | TypeScript's chunks and layers (`rust/src/pipeline.rs`, to src/pipeline.goose line 1739) | Carried. `scripts/port-map.sh`: 317 of 317, 88 cases new |
-| `scripts/port-prove-map.py` | 371 breaks, 115 of them new for this part. Every one fits the source (`--fit`). None has been run on this tree: a run of the new ones was stopped part-way. The 256 older ones were last run at `8dd4821`, before the judge learned to compare more |
+| `scripts/port-prove-map.py` | Run 2026-11-22T18:10Z on the tree of `7fc1276`: 370 of 371 caught, and the one let through (306) was no break and is taken out. 370 of 370 |
 
 So the new cases are not yet shown to catch what they were made for
 (AGENTS.md rule 4). Do this before carrying anything more:
