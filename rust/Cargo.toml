@@ -23,5 +23,9 @@ cc = "=1.11.2"
 name = "port-trees"
 path = "src/bin/port-trees.rs"
 
+[[bin]]
+name = "port-json"
+path = "src/bin/port-json.rs"
+
 [profile.release]
 opt-level = 3

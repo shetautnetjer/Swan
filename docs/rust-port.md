@@ -339,6 +339,8 @@ folders are.
 | 2026-11-22T06:15Z | Stage 3 done on branch `rust-stage-3`. Cost: `syntax-index` 52.6 ms against the Goose program's 54.0 on 1,572 files; `stamp-bench` on rea 6,241 ms against 6,282 in one process, 468 against 459 with 32 workers, 1,668 against 1,674 on 4 threads. |
 | 2026-11-22T06:39Z | Stage 4 begun (branch `rust-stage-4`, on `rust-stage-3`). The indexer patches carried: `rust/src/pypatch.rs` and `rust/src/tspatch.rs`, their sites copied from the Goose sources by a script, and `write_file_atomic` in `sys.rs`. `scripts/port-patch.sh`: 105 of 105 on the three files Swan patches (pyright-internal.js 1.4 MB, scip-python.js, FileIndexer.js), each with and without its patch, and on nine kinds of file a patch must refuse or leave. `scripts/port-prove-patch.py`: 29 of 29 breaks caught. |
 | 2026-11-22T06:49Z | Running a step carried: `sys::run` (native/swan_sys.c's `swan_run`: its own variables, the PATH it will have, a group of its own, both streams, the deadline), `rust/src/run.rs` (src/run.goose) and, with it, `swan trust` (`rust/src/pipeline.rs`, begun) and `swan doctor`. `scripts/port-run.sh`: 53 of 53 the same, each program in a made-up home, with a made-up `mkdir` and `doctor.py`; the ten-second deadline is waited for three times in each program, timed, and nothing a step started may be left running. `scripts/port-prove-run.py`: 39 of 39 breaks caught. |
+| 2026-11-22T07:26Z | Reading JSON carried: `rust/src/json.rs`, from Goose's `stdlib/json.goose`. `scripts/port-json.sh`: 159 of 159 texts read the same by both (150 made up, of which 67 are JSON; 9 files of the repo). `scripts/port-prove-json.py`: 23 of 23 breaks caught. |
+| 2026-11-22T07:26Z | The opening of `swan map` carried: `rust/src/seal.rs`, `wings.rs` (where spread-wings is), `survey.rs` (running it, and the report's lines), `Walk::refresh` (what git ignores) and, in `pipeline.rs`, the languages a repo holds, trust, an older map and a clean one. The Rust map then stops with exit 70. `scripts/port-map.sh`: 72 of 72 the same in the carried part, each program in a made-up home. `scripts/port-prove-map.py`: 74 of 74 breaks caught. |
 
 ## Found while porting
 
@@ -519,6 +521,41 @@ folders are.
 - Stage 4: the line the suite ends on, `typescript test: exit 127 after 0
   ms`, is such an account: a step labelled `typescript test` whose program
   could not be started.
+- Stage 4: the survey's answer is JSON, and the stage's list of sources
+  did not name Goose's own `stdlib/json.goose` (1,663 lines, most of them
+  for numbers with a fraction). Swan reads only strings, booleans and
+  integers from JSON, so the Rust reader keeps no other number's value. It
+  takes and refuses the same texts: 159 compared, 67 of them JSON.
+- Stage 4: the JSON comparison's prover first caught 22 of 23 and could not
+  judge one. Its comparisons run at once, and each built the Goose dumper
+  again, over the others. The dumper is now built once and kept.
+- Stage 4: a map patches Swan's own copy of two indexers, so the map is
+  never judged from this checkout. Each program has a made-up home; the
+  Goose program's holds links to the checkout's indexers, with real copies
+  of the six files a map may write. The homes and the made-up repos are in
+  `build/port-map/`, not in a temporary folder: the seal gives a step a
+  /tmp of its own, where a made-up spread-wings would not be found.
+- Stage 4: the Goose program runs every indexer for each case, about a
+  minute for 71 cases, so what it said and wrote is kept, by the hash of
+  the Goose program and of the judge. A run with it kept takes 5 s.
+- Stage 4: the map judge's first run had 53 of 61 the same. All 8 were its
+  own rules: it watched a file that a map of a Python repo writes later,
+  and it took Goose's wrapper off an error only on the first line, where a
+  map's first line is a step's account.
+- Stage 4: a judge of a part must know where the part ends. The map judge
+  first asked only that the Rust program's report be the start of the
+  Goose program's, and its prover showed the hole: 69 of 74, with the two
+  breaks that drop the opening's last line unseen. The judge now names the
+  lines the carried part writes (`OPENING` in `scripts/port-map.sh`) and
+  wants exactly those. The list grows with each part carried and goes when
+  the map is whole.
+- Stage 4: with nothing to index the Goose program says "no language found
+  to index" and exits 1. The Rust map stops just before that, so it is the
+  next thing to carry.
+- Stage 4: left out of the carried opening until the part that reads them:
+  the virtualenv of a repo that is not trusted (the Goose program keeps it
+  aside as `venv_read` for the Python step), and four of the things
+  `detect` notes (tsconfig, Maven and Gradle files at the top).
 
 ## Next
 
@@ -539,11 +576,28 @@ trusted:
 2. `run` (Swan's home, running a step, the whole of `swan_run`), with the
    two commands that need only it: `trust` and `doctor`. Done 2026-11-22:
    `scripts/port-run.sh`.
-3. `survey`, `tsproj`, `wings` and `seal`, which no command prints alone,
-   with
-4. `pipeline`: `swan map`. It is the first that starts other programs, so
-   the first thing to settle is how the two programs are compared with
-   every third-party repo still sealed in both. Carried in stage 3 and first used there, so judged there:
+3. Reading JSON: Goose's own `stdlib/json.goose`, the part Swan uses
+   (`parse`, `member`, `each`, `as_string`, `as_bool`, `as_i64`). Done
+   2026-11-22: `scripts/port-json.sh`.
+4. `swan map`, a part at a time, in the map's own order. The Rust map
+   stops where the carrying has got to, with what it would have said so
+   far and exit 70, and `scripts/port-map.sh` compares as far as it gets:
+   what is said, and the files of the map folder written by then. Each
+   program maps from a made-up home of its own, in `build/port-map/`.
+   - Done 2026-11-22: its opening. The seal (`seal`), where spread-wings is
+     (`wings_bin`), the survey and what the report says of it (`survey`),
+     the folders git ignores, the languages a repo holds, a virtualenv and
+     trust, an older map and a clean one, the mark of when the map began.
+   - Left, in order: "no language found"; the content stamps and cosmetic
+     edits; the jobs of each language (TypeScript with `tsproj`, Python's
+     pieces, Rust, Java, C#, the language servers, `syntax-index`);
+     running them, at most so many at once; the flattener; `index` or
+     `refresh`; the end of the report. The three `ensure_` functions of
+     the patches come with TypeScript's and Python's jobs.
+   - A map starts its own program again as `syntax-index` (carried) and
+     `lsp-index` (stage 5). Until stage 5 the Rust map is compared on
+     repos with no language a server indexes, or starts the Goose program
+     for that one child; say which when the jobs are carried. Carried in stage 3 and first used there, so judged there:
 `stamp_known` and `line_of_path` (no stamp is known when `stamp-bench`
 starts), and `Walk::load` with the `git-ignored.txt` a map writes.
 Rebuild the Goose program first (`scripts/build.sh`), which also fetches

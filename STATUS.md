@@ -2088,3 +2088,58 @@ Limits:
 - Cases that need a folder or a file that cannot be written only show
   when the judge does not run as root.
 - The suite was not run for this piece: no Goose source changed.
+
+## 2026-11-22T07:26Z: stage 4: reading JSON, and the opening of `swan map`, in Rust
+
+What was missing: the Rust program answered `swan map` with exit 70 before
+doing anything, and could not read JSON.
+
+Changed (branch `rust-stage-4`):
+- `rust/src/json.rs`: Goose's own JSON reader, the part Swan uses. It takes
+  and refuses the same texts, and reads strings, booleans and integers.
+- `rust/src/seal.rs` (a step run through `bin/eggshell`), `wings.rs`
+  (where spread-wings is), `survey.rs` (the survey, kept as survey.json,
+  and the report's "projects:" lines).
+- `walk.rs`: asking git, sealed, which folders it ignores; kept as
+  git-ignored.txt and git-ignored-all.txt.
+- `pipeline.rs`: the opening of a map. The map folder and its lock, trust,
+  the languages a repo holds, a virtualenv, the survey, a clean map
+  refused for another repo, an older map rebuilt, the mark of when the
+  map began. Then the Rust map prints what it has said so far and stops
+  with exit 70: the jobs, the indexers and the rows are not carried.
+
+Checked, Goose program built from this branch against the Rust program:
+
+| Judge | Result |
+|---|---|
+| `port-json.sh` | 159 of 159 texts read the same: 150 made up (67 of them JSON), 9 files of the repo |
+| `port-prove-json.py` | 23 of 23 breaks caught (the first run: 22, and one not judged; below) |
+| `port-map.sh` | 72 of 72 the same in the part of a map that is carried: 15 kinds of repo for the languages, 7 for a virtualenv and trust, 7 for what git ignores, 21 for the survey (18 with a made-up spread-wings), 14 for an older or a clean map, 8 fixtures |
+| What is compared | the lines of the report the carried part writes, all of them and no others; the start of standard error; the four files written by then, and three a clean or an older map removes; when both end the same way (a refusal), all that is said, the exit code and the whole map folder |
+| `port-prove-map.py` | 74 of 74 breaks caught (the first run: 69 of 74; below) |
+| Earlier judges | `port-run.sh` 53 of 53, `port-patch.sh` 105 of 105, `port-syntax.sh` 57 of 57, `port-stamp.sh` 82 of 82, `port-pattern.sh` 182 of 182, wrong calls 47 of 47, `cargo test` 9 passed |
+
+Where a judge was wrong first:
+- The JSON prover's comparisons each built the Goose dumper again, at
+  once, over each other; one could not compare. Built once and kept now.
+- The map judge's first run had 53 of 61. All 8 were its own rules (a file
+  a Python map writes later was watched; Goose's error wrapper was taken
+  off the first line only).
+- The map prover's first run caught 69 of 74. The judge took the Rust
+  program's report for right when it was the start of the Goose program's,
+  so a last line left out went unseen (two breaks); now the lines the
+  carried part writes are named, and must be there, all and no others.
+  Three more breaks had no case of their own: an older map with cached
+  lists beside it, and a project whose folder is itself an ignored one.
+
+Limits:
+- A map is not made by the Rust program yet. The judge compares the part
+  that is carried, and says so in its head.
+- What trust adds to the seal is not shown by the carried part: the survey
+  is never run trusted. Two other things have no break; the prover lists
+  them.
+- The judge keeps the Goose program's side in `build/port-map/` (about
+  400 MB, mostly links to the checkout's indexers) and runs the made-up
+  repos with `SWAN_TRUST_BUILD=1` in four cases, which loosens the seal
+  for those repos alone. Nothing else is trusted.
+- The suite was not run for this piece: no Goose source changed.

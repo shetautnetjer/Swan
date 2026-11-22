@@ -239,6 +239,14 @@ impl WriterLock {
         Ok(WriterLock { fd })
     }
 
+    /// Failure and timeout: only closed, since a child that outlives the
+    /// run may still be writing (native/swan_sys.c, swan_writer_unlock).
+    pub fn unlock(self) {
+        unsafe {
+            libc::close(self.fd);
+        }
+    }
+
     /// Success only: all foreground jobs and publication have completed.
     /// Idle build servers may retain copies of this open file description,
     /// so the lock is released, not just the descriptor closed.

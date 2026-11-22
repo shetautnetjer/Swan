@@ -1,6 +1,6 @@
 # Handoff: Swan in Rust (branch `rust-stage-4`)
 
-Written 2026-11-20T07:25Z; stage 2 part rewritten 2026-11-20T16:21Z, stage 3 part 2026-11-20T23:51Z and again 2026-11-22T06:15Z, when stage 3 was finished; stage 4 part 2026-11-22T06:50Z. For the next session, any agent.
+Written 2026-11-20T07:25Z; stage 2 part rewritten 2026-11-20T16:21Z, stage 3 part 2026-11-20T23:51Z and again 2026-11-22T06:15Z, when stage 3 was finished; stage 4 part 2026-11-22T06:50Z and 2026-11-22T07:26Z. For the next session, any agent.
 
 ## The task
 Carry Swan over from Goose to Rust, on the owner's word, as a complete
@@ -17,14 +17,14 @@ purpose are in [docs/rust-port.md](docs/rust-port.md). Read it first.
 | Stage 1, the store | Done: `index`, `refresh` and 13 of the 14 `query` kinds. The same tables, refusals, staleness and answers as the Goose build `fb8df2a4c199` on four trial repos (STATUS.md has the counts) |
 | Stage 2, planning | Done and on main (#76, merged 2026-11-20 on the owner's word): `cargo-projects`, `gradle-tasks`, `plan-python`. STATUS.md has the counts |
 | Stage 3, syntax | Done on branch `rust-stage-3`; pull request #78 is open and waits for the owner's word to merge: the trees, `query pattern`, `syntax-index`, `stamp-bench` and `stamp-worker`. STATUS.md has the counts |
-| Stage 4, the map | Under way on branch `rust-stage-4` (on `rust-stage-3`, pushed): `scip-python-patch`, `scip-typescript-patch`, `trust` and `doctor` carried, with what runs a step. Left: `swan map` itself |
+| Stage 4, the map | Under way on branch `rust-stage-4` (on `rust-stage-3`, pushed): `scip-python-patch`, `scip-typescript-patch`, `trust` and `doctor` carried, with what runs a step and reads JSON; of `swan map`, its opening. The Rust map then stops with exit 70. Left: the rest of the map |
 | Stages 5 to 8 | Not started. Every command of theirs exits 70 and names its stage |
 
 ## What passed, and how to see it again
 ```bash
 scripts/build.sh                                                     # the Goose program of this commit, the judge's other side
 CARGO_TARGET_DIR=$PWD/build/rust ~/.cargo/bin/cargo build --release --manifest-path rust/Cargo.toml
-CARGO_TARGET_DIR=$PWD/build/rust ~/.cargo/bin/cargo test --release --manifest-path rust/Cargo.toml   # 7 tests
+CARGO_TARGET_DIR=$PWD/build/rust ~/.cargo/bin/cargo test --release --manifest-path rust/Cargo.toml   # 9 tests
 SWAN_OLD=bin/swan scripts/port-compare.sh --wrong-calls              # 47 of 47
 scripts/port-store.sh $TRIES/maps/relate $TRIES/relate               # ends "the same: ..."
 scripts/port-prove.py $TRIES/maps/Agent-Reach $TRIES/Agent-Reach     # 9 of 9 breaks caught
@@ -41,6 +41,10 @@ SWAN_OLD=bin/swan scripts/port-patch.sh                              # stage 4: 
 SWAN_OLD=$PWD/bin/swan scripts/port-prove-patch.py                   # stage 4: 29 of 29 breaks caught
 SWAN_OLD=bin/swan scripts/port-run.sh                                # stage 4: 53 of 53, about a minute (PORT_RUN_QUICK=1: 3 s)
 SWAN_OLD=$PWD/bin/swan scripts/port-prove-run.py                     # stage 4: 39 of 39 breaks caught
+scripts/port-json.sh                                                 # stage 4: 159 of 159 texts
+scripts/port-prove-json.py                                           # stage 4: 23 of 23 breaks caught
+SWAN_OLD=bin/swan scripts/port-map.sh                                # stage 4: 72 of 72 in the carried part; a minute the first time, 5 s after
+SWAN_OLD=$PWD/bin/swan scripts/port-prove-map.py                     # stage 4: 74 of 74 breaks caught (about 16 min; halves can run side by side)
 ```
 `$TRIES` is the folder of trial repo copies the swan-change-loop skill
 names, with the Goose program's maps of them under `maps/`. `port-store.sh`
@@ -51,7 +55,7 @@ still match the source? nothing is built) and break numbers (only those).
 The check suites judge the Goose program: the Rust program cannot run them
 before stage 8.
 
-## Next action: the rest of stage 4, `swan map` (branch `rust-stage-4`)
+## Next action: the rest of `swan map` (branch `rust-stage-4`)
 Stage 3's pull request is #78: main (with #77) is merged in, and the full
 suite passed in the microVM on its merged commit (`4b22745`, STATUS.md).
 It waits for the owner's word to merge. `rust-stage-4` starts from
@@ -61,32 +65,48 @@ rust-stage-4` (`0411675` is the tip of `rust-stage-3` it stands on) and
 check the tree is what it was.
 
 Done in stage 4 (docs/rust-port.md, "Next", has the order): the two indexer
-patches, and running a step with `trust` and `doctor`.
+patches; running a step, with `trust` and `doctor`; reading JSON; and the
+opening of a map, up to the mark of when it began (`scip-started`,
+src/pipeline.goose line 959). `rust/src/pipeline.rs` ends there with what
+the map has said so far and exit 70.
 
-Left: `survey` (198 lines), `tsproj` (189), `wings` (455) and `seal` (213),
-which no command prints alone, and `pipeline` (2,434, of which one
-function, `map_main_locked`, is 1,557). They are judged together by `swan
-map`: table hashes (`scripts/port-tables.sh`), the report, "reused" on the
-second run. Settle these first:
+How the map is carried and judged, a part at a time:
+- Carry the next part of `map_main_locked` (src/pipeline.goose, from line
+  961: the jobs), move the place the Rust map stops, and add to
+  `scripts/port-map.sh` the lines of the report that part writes
+  (`OPENING`) and the files it writes (`WRITTEN`). The judge wants exactly
+  those lines, so a part that says nothing more needs no change there.
+- Give each rule of the part a case only it gets right, then
+  `scripts/port-prove-map.py` with a break for each. Its first run on the
+  opening caught 69 of 74; the five showed what the judge did not ask.
+- The judge keeps the Goose program's side in `build/port-map/<hash>/` (the
+  hash is of the Goose program and of the judge itself), so each edit of
+  the judge costs one minute of the Goose program mapping every case.
+  Made-up repos and homes must stay there and not in /tmp: the seal gives
+  a step its own /tmp.
+
+Next in the map's own order: "no language found to index" (exit 1 from the
+Goose program; the Rust map stops just before it); the content stamps and
+cosmetic edits (`stamp_known`, `line_of_path` and `index_lines` are first
+used here); the jobs of each language; running them; the flattener;
+`index` or `refresh`; the end of the report. Settle before the jobs:
 - **The children.** A map starts its own program again as `syntax-index`
   (carried) and `lsp-index` (stage 5, not carried: Go, Goose and the other
   languages a server indexes). Until stage 5 the Rust map can be compared
   only on repos with none of those languages, or it has to start the Goose
   program for that one child. Say which in docs/rust-port.md before
   building on it.
-- **The seal.** Every indexer runs sealed in both programs, trusted or
-  not; the comparison maps a repo with each program and never loosens the
-  seal for a third-party repo. `src/seal.goose` is what to read first.
-- **The three `ensure_` functions** of pypatch and tspatch (they patch
-  Swan's own copy of an indexer before a map) come with the map. Judge
-  them from a made-up home, as `scripts/port-run.sh` does: a map must not
-  patch the indexers of the checkout it is judged in.
-- **What stage 3 left for the map**: `stamp_known`, `line_of_path` (with
-  `index_lines`, not carried yet) and `Walk::load` with the
-  `git-ignored.txt` a map writes.
-- **The time in a step's account** is already taken off by
-  `scripts/port-compare.sh`; a map's report has more times in it
-  ("scip-python tests: 2344 ms") and they go the same way.
+- **The patches.** The three `ensure_` functions of pypatch and tspatch
+  patch Swan's own copy of an indexer before a map. The Rust program's
+  made-up home links to the checkout's `tools/` today; it needs copies of
+  the six files a map may write, as the Goose program's home has, before
+  the Rust map reaches them.
+- **Left out of the opening until the part that reads them**: the
+  virtualenv of a repo that is not trusted (the Goose program keeps it as
+  `venv_read` for the Python step), and four things `detect` notes
+  (tsconfig, Maven and Gradle files at the top of the repo).
+- **What trust adds to the seal** (the network, folders to write in) is
+  first shown by an indexer that builds; nothing carried so far shows it.
 
 ## Decisions waiting on the owner
 - Merge #78, the pull request for stage 3?

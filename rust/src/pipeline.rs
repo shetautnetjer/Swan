@@ -1,11 +1,119 @@
 // The map: what `swan map` runs, in what order, and what it keeps.
 //
-// Carried over from src/pipeline.goose so far: `swan trust`. The walk at the
-// head of that file is in walk.rs; the map itself is the rest of stage 4.
+// Carried over from src/pipeline.goose so far: `swan trust`, and the head of
+// `swan map` (what git ignores, what the repo holds, its survey, an older
+// or a clean map). The walk at the head of that file is in walk.rs. A map
+// stops where the carrying has got to, with what it would have said so far
+// and exit 70.
 
+use crate::db::Db;
+use crate::index::SCHEMA_VERSION;
+use crate::query::meta_value;
 use crate::run::{run_step, swan_home};
+use crate::survey::{survey_ignored, survey_report, survey_run};
 use crate::sys;
-use crate::util::contains_line;
+use crate::treesitter;
+use crate::util::{contains_line, ends_with, find, print, push_int};
+use crate::walk::Walk;
+
+// What a repo holds, found by walking it.
+#[derive(Default)]
+struct Langs {
+    ts: bool,
+    js: bool,
+    py: bool,
+    rs: bool,
+    java: bool,
+    c: bool,
+    cuda: bool,
+    kt: bool,       // Kotlin: tree-sitter only for now, no SCIP indexer runs
+    syn: bool,      // Go, shell, Make, Ruby or Lua: `swan syntax-index` maps them
+    other: Vec<u8>, // languages with no indexer here, only search and live errors: "lua glsl ..."
+    cargo: bool,
+    venv: Vec<u8>, // a virtualenv inside the repo, if any
+}
+
+// Files `swan syntax-index` (src/syntax.rs) covers: Go, shell, Make, Ruby and Lua by name,
+// and scripts with no extension in a bin/ or scripts/ folder (it reads their
+// #! line itself).
+fn syntax_file(full: &[u8], name: &[u8]) -> bool {
+    for e in [&b".go"[..], b".sh", b".bash", b".zsh", b".ksh", b".rb", b".lua", b".mk"] {
+        if ends_with(name, e) {
+            return true;
+        }
+    }
+    if name == b"Makefile" || name == b"makefile" || name == b"GNUmakefile" || name == b"Rakefile" {
+        return true;
+    }
+    find(name, b".") < 0 && (find(full, b"/bin/") >= 0 || find(full, b"/scripts/") >= 0)
+}
+
+fn is_c_source(name: &[u8]) -> bool {
+    ends_with(name, b".c") || ends_with(name, b".cc") || ends_with(name, b".cpp") || ends_with(name, b".cxx")
+}
+
+// One more name in `other`, which holds at most 255 bytes.
+fn other_add(other: &mut Vec<u8>, lang: &[u8], room: usize) {
+    if other.len() + room < 256 {
+        if !other.is_empty() {
+            other.push(b' ');
+        }
+        other.extend_from_slice(lang);
+    }
+}
+
+fn detect(walk: &Walk, repo: &[u8]) -> Langs {
+    let mut l = Langs { cargo: sys::file_exists(&[repo, b"/Cargo.toml"].concat()), ..Default::default() };
+    for v in [&b".venv"[..], b"venv"] {
+        if l.venv.is_empty() && sys::file_exists(&[repo, b"/", v, b"/pyvenv.cfg"].concat()) {
+            l.venv = [repo, b"/", v].concat();
+        }
+    }
+    walk.each_file(repo, |full, name| {
+        if syntax_file(full, name) {
+            l.syn = true;
+        }
+        if ends_with(name, b".ts") || ends_with(name, b".tsx") || ends_with(name, b".mts") || ends_with(name, b".cts") {
+            l.ts = true;
+        } else if ends_with(name, b".js") || ends_with(name, b".jsx") || ends_with(name, b".mjs") || ends_with(name, b".cjs") {
+            l.js = true;
+        } else if ends_with(name, b".py") {
+            l.py = true;
+        } else if ends_with(name, b".rs") {
+            l.rs = true;
+        } else if ends_with(name, b".java") {
+            l.java = true;
+        } else if ends_with(name, b".kt") || ends_with(name, b".kts") {
+            l.kt = true;
+        } else if ends_with(name, b".cu") || ends_with(name, b".cuh") {
+            l.cuda = true;
+        } else if is_c_source(name) || ends_with(name, b".h") || ends_with(name, b".hpp") || ends_with(name, b".hh") {
+            l.c = true;
+        } else if ends_with(name, b".go") {
+            // Mapped through gopls when it is installed (tools/modules.json
+            // "map": "lsp"); by syntax otherwise (syntax_file above).
+            if find(&[b" ", &l.other[..], b" "].concat(), b" go ") < 0 {
+                other_add(&mut l.other, b"go", 3);
+            }
+        } else if ends_with(name, b".goose") {
+            // No grammar and no SCIP indexer: mapped through its language
+            // server (tools/modules.json "map": "lsp").
+            if find(&l.other, b"goose") < 0 {
+                other_add(&mut l.other, b"goose", 6);
+            }
+        } else {
+            // Any other language with a grammar here (Lua, the shaders,
+            // GDScript, C#, PHP): no SCIP indexer runs for these (yet); they
+            // are searched by structure and checked by their language servers.
+            let lang = treesitter::language_of_path(name);
+            let indexed = [&b"typescript"[..], b"tsx", b"javascript", b"python", b"rust", b"java", b"kotlin", b"c", b"cpp", b"cuda"].contains(&lang);
+            if !lang.is_empty() && !indexed && find(&l.other, lang) < 0 {
+                other_add(&mut l.other, lang, lang.len() + 1);
+            }
+        }
+    });
+    l
+}
 
 // Some indexers and checkers run the repo's own build files: cargo's build
 // scripts and proc macros, Maven and Gradle, MSBuild through `dotnet
@@ -17,6 +125,17 @@ use crate::util::contains_line;
 // MCP server writes it.
 fn trust_file() -> Vec<u8> {
     [&swan_home()[..], b"/data/trusted-repos"].concat()
+}
+
+fn build_trusted(repo: &[u8]) -> bool {
+    if sys::env(b"SWAN_TRUST_BUILD") == b"1" {
+        return true;
+    }
+    let mut saved: Vec<u8> = Vec::new();
+    if !sys::read_file(&trust_file(), &mut saved) {
+        return false;
+    }
+    contains_line(&saved, repo)
 }
 
 pub fn trust_main(repo_arg: &[u8], report: &mut Vec<u8>) -> bool {
@@ -43,4 +162,151 @@ pub fn trust_main(repo_arg: &[u8], report: &mut Vec<u8>) -> bool {
     report.extend_from_slice(&repo);
     report.extend_from_slice(b": swan map, swan check and live answers may now run its build files (Cargo, Maven, Gradle, MSBuild)");
     true
+}
+
+pub fn map_main(repo_arg: &[u8], out_arg: &[u8], report: &mut Vec<u8>, clean: bool) -> bool {
+    let repo = crate::abs_path(repo_arg);
+    let mut ignored: Vec<u8> = Vec::new();
+    run_step(b"mkdir", &[b"mkdir", b"-p", out_arg], b"", &[], 10000, &mut ignored);
+    let out = crate::abs_path(out_arg);
+    let writer = match sys::WriterLock::acquire(&[&out[..], b"/swan.db"].concat()) {
+        Ok(w) => w,
+        Err(e) => {
+            report.extend_from_slice(&e);
+            return false;
+        }
+    };
+    let ok = map_main_locked(&repo, &out, report, clean);
+    if ok {
+        writer.complete();
+    } else {
+        writer.unlock();
+    }
+    ok
+}
+
+// The public wrapper holds the writer lock for every shared output: cached
+// indexer files, flattened rows, schema replacement and final database update.
+fn map_main_locked(repo: &[u8], out: &[u8], report: &mut Vec<u8>, clean: bool) -> bool {
+    let trusted = build_trusted(repo);
+    // Before any walk of the repo: the folders git ignores are left out.
+    let mut walk = Walk::default();
+    let mut ignored_said: Vec<u8> = Vec::new();
+    walk.refresh(repo, out, trusted, &mut ignored_said);
+    let mut l = detect(&walk, repo);
+    // A virtualenv inside the repo is the repo's own code (its python, its pip, its PATH):
+    // run it only once the repo is trusted, like any other build-running step.
+    // Until then it is read and not run (the Python step below).
+    if !trusted {
+        l.venv.clear();
+    }
+    // The projects the repo holds (src/survey.rs): read by Spread-Wings,
+    // nothing of the repo run.
+    let mut survey_why: Vec<u8> = Vec::new();
+    let survey = survey_run(repo, out, &mut survey_why);
+    report.extend_from_slice(b"languages:");
+    let said: [(bool, &[u8]); 9] = [
+        (l.ts, b" typescript"),
+        (l.js, b" javascript"),
+        (l.java, b" java"),
+        (l.c, b" c/c++"),
+        (l.cuda, b" cuda"),
+        (l.py, b" python"),
+        (l.rs || l.cargo, b" rust"),
+        (l.kt, b" kotlin"),
+        (l.syn, b" go/shell/make/ruby/lua (syntax only)"),
+    ];
+    for (there, name) in said {
+        if there {
+            report.extend_from_slice(name);
+        }
+    }
+    if !l.other.is_empty() {
+        report.push(b' ');
+        report.extend_from_slice(&l.other);
+    }
+    if !l.venv.is_empty() {
+        report.extend_from_slice(&[b" (venv ", &l.venv[..], b")"].concat());
+    }
+    report.push(b'\n');
+    report.extend_from_slice(&ignored_said);
+    let survey_skip = survey_ignored(out);
+    if !survey.is_empty() {
+        survey_report(&survey, &survey_skip, report);
+    } else {
+        report.extend_from_slice(&[b"projects: not surveyed (", &survey_why[..], b"): the map assumes what it did before, one Go project at the top\n"].concat());
+    }
+    // A map from an older Swan is rebuilt from scratch, indexers included:
+    // reusing their output would skip what the new schema needs.
+    let old_db = [out, b"/swan.db"].concat();
+    if clean && sys::file_exists(&old_db) {
+        // Refuse a wrong or unverifiable target before invalidating anything.
+        // A damaged map can instead be rebuilt in a new private directory.
+        let h = match Db::open_existing(&old_db) {
+            Ok(h) => h,
+            Err(e) => {
+                report.extend_from_slice(&[b"cannot verify clean map target: ", &e[..]].concat());
+                return false;
+            }
+        };
+        let mut recorded: Vec<u8> = Vec::new();
+        if let Ok(st) = h.prepare(b"SELECT value FROM meta WHERE key = 'root'") {
+            if st.step().unwrap_or(false) {
+                recorded = st.col_text(0);
+            }
+        }
+        drop(h);
+        if recorded != repo {
+            report.extend_from_slice(&[&b"clean rebuild requires the exact recorded repo root; requested "[..], repo, b", recorded ", if !recorded.is_empty() { &recorded[..] } else { &b"(unreadable)"[..] }].concat());
+            return false;
+        }
+    }
+    if !clean && sys::file_exists(&old_db) {
+        let h = match Db::open_existing(&old_db) {
+            Ok(h) => h,
+            Err(e) => crate::util::die(&[b"swan: cannot inspect map schema: ", &e[..]].concat()),
+        };
+        let v = meta_value(&h, b"schema_version");
+        drop(h);
+        if v != SCHEMA_VERSION.to_string().as_bytes() {
+            report.extend_from_slice(&[&b"map schema "[..], if !v.is_empty() { &v[..] } else { &b"?"[..] }, b" is older than "].concat());
+            push_int(report, SCHEMA_VERSION);
+            report.extend_from_slice(b": rebuilding\n");
+            for f in [&b"/swan.db"[..], b"/index-manifest.tsv", b"/python-pieces.tsv", b"/python-files.tsv"] {
+                sys::delete_file(&[out, f].concat());
+            }
+        }
+    }
+    // Invalidate reuse metadata under the same stable writer lock. Never remove
+    // the database or its lock: readers keep their snapshot until atomic publish.
+    // Defer replacement metadata until publication, so failure/interruption
+    // cannot make a later ordinary map trust unfinished indexer output.
+    if clean {
+        for name in [
+            &b"index-manifest.tsv"[..],
+            b"tsc-files.txt",
+            b"tsc-program.txt",
+            b"tsc-projects.txt",
+            b"typescript-chunks.txt",
+            b"typescript-shared.txt",
+            b"typescript-files.tsv",
+            b"typescript-layers.txt",
+            b"python-files.tsv",
+            b"python-pieces.tsv",
+        ] {
+            let path = [out, b"/", name].concat();
+            if !(!sys::file_exists(&path) || sys::delete_file(&path)) {
+                report.extend_from_slice(&[b"cannot invalidate clean rebuild cache: ", &path[..]].concat());
+                return false;
+            }
+        }
+        report.extend_from_slice(b"clean rebuild: cached indexer output and merge layers will not be reused; previous database retained until publication\n");
+    }
+    // Edits after this moment make answers stale (src/fresh.rs).
+    sys::write_file(&[out, b"/scip-started"].concat(), b"");
+
+    // Carried this far (docs/rust-port.md, "Next"): what was said so far is
+    // printed, and the jobs, the indexers and the rows they give are not run.
+    print(report);
+    crate::not_carried(b"map", 4);
 }

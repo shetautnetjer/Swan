@@ -15,6 +15,7 @@ mod fresh;
 mod gradle;
 mod graph;
 mod index;
+mod json;
 mod pipeline;
 mod pypatch;
 mod pyplan;
@@ -22,14 +23,17 @@ mod query;
 mod run;
 mod rustproj;
 mod scip;
+mod seal;
 mod stamp;
 mod structural;
+mod survey;
 mod syntax;
 mod sys;
 mod treesitter;
 mod tspatch;
 mod util;
 mod walk;
+mod wings;
 
 use std::io::Write;
 use std::os::unix::ffi::OsStringExt;
@@ -64,7 +68,7 @@ fn usage() -> ! {
     exit(2);
 }
 
-fn not_carried(command: &[u8], stage: u8) -> ! {
+pub(crate) fn not_carried(command: &[u8], stage: u8) -> ! {
     let mut msg = b"swan (rust): ".to_vec();
     msg.extend_from_slice(command);
     msg.extend_from_slice(format!(" is not carried over yet (stage {stage} of docs/rust-port.md)\n").as_bytes());
@@ -185,7 +189,12 @@ fn main() {
         drop(db);
         print(&out);
     } else if cmd == b"map" && (n == 4 || (n == 5 && is(4, "--clean"))) {
-        not_carried(cmd, 4);
+        let mut report: Vec<u8> = Vec::new();
+        let ok = pipeline::map_main(&a[2], &a[3], &mut report, n == 5);
+        print(&report);
+        if !ok {
+            exit(1);
+        }
     } else if cmd == b"syntax-index" && (n == 4 || (n == 6 && is(4, "--skip"))) {
         let skip_go = n == 6 && is(5, "go");
         if !syntax::syntax_index_main(&a[2], &a[3], skip_go) {

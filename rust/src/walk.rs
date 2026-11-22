@@ -2,8 +2,9 @@
 // Carried over from the head of src/pipeline.goose; the rest of that file
 // (the map itself) is stage 4.
 
+use crate::seal::sealed_run;
 use crate::sys;
-use crate::util::{contains_line, starts_with};
+use crate::util::{contains_line, push_int, starts_with};
 
 const SKIP_DIRS: [&[u8]; 13] = [
     b"node_modules",
@@ -58,6 +59,61 @@ impl Walk {
         let mut lines: Vec<u8> = Vec::new();
         sys::read_file(&[map_dir, b"/git-ignored.txt"].concat(), &mut lines);
         self.set(repo, &lines);
+    }
+
+    // Asks git which folders it ignores and keeps the answer for this map.
+    // Sealed like every other step: git reads the repo's own config.
+    // Folders a walk skips anyway (hidden ones, node_modules, target, ...)
+    // are left out of the list. `said` gets a line for the report when the
+    // list is not empty.
+    pub fn refresh(&mut self, repo: &[u8], out: &[u8], trusted: bool, said: &mut Vec<u8>) {
+        let mut list: Vec<u8> = Vec::new();
+        let mut all: Vec<u8> = Vec::new();
+        if sys::is_dir(&[repo, b"/.git"].concat()) || sys::file_exists(&[repo, b"/.git"].concat()) {
+            let argv: [&[u8]; 8] = [b"git", b"-c", b"core.fsmonitor=false", b"ls-files", b"-z", b"--others", b"--ignored", b"--exclude-standard"];
+            let mut argv = argv.to_vec();
+            argv.push(b"--directory");
+            let mut o: Vec<u8> = Vec::new();
+            let mut e: Vec<u8> = Vec::new();
+            if sealed_run(&argv, repo, out, trusted, &[], 60000, &mut o, &mut e) == 0 {
+                for entry in o.split(|&c| c == 0) {
+                    if !(entry.len() > 1 && entry[entry.len() - 1] == b'/') {
+                        continue;
+                    }
+                    let dir = &entry[..entry.len() - 1];
+                    all.extend_from_slice(dir);
+                    all.push(b'\n');
+                    // would a walk reach it, were it not ignored
+                    let walked = !dir.split(|&c| c == b'/').any(|seg| seg.is_empty() || seg[0] == b'.' || SKIP_DIRS.contains(&seg));
+                    if walked {
+                        list.extend_from_slice(dir);
+                        list.push(b'\n');
+                    }
+                }
+            }
+        }
+        sys::write_file(&[out, b"/git-ignored.txt"].concat(), &list);
+        // Every ignored folder, the ones no walk enters included, for the
+        // flattener: an indexer follows includes and imports wherever they lead
+        // (Swan's C fixtures pulled 22 compiler headers out of its .tools).
+        sys::write_file(&[out, b"/git-ignored-all.txt"].concat(), &all);
+        self.set(repo, &list);
+        let n = list.iter().filter(|&&c| c == b'\n').count();
+        if n > 0 {
+            said.extend_from_slice(b"not mapped, git ignores ");
+            said.extend_from_slice(if n == 1 { b"this folder" } else { b"these folders" });
+            said.push(b':');
+            for d in list.split(|&c| c == b'\n').filter(|d| !d.is_empty()).take(6) {
+                said.push(b' ');
+                said.extend_from_slice(d);
+            }
+            if n > 6 {
+                said.extend_from_slice(b" and ");
+                push_int(said, n as i64 - 6);
+                said.extend_from_slice(b" more");
+            }
+            said.push(b'\n');
+        }
     }
 
     // Whether a walk leaves this folder out.

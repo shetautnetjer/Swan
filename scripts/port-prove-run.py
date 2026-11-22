@@ -107,8 +107,8 @@ BREAKS = [
      '    exe[..bin].to_vec()'),
     # trust.
     ('pipeline.rs', 'a repo is trusted by the path it was given, not its real one',
-     '    let repo = crate::abs_path(repo_arg);',
-     '    let repo = repo_arg.to_vec();'),
+     '    let repo = crate::abs_path(repo_arg);\n    let tf = trust_file();',
+     '    let repo = repo_arg.to_vec();\n    let tf = trust_file();'),
     ('pipeline.rs', 'a repo already trusted is added again',
      '    if !contains_line(&saved, &repo) {',
      '    if true || !contains_line(&saved, &repo) {'),

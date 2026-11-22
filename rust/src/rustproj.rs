@@ -282,7 +282,7 @@ pub fn rust_toolchain_dir(repo: &[u8], dir: &[u8]) -> Vec<u8> {
 // ---- from src/seal.goose: which Rust toolchain the repo asks for ----
 
 // $NAME when set and not empty, else $HOME/<sub>.
-fn toolchain_home(name: &[u8], sub: &[u8]) -> Vec<u8> {
+pub fn toolchain_home(name: &[u8], sub: &[u8]) -> Vec<u8> {
     let v = sys::env(name);
     if !v.is_empty() {
         return v;
