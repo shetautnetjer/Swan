@@ -528,13 +528,133 @@ EOF
     printf '{"files": ["", 5, null, {"a": "./x.ts"}, "./x.ts", "./gone.ts"]}\n' | says projects show-n5@tsconfig.json
     printf '{"files": ["./x.ts", "../a.ts", "/nowhere/z.ts"], "references": "none"}\n' | says projects show-n6@tsconfig.json
     printf '["./x.ts"]\n' | says projects show-n7@tsconfig.json
+
+    # ---- TypeScript: the chunks of a project, and the layers over them ----
+    # chunky <repo>: fifteen sources and a declaration file, sixteen files in
+    # all. a.ts is the largest and b.ts, which uses it, the next, so two
+    # chunks hold one each; c.ts uses b.ts; d.ts to n.ts use nothing and
+    # nothing uses them, each larger than the one before but m.ts and n.ts,
+    # which are of one size; ref.ts names the declaration file with a
+    # reference; a.ts imports a helper outside the config's include.
+    chunky() {
+        local d=$1 i=0 f
+        printf '{"compilerOptions":{"strict":true},"include":["src"]}\n' | put "$d/tsconfig.json"
+        printf '{"name":"c","version":"1.0.0"}\n' | put "$d/package.json"
+        printf 'export const help = 1;\n' | put "$d/lib/helper.ts"
+        printf 'declare const ambient: number;\n' | put "$d/src/types.d.ts"
+        { printf 'import { help } from "../lib/helper";\nexport const a = help + 1;\n'; printf '// %0900d\n' 0; } | put "$d/src/a.ts"
+        { printf 'import { a } from "./a";\nexport const b = a + 1;\n'; printf '// %0800d\n' 0; } | put "$d/src/b.ts"
+        { printf 'import { b } from "./b";\nexport const c = b + 1;\n'; printf '// %0700d\n' 0; } | put "$d/src/c.ts"
+        printf '/// <reference path="./types.d.ts" />\nexport const r = ambient;\n' | put "$d/src/ref.ts"
+        for f in d e f g h i j k l m n; do
+            i=$((i + 1))
+            { printf 'export const %s = %s;\n' "$f" "$i"; printf '// %0*d\n' $((40 * (i < 11 ? i : 10))) 0; } | put "$d/src/$f.ts"
+        done
+    }
+    chunky "$r/ts-chunks"
+    for d in same edit comment more gone pkg decl lone helper many many5 twice ref; do chunky "$r/ts-ch-$d"; done
+    # chunky_projects <repo>: a root that names two projects and has no files
+    # of its own. app: nine sources (a2.ts uses a1.ts), one with a reference,
+    # and a declaration file; lib: four sources and a declaration file.
+    chunky_projects() {
+        local d=$1 i
+        printf '{"files":[],"references":[{"path":"./app"},{"path":"./lib"}]}\n' | put "$d/tsconfig.json"
+        printf '{"compilerOptions":{"composite":true,"strict":true},"include":["*.ts"]}\n' | put "$d/app/tsconfig.json"
+        printf '{"compilerOptions":{"composite":true,"strict":true},"include":["*.ts"]}\n' | put "$d/lib/tsconfig.json"
+        printf 'declare const inApp: number;\n' | put "$d/app/types.d.ts"; printf 'declare const inLib: number;\n' | put "$d/lib/decl.d.ts"
+        { printf 'export const a1 = 1;\n'; printf '// %0600d\n' 0; } | put "$d/app/a1.ts"
+        { printf 'import { a1 } from "./a1";\nexport const a2 = a1 + 1;\n'; printf '// %0500d\n' 0; } | put "$d/app/a2.ts"
+        for i in 3 4 5 6 7 8 9; do { printf 'export const a%s = %s;\n' "$i" "$i"; printf '// %0*d\n' $((30 * i)) 0; } | put "$d/app/a$i.ts"; done
+        printf '/// <reference path="./types.d.ts" />\nexport const ar = inApp;\n' | put "$d/app/ref.ts"
+        for i in 1 2 3; do { printf 'export const l%s = %s;\n' "$i" "$i"; printf '// %0*d\n' $((50 * i)) 0; } | put "$d/lib/l$i.ts"; done
+        printf '/// <reference path="./decl.d.ts" />\nexport const lr = inLib;\n' | put "$d/lib/lref.ts"
+    }
+    chunky_projects "$r/ts-chp"
+    for d in same one two; do chunky_projects "$r/ts-chp-$d"; done
+    # Fourteen sources of three sizes, in no order of size: which chunk each
+    # lands in is the order the Goose program's sort leaves equal sizes in,
+    # which is not the order they come in.
+    printf '{"include":["*.ts"]}\n' | put "$r/ts-ties/tsconfig.json"
+    i=0; for w in 30 10 20 10 30 10 20 10 30 10 20 10 30 10; do i=$((i + 1)); { printf 'export const t = 1;\n'; printf '// %0*d\n' "$w" 0; } >"$r/ts-ties/t$(printf '%02d' $i).ts"; done
+    # Two empty sources among six in pairs of one size: an empty source
+    # weighs a byte, so the two go to a chunk each.
+    printf '{"include":["*.ts"]}\n' | put "$r/ts-empty/tsconfig.json"; : >"$r/ts-empty/y.ts"; : >"$r/ts-empty/z.ts"
+    i=0; for w in 40 40 30 30 20 20; do i=$((i + 1)); { printf 'export const e = 1;\n'; printf '// %0*d\n' "$w" 0; } >"$r/ts-empty/e$i.ts"; done
+    # A root's source that imports one another project owns.
+    printf '{"include":["src"]}\n' | put "$r/ts-proj-import/tsconfig.json"
+    printf 'import { x } from "../packages/x/x";\nexport const s = x;\n' | put "$r/ts-proj-import/src/s.ts"
+    printf '{"include":["*.ts"]}\n' | put "$r/ts-proj-import/packages/x/tsconfig.json"; printf 'export const x = 1;\n' | put "$r/ts-proj-import/packages/x/x.ts"
+    # Eight sources are enough for two chunks, seven are not.
+    printf '{"include":["*.ts"]}\n' | put "$r/ts-eight/tsconfig.json"
+    for i in 1 2 3 4 5 6 7 8; do { printf 'export const e%s = %s;\n' "$i" "$i"; printf '// %0*d\n' $((25 * i)) 0; } >"$r/ts-eight/e$i.ts"; done
+    cp -r "$r/ts-eight" "$r/ts-seven"; rm "$r/ts-seven/e8.ts"
+    # A reference counts where it is whole within a source's first 4096
+    # bytes: at its start, ending on the last of them, one byte further, and
+    # far beyond.
+    printf '{"include":["*.ts"]}\n' | put "$r/ts-ref-far/tsconfig.json"; printf 'declare const far: number;\n' >"$r/ts-ref-far/t.d.ts"
+    printf '/// <reference path="./t.d.ts" />\nexport const r0 = far;\n' >"$r/ts-ref-far/r0.ts"
+    i=0; for w in 4079 4080 5000; do i=$((i + 1)); { printf '//%0*d\n' "$w" 0; printf '/// <reference path="./t.d.ts" />\nexport const r%s = far;\n' "$i"; } >"$r/ts-ref-far/r$i.ts"; done
+    for i in 1 2 3 4 5; do { printf 'export const p%s = %s;\n' "$i" "$i"; printf '// %0*d\n' $((35 * i)) 0; } >"$r/ts-ref-far/p$i.ts"; done
+    # What tsc lists that is no source of the repo to put in a chunk (for
+    # the made-up tsc): a file in node_modules, one outside the repo whose
+    # path has a / where the repo's ends, one in a folder whose name starts
+    # with the repo's, a declaration file; and two that are: an empty file
+    # and one that is not there. And what it compiles that is no root: a
+    # file of the repo, which counts among what the chunks share, and the
+    # same kinds of file that are none of the repo's.
+    printf '{}\n' | put "$r/ts-fake-chunks/tsconfig.json"; : >"$r/ts-fake-chunks/empty.ts"; printf 'declare const d: number;\n' >"$r/ts-fake-chunks/types.d.ts"
+    i=0; for f in a b c d e f g; do i=$((i + 1)); { printf 'export const %s = 1;\n' "$f"; printf '// %0*d\n' $((20 * i)) 0; } >"$r/ts-fake-chunks/$f.ts"; done
+    printf 'export const p = 1;\n' | put "$r/ts-fake-chunks/node_modules/p/index.ts"; printf 'export const q = 1;\n' >"$r/ts-fake-chunks/node_modules/p/dep.ts"
+    printf 'export const s = 1;\n' | put "$r/ts-fake-chunksx/sibling.ts"; printf 'export const o = 1;\n' >"$r/ts-fake-chunksx/other.ts"
+    printf 'export const i = 1;\n' | put "$r/ts-fake-chunks/lib/imported.ts"
+    far="/$(printf '%*s' $((${#r} + 14)) '' | tr ' ' n)"
+    {
+        for f in a b c d e f g empty gone; do printf '@REPO@/%s.ts\n' "$f"; done
+        printf '@REPO@/types.d.ts\n@REPO@/node_modules/p/index.ts\n@REPO@x/sibling.ts\n/nowhere/z.ts\n%s/z.ts\n' "$far"
+        printf '@REPO@/lib/imported.ts\n@REPO@/node_modules/p/dep.ts\n@REPO@x/other.ts\n/nowhere/y.ts\n%s/y.ts\n' "$far"
+    } | says chunks-odd list-repo
+    {
+        printf '{\n    "files": [\n'
+        for f in a b c d e f g empty gone; do printf '        "./%s.ts",\n' "$f"; done
+        printf '        "./types.d.ts",\n        "./node_modules/p/index.ts",\n        "@REPO@x/sibling.ts",\n        "/nowhere/z.ts",\n        "%s/z.ts"\n    ]\n}\n' "$far"
+    } | says chunks-odd show-repo
 }
 
 # The Goose program maps these once, as they are made, and they are changed
 # after: a later map of each starts from what was kept of the earlier state.
 BEFORE="ts-edit-config ts-edit-pkg ts-edit-nested ts-edit-code ts-edit-touch ts-edit-more ts-edit-gone"
+# These with room for two indexers at once, so that TypeScript is in two
+# chunks, and these with room for four: app in two chunks and lib in one.
+BEFORE_TWO="ts-ch-same ts-ch-edit ts-ch-comment ts-ch-more ts-ch-gone ts-ch-pkg ts-ch-decl ts-ch-lone ts-ch-helper ts-ch-many ts-ch-many5 ts-ch-twice ts-ch-ref"
+BEFORE_FOUR="ts-chp-same ts-chp-one ts-chp-two"
 make_before() {
-    local d
+    local d jobs f
+    for jobs in 2 4; do
+        for d in $([ $jobs = 2 ] && echo "$BEFORE_TWO" || echo "$BEFORE_FOUR"); do
+            home_as_installed "$base/old/home"
+            (cd "$base/old" && env "${UNSET[@]}" SWAN_JOBS=$jobs home/bin/swan map "$r/$d" "$base/before/$d" >/dev/null 2>&1 </dev/null)
+            [ -e "$base/before/$d/index-typescript-1.scip" ] || { echo "port-map: the Goose program made no second chunk for $d"; exit 2; }
+        done
+    done
+    # One changed twice: after its first change it is mapped again, which
+    # leaves a layer over its chunks, and then it is changed once more.
+    sed -i 's/help + 1/help + 2/' "$r/ts-ch-twice/src/a.ts"
+    (cd "$base/old" && env "${UNSET[@]}" SWAN_JOBS=2 home/bin/swan map "$r/ts-ch-twice" "$base/before/ts-ch-twice" >/dev/null 2>&1 </dev/null)
+    [ -e "$base/before/ts-ch-twice/index-typescript-layer-0.scip" ] || { echo "port-map: the Goose program made no layer for ts-ch-twice"; exit 2; }
+    sed -i 's/= 1;/= 100;/' "$r/ts-ch-twice/src/d.ts"
+    sed -i 's/help + 1/help + 2/' "$r/ts-ch-edit/src/a.ts"
+    sed -i 's|^// 0|// 1|' "$r/ts-ch-comment/src/a.ts"
+    printf 'export const more = 1;\n' >"$r/ts-ch-more/src/more.ts"
+    rm "$r/ts-ch-gone/src/b.ts"
+    printf '{"name":"c","version":"1.0.1"}\n' >"$r/ts-ch-pkg/package.json"
+    printf 'declare const ambient: number;\ndeclare const other: string;\n' >"$r/ts-ch-decl/src/types.d.ts"
+    sed -i 's/= 1;/= 100;/' "$r/ts-ch-lone/src/d.ts"
+    printf 'export const help = 2;\n' >"$r/ts-ch-helper/lib/helper.ts"
+    for f in d e f g; do sed -i 's/;$/ + 100;/' "$r/ts-ch-many/src/$f.ts"; done
+    for f in d e f g h; do sed -i 's/;$/ + 100;/' "$r/ts-ch-many5/src/$f.ts"; done
+    sed -i 's/= ambient;/= ambient + 1;/' "$r/ts-ch-ref/src/ref.ts"
+    sed -i 's/= 1;/= 100;/' "$r/ts-chp-one/app/a1.ts"
+    sed -i 's/= 1;/= 100;/' "$r/ts-chp-two/app/a1.ts" "$r/ts-chp-two/lib/l1.ts"
     for d in $BEFORE; do
         home_as_installed "$base/old/home"
         (cd "$base/old" && env "${UNSET[@]}" home/bin/swan map "$r/$d" "$base/before/$d" >/dev/null 2>&1 </dev/null)
@@ -595,15 +715,17 @@ cp bin/eggshell bin/spread-wings bin/swan-flatten "$work/programs/"; cp "$new" "
 # plain repo that starts from a folder with files in it (WATCH) also watches
 # three it removes or leaves, which no later part makes again for a repo
 # with no Python.
+# The config of each of TypeScript's chunks and layers (tsproject-<n>/,
+# tsproject-layer-<id>/) is compared as well, wherever either program has one.
 WRITTEN="git-ignored.txt git-ignored-all.txt survey.json scip-started tsproject/tsconfig.json"
 # What it keeps to use again. A clean map holds these back until it ends.
-CACHED="tsc-files.txt tsc-program.txt tsc-projects.txt"
+CACHED="tsc-files.txt tsc-program.txt tsc-projects.txt typescript-chunks.txt typescript-shared.txt typescript-files.tsv typescript-layers.txt"
 # The lines of the report the carried part writes: the Goose program's
 # report starts with these, and the Rust program's is these and no more.
 # Two are the ends of what a made-up program said over more than one line:
 # spread-wings inside "projects: not surveyed (...)", tsc inside
 # "typescript: the repo's tsconfig.json cannot be read (...)".
-OPENING='^(languages:|not mapped, git ignores |projects: |node: dependencies are not installed |map schema |clean rebuild: cached |line [0-9]+ of what went wrong|stamps: |cosmetic edits: [0-9]+ file.s. changed only |reindexing [0-9]+ file.s. whose indexed text is unknown|typescript: the repo.s tsconfig.json cannot be read |.*[)]; indexing with Swan.s own config$|scip-typescript: applied Swan.s stable names |scip-typescript: Swan.s stable names are not applied |typescript: [0-9]+ more tsconfig )'
+OPENING='^(languages:|not mapped, git ignores |projects: |node: dependencies are not installed |map schema |clean rebuild: cached |line [0-9]+ of what went wrong|stamps: |cosmetic edits: [0-9]+ file.s. changed only |reindexing [0-9]+ file.s. whose indexed text is unknown|typescript: the repo.s tsconfig.json cannot be read |.*[)]; indexing with Swan.s own config$|scip-typescript: applied Swan.s stable names |scip-typescript: Swan.s stable names are not applied |typescript: [0-9]+ more tsconfig |scip-typescript( [0-9]+/[0-9]+)?: reused .no changes.$)'
 # The steps the carried part runs and gives an account of on standard
 # error: the Goose program's standard error starts with these (each with
 # whatever its step said when it failed), and the Rust program's is these
@@ -616,6 +738,9 @@ total=0
 tidy() { sed -E -e 's/ in [0-9]+ ms$//' -e 's/^(.*): [0-9]+ ms$/\1: N ms/' -e 's/^(.*): exit (-?[0-9]+) after [0-9]+ ms$/\1: exit \2 after N ms/' -e "s|$2|<its folder>|g" -e 's/^goose runtime error: //' -e '$s/ \([^()]*\.goose:[0-9]+\)$//' "$1"; }
 # The prep_ and home_ functions there are so far: the Goose program maps a
 # case again when one of them changes.
+# A copy of a map the Goose program made, with its record of where its
+# indexes are (index-manifest.tsv) moved with it, as if made where it is.
+prep_copy() { cp -r "$1" "$2"; [ ! -f "$2/index-manifest.tsv" ] || sed -i "s|$1/|$2/|g" "$2/index-manifest.tsv"; }
 preps() { declare -f $(compgen -A function | grep -E '^(prep_|home_|mtime_ns$)') | sha256sum | cut -c1-16; }
 # case_of <name> <repo> [--clean] [NAME=value...]: both programs map the
 # repo into maps/<name> of their own folder. PREP names a function that
@@ -673,10 +798,15 @@ case_of() {
             [ -n "$why" ] || [ "$code" = "$old_code" ] || why="exit code differs: Goose $old_code, Rust $code"
         fi
         if [ -z "$why" ] && [ "$code" = 70 ]; then
-            for f in $WRITTEN ${WATCH:+$WATCHED} $([ ${#clean[@]} = 0 ] && echo "$CACHED"); do
+            configs=$(for d in "$n" "$o"; do (cd "$d" 2>/dev/null && ls -d tsproject-*/tsconfig.json 2>/dev/null); done | sort -u | tr '\n' ' ')
+            for f in $WRITTEN $configs ${WATCH:+$WATCHED} $([ ${#clean[@]} = 0 ] && echo "$CACHED"); do
                 if { [ -e "$n/$f" ] && [ ! -e "$o/$f" ]; } || { [ ! -e "$n/$f" ] && [ -e "$o/$f" ]; }; then
                     why="the map folder's $f is there for one program only"; break
                 fi
+                # With Swan's own config for TypeScript, which is in the map
+                # folder, the fingerprint of what the chunks share takes in
+                # that folder's path, and each program has its own.
+                [ "$f" = typescript-shared.txt ] && [ -e "$o/tsproject/tsconfig.json" ] && continue
                 # The same bytes, each program's own folder apart.
                 if [ -e "$n/$f" ] && ! cmp -s <(sed "s|$w|<its folder>|g" "$n/$f") <(sed "s|$base/old|<its folder>|g" "$o/$f"); then why="the map folder's $f differs"; break; fi
             done
@@ -699,7 +829,12 @@ case_of() {
                 if [ -z "$why" ] && [ -z "${PREP:-}" ] && [ "$(ls "$o/texts" | wc -l)" != "$(($(ls "$n/texts" 2>/dev/null | wc -l) + later))" ]; then why="more texts are kept than the Goose program keeps"; fi
             fi
         elif [ -z "$why" ] && { [ -d "$n" ] || [ -d "$o" ]; }; then
-            diff -r -x swan.db.lock "$n" "$o" >"$w/d" 2>&1 || why="the map folders differ: $(head -2 "$w/d" | tr '\n' ' ' | sed "s|$w|<Rust>|g; s|$base/old|<Goose>|g" | cut -c1-200)"
+            # The record of where the indexes are names the folder itself,
+            # which is each program's own: it is compared with that apart.
+            diff -r -x swan.db.lock -x index-manifest.tsv "$n" "$o" >"$w/d" 2>&1 || why="the map folders differ: $(head -2 "$w/d" | tr '\n' ' ' | sed "s|$w|<Rust>|g; s|$base/old|<Goose>|g" | cut -c1-200)"
+            if [ -z "$why" ] && { [ -e "$n/index-manifest.tsv" ] || [ -e "$o/index-manifest.tsv" ]; }; then
+                { [ -e "$n/index-manifest.tsv" ] && [ -e "$o/index-manifest.tsv" ] && cmp -s <(sed "s|$w|<its folder>|g" "$n/index-manifest.tsv") <(sed "s|$base/old|<its folder>|g" "$o/index-manifest.tsv"); } || why="the map folder's index-manifest.tsv differs"
+            fi
         fi
         if [ -z "$why" ] && ! home_state "$w/home" | cmp -s - "$kept/home"; then
             why="the indexer in its home is not left as the Goose program leaves it (Goose: $(tr '\n' ' ' <"$kept/home" | cut -c1-12,65-90); Rust: $(home_state "$w/home" | tr '\n' ' ' | cut -c1-12,65-90))"
@@ -765,12 +900,12 @@ if [ ! -e "$base/plain-map/swan.db" ]; then
     (cd "$base/old" && env "${UNSET[@]}" home/bin/swan map "$r/plain" "$base/plain-map" >/dev/null 2>&1 </dev/null)
     [ -e "$base/plain-map/swan.db" ] || { echo "port-map: the Goose program made no map of the plain repo"; exit 2; }
 fi
-prep_plain() { cp -r "$base/plain-map" "$1"; }
-prep_older() { cp -r "$base/plain-map" "$1"; sqlite3 "$1/swan.db" "UPDATE meta SET value = '8' WHERE key = 'schema_version'"; }
-prep_no_version() { cp -r "$base/plain-map" "$1"; sqlite3 "$1/swan.db" "DELETE FROM meta WHERE key = 'schema_version'"; }
-prep_no_root() { cp -r "$base/plain-map" "$1"; sqlite3 "$1/swan.db" "DELETE FROM meta WHERE key = 'root'"; }
+prep_plain() { prep_copy "$base/plain-map" "$1"; }
+prep_older() { prep_copy "$base/plain-map" "$1"; sqlite3 "$1/swan.db" "UPDATE meta SET value = '8' WHERE key = 'schema_version'"; }
+prep_no_version() { prep_copy "$base/plain-map" "$1"; sqlite3 "$1/swan.db" "DELETE FROM meta WHERE key = 'schema_version'"; }
+prep_no_root() { prep_copy "$base/plain-map" "$1"; sqlite3 "$1/swan.db" "DELETE FROM meta WHERE key = 'root'"; }
 prep_garbage() { mkdir -p "$1"; printf 'this is no database\n' >"$1/swan.db"; }
-prep_caches() { cp -r "$base/plain-map" "$1"; for f in index-manifest.tsv tsc-files.txt typescript-layers.txt python-files.tsv python-pieces.tsv other.txt; do printf 'old\n' >"$1/$f"; done; }
+prep_caches() { prep_copy "$base/plain-map" "$1"; for f in index-manifest.tsv tsc-files.txt typescript-layers.txt python-files.tsv python-pieces.tsv other.txt; do printf 'old\n' >"$1/$f"; done; }
 prep_older_caches() { prep_caches "$1"; sqlite3 "$1/swan.db" "UPDATE meta SET value = '8' WHERE key = 'schema_version'"; }
 prep_file() { printf 'a file\n' >"$1"; }
 case_of clean-fresh "$r/plain" --clean
@@ -801,19 +936,19 @@ if [ ! -e "$base/cos-map/swan.db" ]; then
     [ -e "$base/cos-map/indexed-texts.tsv" ] || { echo "port-map: the Goose program made no map of the cos repo"; exit 2; }
 fi
 mtime_ns() { stat -c '%.9Y' "$1" | tr -d .; }
-prep_cos() { cp -r "$base/cos-map" "$1"; }
-prep_cos_no_texts() { cp -r "$base/cos-map" "$1"; rm -f "$1"/texts/*; }
-prep_cos_unknown() { cp -r "$base/cos-map" "$1"; sed -i -E 's/^(a\.ts)\t[^\t]+\t/\1\t?\t/' "$1/indexed-texts.tsv"; }
-prep_cos_short_line() { cp -r "$base/cos-map" "$1"; sed -i -E 's/^(a\.ts\t[^\t]+)\t.*$/\1/' "$1/indexed-texts.tsv"; }
-prep_cos_no_record() { cp -r "$base/cos-map" "$1"; : >"$1/indexed-texts.tsv"; }
-prep_cos_bad_stamp() { cp -r "$base/cos-map" "$1"; sed -i -E 's/^(a\.ts\t[0-9]+\t[0-9]+)\t-?[0-9]+\t/\1\tnot-a-number\t/' "$1/content-stamps.tsv"; }
+prep_cos() { prep_copy "$base/cos-map" "$1"; }
+prep_cos_no_texts() { prep_copy "$base/cos-map" "$1"; rm -f "$1"/texts/*; }
+prep_cos_unknown() { prep_copy "$base/cos-map" "$1"; sed -i -E 's/^(a\.ts)\t[^\t]+\t/\1\t?\t/' "$1/indexed-texts.tsv"; }
+prep_cos_short_line() { prep_copy "$base/cos-map" "$1"; sed -i -E 's/^(a\.ts\t[^\t]+)\t.*$/\1/' "$1/indexed-texts.tsv"; }
+prep_cos_no_record() { prep_copy "$base/cos-map" "$1"; : >"$1/indexed-texts.tsv"; }
+prep_cos_bad_stamp() { prep_copy "$base/cos-map" "$1"; sed -i -E 's/^(a\.ts\t[0-9]+\t[0-9]+)\t-?[0-9]+\t/\1\tnot-a-number\t/' "$1/content-stamps.tsv"; }
 # Rows Swan moved itself: the time it noted in the map, and the text they match now.
-prep_cos_moved() { cp -r "$base/cos-map" "$1"; sqlite3 "$1/swan.db" "UPDATE files SET edited_mtime = 123 WHERE file = 'a.ts'"; printf 'a.ts\t%s\t123\n' "$2" >"$1/row-basis.tsv"; }
+prep_cos_moved() { prep_copy "$base/cos-map" "$1"; sqlite3 "$1/swan.db" "UPDATE files SET edited_mtime = 123 WHERE file = 'a.ts'"; printf 'a.ts\t%s\t123\n' "$2" >"$1/row-basis.tsv"; }
 prep_cos_moved_known() { prep_cos_moved "$1" "$(cut -f2 "$base/cos-map/indexed-texts.tsv" | head -1)"; }
 prep_cos_moved_lost() { prep_cos_moved "$1" 4242; }
 prep_cos_moved_other_time() { prep_cos_moved_known "$1"; sed -i -E 's/\t123$/\t999/' "$1/row-basis.tsv"; }
-prep_py_many() { cp -r "$base/old/maps/py-many" "$1"; }
-prep_cos_moved_now() { cp -r "$base/cos-map" "$1"; sqlite3 "$1/swan.db" "UPDATE files SET edited_mtime = $(mtime_ns "$r/cos-comment/a.ts") WHERE file = 'a.ts'"; }
+prep_py_many() { prep_copy "$base/old/maps/py-many" "$1"; }
+prep_cos_moved_now() { prep_copy "$base/cos-map" "$1"; sqlite3 "$1/swan.db" "UPDATE files SET edited_mtime = $(mtime_ns "$r/cos-comment/a.ts") WHERE file = 'a.ts'"; }
 PREP=prep_cos case_of cos-again "$r/cos"
 PREP=prep_cos case_of cos-clean "$r/cos" --clean
 PREP=prep_cos case_of cos-comment "$r/cos-comment"
@@ -893,13 +1028,13 @@ HOME_PREP=home_plain case_of patch-00-plain "$r/plain" SWAN_SCIP_TYPESCRIPT_PATC
 HOME_PREP=home_plain case_of patch-plain-no-typescript "$r/rs-only"
 # tsc's list is kept, and asked for again when a file comes or goes or a
 # config changes, and not when only code does.
-prep_ts_config() { cp -r "$base/old/maps/ts-config" "$1"; }
+prep_ts_config() { prep_copy "$base/old/maps/ts-config" "$1"; }
 prep_ts_old_list() { prep_ts_config "$1"; sed -i '1s/ roots$//' "$1/tsc-files.txt"; }
 prep_ts_longer_key() { prep_ts_config "$1"; sed -i '1s/ roots$/ roots and more/' "$1/tsc-files.txt"; }
 prep_ts_other_program() { prep_ts_config "$1"; sed -i '1s/^/9/' "$1/tsc-program.txt"; }
 prep_ts_no_program() { prep_ts_config "$1"; rm -f "$1/tsc-program.txt"; }
 prep_ts_no_list() { prep_ts_config "$1"; rm -f "$1/tsc-files.txt"; }
-prep_before() { cp -r "$base/before/${1##*/}" "$1"; }
+prep_before() { prep_copy "$base/before/${1##*/}" "$1"; }
 DEPENDS=ts-config PREP=prep_ts_config case_of ts-config-again "$r/ts-config"
 DEPENDS=ts-config PREP=prep_ts_config case_of ts-config-again-clean "$r/ts-config" --clean
 DEPENDS=ts-config PREP=prep_ts_config case_of ts-config-again-one-job "$r/ts-config" SWAN_JOBS=1
@@ -954,21 +1089,138 @@ case_of ts-proj-same-folder-ref-first "$r/ts-proj-same-folder-ref-first"
 case_of ts-proj-root-same "$r/ts-proj-root-same"
 case_of ts-proj-own-base "$r/ts-proj-own-base"
 case_of ts-proj-no-root "$r/ts-proj-no-root"
-LATER_TEXTS=1 case_of ts-proj-hidden-ref "$r/ts-proj-hidden-ref"
+case_of ts-proj-hidden-ref "$r/ts-proj-hidden-ref"
 case_of ts-proj-self-ref "$r/ts-proj-self-ref"
 case_of ts-proj-two-refs "$r/ts-proj-two-refs"
 case_of ts-proj-outside "$r/ts-proj-outside"
 HOME_PREP="home_tsc projects-many" case_of ts-proj-64 "$r/ts-proj-64"
 HOME_PREP="home_tsc projects-many" case_of ts-proj-66 "$r/ts-proj-66"
-LATER_TEXTS=1 HOME_PREP="home_tsc projects" case_of ts-proj-fake "$r/ts-proj-fake"
+HOME_PREP="home_tsc projects" case_of ts-proj-fake "$r/ts-proj-fake"
 HOME_PREP="home_tsc projects-own" case_of ts-proj-own-fake "$r/ts-proj-own-fake"
 # The answer is kept under the key of tsc's list, and asked for again without it.
-prep_ts_dirs() { cp -r "$base/old/maps/ts-proj-dirs" "$1"; }
+prep_ts_dirs() { prep_copy "$base/old/maps/ts-proj-dirs" "$1"; }
 prep_ts_dirs_other_key() { prep_ts_dirs "$1"; sed -i '1s/^/9/' "$1/tsc-projects.txt"; }
 prep_ts_dirs_no_projects() { prep_ts_dirs "$1"; rm -f "$1/tsc-projects.txt"; }
 DEPENDS=ts-proj-dirs PREP=prep_ts_dirs case_of ts-proj-dirs-again "$r/ts-proj-dirs"
 DEPENDS=ts-proj-dirs PREP=prep_ts_dirs_other_key case_of ts-proj-dirs-other-key "$r/ts-proj-dirs"
 DEPENDS=ts-proj-dirs PREP=prep_ts_dirs_no_projects case_of ts-proj-dirs-no-projects "$r/ts-proj-dirs"
+# ---- TypeScript: the chunks of a project, and the layers over them ----
+# How a project is cut: its sources by size, largest first, each into the
+# lightest chunk; as many chunks as there is room for, with four sources or
+# more to each; one chunk of all when there is room for none but the project
+# is large enough for layers.
+case_of ts-chunks-two "$r/ts-chunks" SWAN_JOBS=2
+case_of ts-chunks-three "$r/ts-chunks" SWAN_JOBS=3
+case_of ts-chunks-four "$r/ts-chunks" SWAN_JOBS=4
+case_of ts-chunks-one "$r/ts-chunks" SWAN_JOBS=1 SWAN_TS_LAYER_MIN=1
+case_of ts-chunks-none "$r/ts-chunks" SWAN_JOBS=1
+case_of ts-chunks-clean "$r/ts-chunks" --clean SWAN_JOBS=2
+case_of ts-ties-two "$r/ts-ties" SWAN_JOBS=2
+case_of ts-ties-three "$r/ts-ties" SWAN_JOBS=3
+case_of ts-empty "$r/ts-empty" SWAN_JOBS=2
+case_of ts-eight "$r/ts-eight" SWAN_JOBS=2
+case_of ts-seven "$r/ts-seven" SWAN_JOBS=2
+case_of ts-ref-far "$r/ts-ref-far" SWAN_JOBS=2
+HOME_PREP="home_tsc chunks-odd" case_of ts-fake-chunks "$r/ts-fake-chunks" SWAN_JOBS=2
+# Several projects: each cut by itself, with its part of the room.
+case_of ts-proj-import "$r/ts-proj-import" SWAN_JOBS=1
+case_of ts-chp-one-job "$r/ts-chp" SWAN_JOBS=1
+case_of ts-chp-two-jobs "$r/ts-chp" SWAN_JOBS=2
+case_of ts-chp-four-jobs "$r/ts-chp" SWAN_JOBS=4
+case_of ts-chp-eight-jobs "$r/ts-chp" SWAN_JOBS=8
+# A second map of a repo that was changed after its first (make_before): a
+# chunk is kept while its files, what the chunks share and the plan are the
+# same; a small change is indexed as a layer over the chunks.
+for d in $BEFORE_TWO; do PREP=prep_before case_of "$d" "$r/$d" SWAN_JOBS=2; done
+for d in $BEFORE_FOUR; do PREP=prep_before case_of "$d" "$r/$d" SWAN_JOBS=4; done
+prep_same() { prep_copy "$base/before/ts-ch-same" "$1"; }
+prep_edit() { prep_copy "$base/before/ts-ch-edit" "$1"; }
+prep_lone() { prep_copy "$base/before/ts-ch-lone" "$1"; }
+prep_chp() { prep_copy "$base/before/ts-chp-same" "$1"; }
+PREP=prep_same case_of ch-same-clean "$r/ts-ch-same" --clean SWAN_JOBS=2
+PREP=prep_same case_of ch-same-three-jobs "$r/ts-ch-same" SWAN_JOBS=3
+PREP=prep_same case_of ch-same-one-job "$r/ts-ch-same" SWAN_JOBS=1
+PREP=prep_same case_of ch-same-one-chunk "$r/ts-ch-same" SWAN_JOBS=1 SWAN_TS_LAYER_MIN=1
+PREP=prep_edit case_of ch-edit-clean "$r/ts-ch-edit" --clean SWAN_JOBS=2
+PREP=prep_edit case_of ch-edit-three-jobs "$r/ts-ch-edit" SWAN_JOBS=3
+PREP=prep_chp case_of chp-same-two-jobs "$r/ts-chp-same" SWAN_JOBS=2
+# What says an index can be kept: its line in the record, with this label,
+# this fingerprint and this file, and the file there.
+prep_same_no_index() { prep_same "$1"; rm "$1/index-typescript-1.scip"; }
+prep_same_other_fp() { prep_same "$1"; sed -i -E '/^scip-typescript 0\/2\t/s/\t[0-9]+\t/\t1\t/' "$1/index-manifest.tsv"; }
+prep_same_other_label() { prep_same "$1"; sed -i -E 's|^scip-typescript 0/2\t|scip-typescript 0/3\t|' "$1/index-manifest.tsv"; }
+prep_same_other_target() { prep_same "$1"; sed -i -E '/^scip-typescript 1\/2\t/s|index-typescript-1\.scip$|index-typescript-0.scip|' "$1/index-manifest.tsv"; }
+prep_same_four_fields() { prep_same "$1"; sed -i -E '/^scip-typescript 1\/2\t/s|$|\tmore|' "$1/index-manifest.tsv"; }
+prep_same_no_record() { prep_same "$1"; rm "$1/index-manifest.tsv"; }
+for p in no_index other_fp other_label other_target four_fields no_record; do PREP=prep_same_$p case_of "ch-same-${p//_/-}" "$r/ts-ch-same" SWAN_JOBS=2; done
+# The last map's plan is kept while it holds the same files, however they
+# are arranged in it, and one project's in each chunk.
+prep_plan() { "${@:2}" <"$1/typescript-chunks.txt" >"$1/plan.new"; mv "$1/plan.new" "$1/typescript-chunks.txt"; }
+prep_same_swapped() { prep_same "$1"; prep_plan "$1" tac; }
+prep_same_one_line() { prep_same "$1"; prep_plan "$1" paste -s; }
+prep_same_blank() { prep_same "$1"; prep_plan "$1" sed 1G; }
+prep_same_no_newline() { prep_same "$1"; prep_plan "$1" head -c -1; }
+prep_same_other_file() { prep_same "$1"; prep_plan "$1" sed 's|/src/d\.ts|/src/zz.ts|'; }
+prep_same_fewer() { prep_same "$1"; prep_plan "$1" sed 's|\t[^\t]*/src/d\.ts||'; }
+prep_same_twice() { prep_same "$1"; prep_plan "$1" sed -E '1s|^([^\t]*)\t|\1\t\1\t|'; }
+prep_same_empty_plan() { prep_same "$1"; : >"$1/typescript-chunks.txt"; }
+prep_same_no_plan() { prep_same "$1"; rm "$1/typescript-chunks.txt"; }
+for p in swapped one_line blank no_newline other_file fewer twice empty_plan no_plan; do PREP=prep_same_$p case_of "ch-same-${p//_/-}" "$r/ts-ch-same" SWAN_JOBS=2; done
+prep_chp_merged() { prep_chp "$1"; { sed -n 1p "$1/typescript-chunks.txt"; sed -n '2,3p' "$1/typescript-chunks.txt" | paste -s; } >"$1/plan.new"; mv "$1/plan.new" "$1/typescript-chunks.txt"; }
+PREP=prep_chp_merged case_of chp-merged "$r/ts-chp-same" SWAN_JOBS=4
+# Layers: kept while the chunks, what they share and the layers' own indexes
+# are there, the layers cover no more than a quarter of the files, and there
+# are no more than six. prep_layers <map folder> <id> <files>...: the folder
+# says it has these layers, newest first, each with an index.
+prep_layers() { local d=$1; shift; : >"$d/typescript-layers.txt"; while [ $# -gt 0 ]; do printf '%s\t%s\n' "$1" "$2" >>"$d/typescript-layers.txt"; : >"$d/index-typescript-layer-$1.scip"; shift 2; done; }
+prep_same_layers() { prep_same "$1"; prep_layers "$1" 3 src/d.ts 1 src/e.ts,,src/f.ts,src/g.ts; }
+prep_same_layers_shared() { prep_same_layers "$1"; printf '1' >"$1/typescript-shared.txt"; }
+prep_same_layers_no_shared() { prep_same_layers "$1"; rm "$1/typescript-shared.txt"; }
+prep_same_layers_missing() { prep_same_layers "$1"; rm "$1/index-typescript-layer-1.scip"; }
+prep_same_layers_no_chunk() { prep_same_layers "$1"; rm "$1/index-typescript-0.scip"; }
+prep_same_layers_six() { prep_same "$1"; prep_layers "$1" 0 src/d.ts 1 src/d.ts 2 src/d.ts 3 src/d.ts 4 src/d.ts 5 src/d.ts; }
+prep_same_layers_seven() { prep_same "$1"; prep_layers "$1" 0 src/d.ts 1 src/d.ts 2 src/d.ts 3 src/d.ts 4 src/d.ts 5 src/d.ts 6 src/d.ts; }
+prep_same_layers_quarter() { prep_same "$1"; prep_layers "$1" 0 src/d.ts,src/e.ts,src/f.ts,src/g.ts; }
+prep_same_layers_over() { prep_same "$1"; prep_layers "$1" 0 src/d.ts,src/e.ts,src/f.ts,src/g.ts,src/h.ts; }
+prep_same_layers_odd_lines() { prep_same_layers "$1"; printf 'no tab in this line\n\n\tsrc/h.ts\n' >>"$1/typescript-layers.txt"; }
+prep_same_layers_swapped() { prep_same_layers "$1"; prep_plan "$1" tac; }
+for p in layers layers_shared layers_no_shared layers_missing layers_no_chunk layers_six layers_seven layers_quarter layers_over layers_odd_lines layers_swapped; do
+    PREP=prep_same_$p case_of "ch-same-${p//_/-}" "$r/ts-ch-same" SWAN_JOBS=2
+done
+PREP=prep_same_layers case_of ch-same-layers-clean "$r/ts-ch-same" --clean SWAN_JOBS=2
+# What counts as changed: a file whose stamp is not the last map's, the
+# files that use what it defines (by the last map's rows), and a file whose
+# indexed text is unknown.
+prep_same_unknown() { prep_same "$1"; sed -i -E 's/^(src\/d\.ts)\t[^\t]+\t/\1\t?\t/' "$1/indexed-texts.tsv"; }
+prep_same_stamp() { prep_same "$1"; sed -i -E 's/^(src\/d\.ts)\t.*/\1\t7/' "$1/typescript-files.tsv"; }
+prep_same_stamp_decl() { prep_same "$1"; sed -i -E 's/^(src\/types\.d\.ts)\t.*/\1\t7/' "$1/typescript-files.tsv"; }
+prep_same_stamps_gone() { prep_same "$1"; printf 'src/zz.ts\t5\nsrc/yy.ts\t6\nno tab here\nsrc/d\t9\n' >>"$1/typescript-files.tsv"; }
+prep_same_stamp_missing() { prep_same "$1"; sed -i '/^src\/d\.ts\t/d' "$1/typescript-files.tsv"; }
+prep_same_stamp_twice() { prep_same "$1"; printf 'src/d.ts\t7\n' >>"$1/typescript-files.tsv"; }
+prep_same_stamp_user() { prep_same "$1"; sed -i -E 's/^(src\/b\.ts)\t.*/\1\t7/' "$1/typescript-files.tsv"; }
+# Files gone since the last map, whose rows still say what they defined:
+# the files that used those are changed, taken in the order the Goose
+# program's dictionary gives the gone files back. A file that only defines
+# again what a gone file defined (d.ts here) is not.
+prep_same_gone_defs() {
+    local f
+    prep_same "$1"; printf 'src/was-a.ts\t5\nsrc/was-b.ts\t6\nsrc/was-types.d.ts\t7\nsrc/was-d.ts\t8\n' >>"$1/typescript-files.tsv"
+    for f in a.ts b.ts types.d.ts d.ts; do sqlite3 "$1/swan.db" "UPDATE symbols SET def_file = 'src/was-$f' WHERE def_file = 'src/$f'"; done
+}
+for p in unknown stamp stamp_decl stamps_gone stamp_missing stamp_twice stamp_user gone_defs; do PREP=prep_same_$p case_of "ch-same-${p//_/-}" "$r/ts-ch-same" SWAN_JOBS=2; done
+prep_edit_shared() { prep_edit "$1"; printf '1' >"$1/typescript-shared.txt"; }
+prep_edit_no_db() { prep_edit "$1"; rm "$1/swan.db"; }
+prep_edit_no_table() { prep_edit "$1"; sqlite3 "$1/swan.db" "DROP TABLE occurrences"; }
+prep_edit_no_stamps() { prep_edit "$1"; : >"$1/typescript-files.tsv"; }
+prep_edit_user_too() { prep_edit "$1"; sed -i -E 's/^(src\/b\.ts)\t.*/\1\t7/' "$1/typescript-files.tsv"; }
+prep_edit_layers() { prep_edit "$1"; prep_layers "$1" x src/d.ts 5 src/e.ts 2 src/a.ts; }
+prep_edit_layers_five() { prep_edit "$1"; prep_layers "$1" 0 src/d.ts 1 src/d.ts 2 src/d.ts 3 src/d.ts 4 src/d.ts; }
+prep_edit_layers_six() { prep_edit "$1"; prep_layers "$1" 0 src/d.ts 1 src/d.ts 2 src/d.ts 3 src/d.ts 4 src/d.ts 5 src/d.ts; }
+prep_edit_layers_quarter() { prep_edit "$1"; prep_layers "$1" 0 src/d.ts,src/e.ts; }
+prep_edit_layers_over() { prep_edit "$1"; prep_layers "$1" 0 src/d.ts,src/e.ts,src/f.ts; }
+for p in shared no_db no_table no_stamps user_too layers layers_five layers_six layers_quarter layers_over; do PREP=prep_edit_$p case_of "ch-edit-${p//_/-}" "$r/ts-ch-edit" SWAN_JOBS=2; done
+prep_lone_shared() { prep_lone "$1"; printf '1' >"$1/typescript-shared.txt"; }
+PREP=prep_lone_shared case_of ch-lone-shared "$r/ts-ch-lone" SWAN_JOBS=2
 # ---- fixtures ----
 for f in tiny-ts tiny-py tiny-go tiny-rs tiny-java tiny-lua tiny-game go-modules; do
     [ -d "fixtures/$f" ] && case_of "fixture-$f" "$here/fixtures/$f"

@@ -359,6 +359,7 @@ folders are.
 | 2026-11-22T07:26Z | The opening of `swan map` carried: `rust/src/seal.rs`, `wings.rs` (where spread-wings is), `survey.rs` (running it, and the report's lines), `Walk::refresh` (what git ignores) and, in `pipeline.rs`, the languages a repo holds, trust, an older map and a clean one. The Rust map then stops with exit 70. `scripts/port-map.sh`: 72 of 72 the same in the carried part, each program in a made-up home. `scripts/port-prove-map.py`: 74 of 74 breaks caught. |
 | 2026-11-22T07:49Z | The content stamps of `swan map` carried (src/pipeline.goose to line 1163): `Stamps` in `pipeline.rs`, with `index_lines` in `change.rs`; `stamp_known` and `line_of_path`, carried at stage 3, are reached now. `scripts/port-map.sh`: 98 of 98 in the carried part, 26 of them for the stamps. `scripts/port-prove-map.py`: 99 of 99 breaks caught, the first time it was run. #78 (stage 3) merged into main on the owner's word; main merged into `rust-stage-4`. |
 | 2026-11-22T09:21Z | `swan map` carried as far as the projects TypeScript is split into (src/pipeline.goose to line 1449, and src/tsproj.goose whole as `tsproj.rs`): the config probe, Swan's own tsconfig, `ensure_scip_typescript_patch` (`tspatch.rs`), `child_env`, `jobs_limit`, `ts_root_listing`, `lang_fingerprint`, the kept lists and their key, `ts_other_projects`. `scripts/port-map.sh` reworked (cases side by side, a home each, a made-up tsc, steps compared whole): 229 of 229, 131 of them new. `scripts/port-prove-map.py`: 256 of 256 breaks caught: 254 in a run of them all, and the two it missed by the case added for them (the other 254 were not run again after that case went in). |
+| 2026-11-22T16:48Z | `swan map` carried to the end of TypeScript (src/pipeline.goose to line 1739): `plan_ts`, `same_file_set`, `dependents_of_changes`, the jobs' list (`Jobs`: `add_job`, `add_lang_job`), the plan (`TsPlan`), what the chunks share, the layers. Goose's sort carried as `rust/src/gsort.rs`: `scripts/port-sort.sh` 7,718 of 7,718 lists, `scripts/port-prove-sort.py` 30 of 30 (29 of 31 on its first run). `scripts/port-map.sh`: 317 of 317, 88 of them new. `scripts/port-prove-map.py` has 371 breaks, 115 new, all fitting the source, and has not run on this tree: the session was ended on the owner's word first. HANDOFF.md has it as the next thing. |
 
 ## Found while porting
 
@@ -636,12 +637,52 @@ folders are.
   5: start the original for it 59%, compare only on repos without those
   languages 40%. It judged a summary written by the agent doing the work,
   so its answers are evidence, not decisions.
+- Stage 4: Goose's sort is unstable, and a map holds the order it leaves
+  equal elements in: a plan of TypeScript's chunks sorts a project's files
+  by size, and which chunk each of two files of one size lands in follows.
+  For twelve keys `3 1 2 1 3 1 2 1 3 1 2 1` sorted smallest first, Goose
+  gives the places `1 9 3 5 7 11 10 2 6 0 8 4`, where a stable sort gives
+  `1 3 5 7 9 11 2 6 10 0 4 8`. The sort is carried step by step
+  (`rust/src/gsort.rs`, from `stdlib/std.goose`) and has a judge of its
+  own (`scripts/port-sort.sh`). The two earlier sorts of the port are of
+  keys that all differ, where any sort gives one order.
+- Stage 4: the first lists made to take the sort to its heapsort did not.
+  They were made by answering each comparison so that the pivot is the
+  smallest element left, which defeats a plain quicksort; Goose's sort
+  looks first for a list already in order, and to that glance such a list
+  is in order. The prover showed it: a heap built one element short was
+  not caught. The lists now start out of order, and what is left to the
+  heapsort is scattered.
+- Stage 4: a multi-line text in Goose (`"""`) ends without a line end. The
+  Rust copies of the statements carried at stages 1 to 3 that are written
+  over several lines (in `graph.rs`, `query.rs`, `diag.rs` and `index.rs`)
+  end with one. A statement's text is said only when SQLite cannot prepare
+  it, as on a map with a table missing, and there the Rust program says an
+  empty line more: seen with `query <db> impls a` and `callers a` on a map
+  whose `relationships` table was dropped (exit 1 in both). Found when
+  the statement carried here differed in that one byte in a case made for
+  it. The one carried here is right; the earlier ones are on main and are
+  a change of their own ("Next" has it).
+- Stage 4: a copy of a map says where its own indexes are
+  (`index-manifest.tsv` holds whole paths), so the judge's second maps,
+  which start from a copy of a map made elsewhere, never kept an index
+  and "reused (no changes)" was never said in them. The judge now moves
+  that record with the copy.
 - Stage 4: left out of the carried opening until the part that reads them:
   the virtualenv of a repo that is not trusted (the Goose program keeps it
   aside as `venv_read` for the Python step), and four of the things
   `detect` notes (tsconfig, Maven and Gradle files at the top).
 
 ## Next
+
+Beside the stages, a mend to what is on main, on its own branch from main
+and with its own pull request: the statements of stages 1 to 3 that are
+written over several lines end with a line end the Goose program's texts
+do not have ("Found while porting", stage 4), so a statement SQLite cannot
+prepare is said with an empty line after it. Take the last line end out of
+each such text in `graph.rs`, `query.rs`, `diag.rs` and `index.rs`, with a
+comparison of both programs on a map lacking each table in turn, seen
+failing first.
 
 Stage 3 is done on branch `rust-stage-3`; its pull request is opened when
 the owner asks, after the full suite in the microVM on the commit that
@@ -686,12 +727,23 @@ trusted:
      that owns it (`tsproj.rs`, from `src/tsproj.goose`). With it: what a
      child is given to run with (`child_env`), `jobs_limit`,
      `ts_root_listing`, `lang_fingerprint`.
-   - Left, in order: the rest of TypeScript (the chunks, the layers, its
-     jobs), then Python's pieces, Rust, Java, C#, the language servers,
-     `syntax-index`, and "no language found";
+   - Done 2026-11-22: the rest of TypeScript, planned and not yet run. A
+     project is cut into chunks by size (`plan_ts`, with Goose's own sort
+     as `gsort.rs`), each project of several by itself; the last map's
+     plan is kept while it holds the same files (`same_file_set`); what
+     the chunks share is fingerprinted and each chunk by its files; an
+     index is kept while the last map's record names it with the same
+     fingerprint, and the report says so; the files changed since the last
+     map and the files that use what they define (`dependents_of_changes`,
+     from the last map's rows) are indexed as a layer over the chunks
+     while layers are few and small. The jobs are listed (`Jobs`) and
+     their configs written; nothing runs them yet.
+   - Left, in order: Python's pieces, Rust, Java, C#, the language
+     servers, `syntax-index`, and "no language found";
      running them, at most so many at once; the flattener; `index` or
-     `refresh`; the end of the report. The three `ensure_` functions of
-     the patches come with TypeScript's and Python's jobs.
+     `refresh`; the end of the report, with the record of the indexes
+     (`index-manifest.tsv`). The two `ensure_` functions of the Python
+     patches come with Python's jobs.
    - A map starts its own program again as `syntax-index` (carried) and
      `lsp-index` (stage 5). Until stage 5 the Rust map is compared on
      repos with no language a server indexes, or starts the Goose program

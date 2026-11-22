@@ -12,6 +12,7 @@ mod change;
 mod db;
 mod diag;
 mod fresh;
+mod gsort;
 mod gradle;
 mod graph;
 mod index;

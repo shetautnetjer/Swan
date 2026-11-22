@@ -27,5 +27,9 @@ path = "src/bin/port-trees.rs"
 name = "port-json"
 path = "src/bin/port-json.rs"
 
+[[bin]]
+name = "port-sort"
+path = "src/bin/port-sort.rs"
+
 [profile.release]
 opt-level = 3

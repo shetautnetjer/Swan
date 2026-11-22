@@ -2244,3 +2244,87 @@ Limits:
 - Cases that leave the number of jobs to the machine need 6 GB of memory
   free to ask tsc at all.
 - The suite was not run for this piece: no Goose source changed.
+
+## 2026-11-22T16:48Z: stage 4: TypeScript's chunks and layers in the Rust map, and Goose's sort (the map's prover not yet run)
+
+What was missing: the Rust map stopped once each TypeScript file had its
+config.
+
+Changed: `rust/src/pipeline.rs` carries the map to line 1739 of
+src/pipeline.goose, the end of TypeScript. A project is cut into chunks by
+size (`plan_ts`), each project of several by itself with its part of the
+room; the last map's plan is kept while it holds the same files; what the
+chunks share (the configs, package.json, the indexer, the declaration
+files, the files tsc compiles that are no roots) is fingerprinted, and
+each chunk by its files; an index is kept while the last map's record
+names it with that fingerprint, and the report says "reused (no changes)";
+the files changed since the last map, with the files that use what they
+define (read from the last map's rows), are indexed as a layer over the
+chunks while the layers cover no more than a quarter of the files and are
+no more than six. The jobs are listed and the config of each chunk and
+layer written. Nothing runs them yet: the Rust map stops there, as before,
+with exit 70.
+
+Goose's sort came with it (`rust/src/gsort.rs`, new, from Goose's own
+`stdlib/std.goose`). It is unstable, and the plan holds the order it leaves
+files of one size in: twelve keys `3 1 2 1 3 1 2 1 3 1 2 1` come out of it
+as places `1 9 3 5 7 11 10 2 6 0 8 4`, and out of a stable sort as `1 3 5 7
+9 11 2 6 10 0 4 8`. It has a judge of its own, `scripts/port-sort.sh`
+(with `scripts/port-sort.goose` and `rust/src/bin/port-sort.rs`), and a
+prover, `scripts/port-prove-sort.py`.
+
+Not done: the map's prover has not run on this tree. It has 371 breaks,
+115 of them new for this part, and every one fits the source; a run of the
+new ones was stopped part-way when the session was ended on the owner's
+word. Until it has run, the 88 new cases are not shown to catch what they
+were made for. HANDOFF.md has it as the first thing to do.
+
+What the sort's prover found. Its first run caught 29 of 31. One miss was
+no break (a list of ten sorted the long way round comes out the same). The
+other showed that the lists made to reach the heapsort never did: lists
+that defeat a plain quicksort look already in order to Goose's sort, which
+checks that first. The lists were remade, and 333 now reach it.
+
+Seen on the way, in what is on main, and not mended here: a statement
+written over several lines that SQLite cannot prepare is said by the Rust
+program with one empty line more than by the Goose program, because the
+Rust copies of those texts (stages 1 to 3) end with a line end and Goose's
+texts do not. Seen with `query <db> impls a` and `callers a` on a map whose
+`relationships` table was dropped. It is its own change on its own branch
+(docs/rust-port.md, "Next").
+
+The judge learned three things. A copy of a map says where its own indexes
+are, so its second maps never kept an index before: the copy's record is
+now moved with it, and "reused (no changes)" is compared. The config of
+every chunk and layer is compared, wherever either program writes one. And
+where both programs refuse a map, the record of indexes is compared with
+each program's own folder taken out of it.
+
+Checked, Goose program built from this branch against the Rust program:
+
+| Judge | Result |
+|---|---|
+| `port-sort.sh` | 7,718 of 7,718 lists in the same order (7,268 with equal keys, 333 that reach the heapsort); under a second |
+| `port-prove-sort.py` | 30 of 30 breaks caught |
+| `port-map.sh` | 317 of 317 the same in the part of a map that is carried; four and a half minutes when the Goose program maps every case, seconds after |
+| The new cases | 88: a project cut for two, three and four indexers at once, and as one chunk; files of one size; empty files; eight sources and seven; a reference at the edge of a source's first 4096 bytes; what tsc lists that is no source of the repo (a made-up tsc); several projects with one, two, four and eight places; and second maps of 16 repos changed after a first map (code, a comment, a file more, a file gone, package.json, a declaration file, a helper outside the config, four files and five, two changes in a row, two projects), with the record of indexes, the kept plan, the layers and the stamps each altered in the ways a rule turns on |
+| `port-prove-map.py` | Not run. 371 of 371 breaks fit the source (`--fit`); the 256 of before were last all caught at `8dd4821` |
+| Earlier judges | `port-json.sh` 159 of 159, `port-run.sh` 53 of 53, `port-patch.sh` 105 of 105, `port-syntax.sh` 57 of 57, `port-stamp.sh` 82 of 82, `port-pattern.sh` 182 of 182, `port-plan.sh` 443 of 443, `port-trees.sh` 95 of 95 files, `cargo test` 9 and 2 passed |
+
+Limits:
+- A map is still not made by the Rust program.
+- The map's prover has not run on this part (above).
+- What each job is to run and the record of the indexes are worked out and
+  not judged yet: the jobs are first run, and the record first written, in
+  parts still to be carried. That an index is kept is judged, by the line
+  that says so.
+- With Swan's own config at the root (a repo with none it can read), the
+  fingerprint of what the chunks share takes in the path of the map
+  folder, which each program has its own of: there the judge asks only
+  that both programs keep one.
+- The order in which files gone since the last map are taken is the order
+  of a Goose dictionary. One case shows it, with a last map's rows altered
+  by hand; no change to a repo that the judge makes reaches it.
+- The machine's limits are as before (no clang++ on the plain PATH, Swan's
+  JDK, 6 GB free for the cases that leave the number of jobs to it).
+- The suite was not run for this piece: no Goose source changed.

@@ -10,6 +10,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::change::{code_hash, cosmetic_lang, index_lines, line_of_path};
 use crate::db::Db;
+use crate::gsort::goose_sort;
 use crate::index::SCHEMA_VERSION;
 use crate::pyplan::plan_python;
 use crate::query::meta_value;
@@ -21,7 +22,7 @@ use crate::sys;
 use crate::treesitter;
 use crate::tspatch::ensure_scip_typescript_patch;
 use crate::tsproj::ts_other_projects;
-use crate::util::{contains_line, ends_with, find, hash, hash_combine, json_string, parse_int, print, push_int, split, starts_with, trim};
+use crate::util::{contains_line, die, ends_with, find, hash, hash_combine, json_string, parse_int, print, push_int, split, starts_with, trim, Dict};
 use crate::walk::Walk;
 
 // What a repo holds, found by walking it.
@@ -343,6 +344,279 @@ fn count_lines(s: &[u8]) -> i64 {
 // What a map keeps to use again (tsc's lists, the chunks, the fingerprints).
 // A clean map holds them back until its rows are published, so that one
 // that fails or is stopped leaves nothing a later map would trust.
+// Splits a TypeScript project into k chunks of similar size for parallel
+// scip-typescript runs. The files are tsc's own roots (`tsc --listFilesOnly`
+// kept to the `--showConfig` file list, so the project's include and
+// exclude hold), less node_modules and declaration files, which every chunk
+// gets. Packed largest first, each into the lightest chunk. Returns one
+// line per chunk, files separated by tabs, and the declaration files as
+// `decls`; nothing when one run will do. k may be 1: one chunk of every
+// file, which lets a later edit be indexed as a layer over it.
+fn plan_ts(repo: &[u8], listing: &[u8], k_asked: i64, decls: &mut Vec<u8>, refs: &mut Vec<u8>, always: bool) -> Vec<u8> {
+    let mut files: Vec<u8> = Vec::new();
+    let mut sizes: Vec<i64> = Vec::new();
+    for raw in listing.split(|&c| c == b'\n') {
+        let f = trim(raw);
+        if f.len() > repo.len() && starts_with(f, repo) && f[repo.len()] == b'/' && find(f, b"/node_modules/") < 0 {
+            if ends_with(f, b".d.ts") {
+                decls.extend_from_slice(f);
+                decls.push(b'\n');
+            } else {
+                files.extend_from_slice(f);
+                files.push(b'\n');
+                sizes.push(sys::file_size(f).max(1));
+                // A file with `/// <reference types=...>` brings ambient types
+                // (bun-types' "bun:test", say) to whatever is compiled with it,
+                // so every chunk gets it, as it gets the .d.ts files.
+                let mut head: Vec<u8> = Vec::new();
+                if sys::read_file(f, &mut head) && find(&head[..head.len().min(4096)], b"/// <reference") >= 0 {
+                    refs.extend_from_slice(f);
+                    refs.push(b'\n');
+                }
+            }
+        }
+    }
+    let mut plan: Vec<u8> = Vec::new();
+    // `always`: a plan however few the files (one project of several, which
+    // cannot be left to a whole run under another project's config).
+    let count = sizes.len() as i64;
+    let k = if always { k_asked.min(count / 4).max(1) } else { k_asked };
+    if !(count > 0 && k >= 1 && (always || count >= 4 * k)) {
+        return plan;
+    }
+    let k = k as usize;
+    let paths = split(&files[..files.len() - 1], b'\n');
+    // Largest first, files of one size in the order Goose's sort leaves them.
+    let mut order: Vec<usize> = (0..sizes.len()).collect();
+    goose_sort(&mut order, &|a, b| sizes[a] > sizes[b]);
+    let mut load: Vec<i64> = vec![0; k];
+    let mut owner: Vec<usize> = vec![0; paths.len()];
+    for &u in &order {
+        let mut best = 0;
+        for c in 0..k {
+            if load[c] < load[best] {
+                best = c;
+            }
+        }
+        load[best] += sizes[u];
+        owner[u] = best;
+    }
+    for c in 0..k {
+        let mut first = true;
+        for u in 0..paths.len() {
+            if owner[u] == c {
+                if !first {
+                    plan.push(b'\t');
+                }
+                plan.extend_from_slice(paths[u]);
+                first = false;
+            }
+        }
+        if !first {
+            plan.push(b'\n');
+        }
+    }
+    plan
+}
+
+// Whether two chunk plans (lines of tab-separated files) hold the same files.
+fn same_file_set(a: &[u8], b: &[u8]) -> bool {
+    let files = |plan: &'_ [u8]| -> Vec<Vec<u8>> {
+        let mut found: Vec<Vec<u8>> = Vec::new();
+        for l in plan.split(|&c| c == b'\n') {
+            for f in l.split(|&c| c == b'\t') {
+                if !f.is_empty() {
+                    found.push(f.to_vec());
+                }
+            }
+        }
+        // Bytes in order, as Goose's compare: equal names are the same name,
+        // so any sort gives this order.
+        found.sort();
+        found
+    };
+    files(a) == files(b)
+}
+
+// Files to treat as changed: those whose stamp changed, and, from the last
+// map, the files that use a symbol defined in one of those. A piece holding
+// any of them is indexed again. One line per file.
+fn dependents_of_changes(out: &[u8], stamps: &[u8], prev: &[u8]) -> Vec<u8> {
+    let mut dirty: Vec<u8> = Vec::new();
+    if prev.is_empty() {
+        return dirty;
+    }
+    // The last map's line for each path, and the paths in the order a Goose
+    // dictionary gives them back (the files gone since then are added in it).
+    let mut before: HashMap<&[u8], &[u8]> = HashMap::new();
+    let mut before_order: Dict<bool> = Dict::new();
+    for line in prev.split(|&c| c == b'\n') {
+        let tab = find(line, b"\t");
+        if tab > 0 {
+            before.insert(&line[..tab as usize], line);
+            before_order.entry(&line[..tab as usize], true);
+        }
+    }
+    let mut changed: Vec<u8> = Vec::new();
+    let mut seen: HashSet<&[u8]> = HashSet::new();
+    for line in stamps.split(|&c| c == b'\n') {
+        let tab = find(line, b"\t");
+        if tab > 0 {
+            let path = &line[..tab as usize];
+            seen.insert(path);
+            if before.get(path) != Some(&line) {
+                changed.extend_from_slice(path);
+                changed.push(b'\n');
+            }
+        }
+    }
+    for (path, _) in before_order.each() {
+        if !seen.contains(path) {
+            changed.extend_from_slice(path);
+            changed.push(b'\n');
+        }
+    }
+    dirty.extend_from_slice(&changed);
+    let db_path = [out, b"/swan.db"].concat();
+    if !(!changed.is_empty() && sys::file_exists(&db_path)) {
+        return dirty;
+    }
+    let db = match Db::open_existing(&db_path) {
+        Ok(db) => db,
+        Err(e) => die(&[b"swan: cannot read dependency map: ", &e[..]].concat()),
+    };
+    // The text as Goose's literal holds it, with no line end after its last
+    // line: it is part of what is said when it cannot be prepared.
+    let st = db.prepare_or_die(
+        b"SELECT DISTINCT o.file FROM occurrences o JOIN symbols s ON s.id = o.symbol_id
+WHERE s.def_file = ?1 AND o.file != ?1 AND o.is_def = 0",
+    );
+    for f in changed.split(|&c| c == b'\n') {
+        if f.is_empty() {
+            continue;
+        }
+        st.bind_text(1, f);
+        while st.step_checked() {
+            dirty.extend_from_slice(&st.col_text(0));
+            dirty.push(b'\n');
+        }
+        st.reset();
+    }
+    dirty
+}
+
+/// One indexer run of a map, or an index kept from the last map (no label
+/// and nothing to run).
+#[allow(dead_code)] // read where the jobs are run, still to be carried
+struct Job {
+    label: Vec<u8>,
+    target: Vec<u8>,
+    argv: Vec<Vec<u8>>,
+    env: Vec<Vec<u8>>,
+    /// The folder the job's document paths are relative to, when that is not
+    /// the repo (scip-python --target-only, a cargo project in a subfolder).
+    base: Vec<u8>,
+    /// A job the map can do without: when it fails the report says so and
+    /// the map is still made (a fuzz crate that does not resolve).
+    optional: bool,
+}
+
+/// The jobs of a map, and what says which of their indexes can be kept.
+struct Jobs {
+    list: Vec<Job>,
+    /// index-manifest.tsv as the last map left it: "label \t fingerprint \t index file".
+    prev_index: Vec<u8>,
+    index_manifest: Vec<u8>,
+    reused_all: bool,
+}
+
+impl Jobs {
+    fn add(&mut self, label: &[u8], target: &[u8], argv: Vec<Vec<u8>>, env: Vec<Vec<u8>>, base: &[u8], optional: bool) {
+        if !label.is_empty() {
+            self.reused_all = false;
+        }
+        self.list.push(Job { label: label.to_vec(), target: target.to_vec(), argv, env, base: base.to_vec(), optional });
+    }
+
+    // A whole-language job, unless its files have the fingerprint they had
+    // when its index was made. `force` runs it anyway, with the fingerprint
+    // recorded as usual (a file whose indexed text is unknown).
+    #[allow(clippy::too_many_arguments)]
+    fn add_lang(&mut self, report: &mut Vec<u8>, label: &[u8], target: &[u8], argv: Vec<Vec<u8>>, env: Vec<Vec<u8>>, fp: u64, force: bool, base: &[u8], optional: bool) {
+        let fps = fp.to_string();
+        let mut hit = false;
+        for line in self.prev_index.split(|&c| c == b'\n') {
+            let f = split(line, b'\t');
+            if f.len() == 3 && f[0] == label && f[1] == fps.as_bytes() && f[2] == target && sys::file_exists(target) {
+                hit = true;
+            }
+        }
+        self.index_manifest.extend_from_slice(&[label, b"\t", fps.as_bytes(), b"\t", target, b"\n"].concat());
+        if hit && !force {
+            report.extend_from_slice(&[label, b": reused (no changes)\n"].concat());
+            self.add(b"", target, Vec::new(), Vec::new(), base, false);
+        } else {
+            self.add(label, target, argv, env, base, optional);
+        }
+    }
+}
+
+/// TypeScript's chunks, planned inside each project: no chunk holds files
+/// of two configs.
+struct TsPlan {
+    decls: Vec<u8>,
+    /// "config \t file": each project's declaration files,
+    decl_of: Vec<u8>,
+    /// and its files with a /// <reference>.
+    ref_of: Vec<u8>,
+    /// The configs that own files, the root's first.
+    bases: Vec<u8>,
+    /// Which of them a file of another's is under, as its place in `bases`.
+    owner_at: HashMap<u64, i64>,
+    chunks: Vec<u8>,
+}
+
+impl TsPlan {
+    // One project's chunks: its share of the `plan_k` slots, by its part of
+    // the `ts_total` files, when there are several projects.
+    fn project(&mut self, repo: &[u8], cfg: &[u8], files: &[u8], plan_k: i64, ts_total: i64, ts_projects: bool) {
+        if files.is_empty() {
+            return;
+        }
+        let mut gd: Vec<u8> = Vec::new();
+        let mut gr: Vec<u8> = Vec::new();
+        let n = count_lines(files);
+        let plan = plan_ts(repo, files, if ts_projects { plan_k * n / ts_total.max(1) } else { plan_k }, &mut gd, &mut gr, ts_projects);
+        let at = count_lines(&self.bases);
+        self.bases.extend_from_slice(cfg);
+        self.bases.push(b'\n');
+        if at > 0 {
+            for f in files.split(|&c| c == b'\n') {
+                if !f.is_empty() {
+                    self.owner_at.insert(hash(f), at);
+                }
+            }
+        }
+        self.chunks.extend_from_slice(&plan);
+        self.decls.extend_from_slice(&gd);
+        for f in gd.split(|&c| c == b'\n') {
+            if !f.is_empty() {
+                self.decl_of.extend_from_slice(&[cfg, b"\t", f, b"\n"].concat());
+            }
+        }
+        for f in gr.split(|&c| c == b'\n') {
+            if !f.is_empty() {
+                self.ref_of.extend_from_slice(&[cfg, b"\t", f, b"\n"].concat());
+            }
+        }
+    }
+
+    // Which config a file is under, as its place in `bases`.
+    fn owner_index(&self, f: &[u8]) -> i64 {
+        self.owner_at.get(&hash(f)).copied().unwrap_or(0)
+    }
+}
+
 struct Cache {
     clean: bool,
     out: Vec<u8>,
@@ -658,6 +932,11 @@ fn map_main_locked(repo: &[u8], out: &[u8], report: &mut Vec<u8>, clean: bool) -
     }
     // Edits after this moment make answers stale (src/fresh.rs).
     sys::write_file(&[out, b"/scip-started"].concat(), b"");
+
+    // The jobs. An index is kept while its fingerprint in the last map's
+    // index-manifest.tsv is the one worked out now.
+    let mut jobs = Jobs { list: Vec::new(), prev_index: Vec::new(), index_manifest: Vec::new(), reused_all: true };
+    sys::read_file(&[out, b"/index-manifest.tsv"].concat(), &mut jobs.prev_index);
 
     let texts_dir = [out, b"/texts"].concat();
     sys::make_dir(&texts_dir);
@@ -989,12 +1268,369 @@ fn map_main_locked(repo: &[u8], out: &[u8], report: &mut Vec<u8>, clean: bool) -
                 listed = true;
             }
         }
-        // Read by the planning of TypeScript's chunks, still to be carried.
-        let _ = (&a, &target, ts_fp, force_ts, listed, &listing, &ts_others);
+        // The chunks, planned inside each project: no chunk holds files of
+        // two configs.
+        let mut plan = TsPlan { decls: Vec::new(), decl_of: Vec::new(), ref_of: Vec::new(), bases: Vec::new(), owner_at: HashMap::new(), chunks: Vec::new() };
+        let ts_projects = !ts_others.is_empty();
+        let ts_total = count_lines(&listing) + count_lines(&ts_others);
+        if listed {
+            let mut root_files: Vec<u8> = Vec::new();
+            for raw in listing.split(|&c| c == b'\n') {
+                let f = trim(raw);
+                if !f.is_empty() {
+                    root_files.extend_from_slice(f);
+                    root_files.push(b'\n');
+                }
+            }
+            if !root_files.is_empty() || !ts_projects {
+                plan.project(repo, &base, if ts_projects { &root_files } else { &listing }, plan_k, ts_total, ts_projects);
+            } else {
+                plan.bases.extend_from_slice(&base);
+                plan.bases.push(b'\n');
+            }
+            let mut group: Vec<u8> = Vec::new();
+            let mut group_cfg: Vec<u8> = Vec::new();
+            for line in ts_others.split(|&c| c == b'\n') {
+                let tab = find(line, b"\t");
+                if tab <= 0 {
+                    continue;
+                }
+                let tab = tab as usize;
+                if line[..tab] != group_cfg[..] {
+                    plan.project(repo, &group_cfg, &group, plan_k, ts_total, ts_projects);
+                    group.clear();
+                    group_cfg.clear();
+                    group_cfg.extend_from_slice(&line[..tab]);
+                }
+                group.extend_from_slice(&line[tab + 1..]);
+                group.push(b'\n');
+            }
+            plan.project(repo, &group_cfg, &group, plan_k, ts_total, ts_projects);
+        }
+        // Keep the last map's chunks while the set of files is the same, so
+        // that an edit reruns only the chunks it touches (sizes moving files
+        // between chunks would rerun them all), and while each of them is
+        // still one project's.
+        let mut same_plan = false;
+        if !plan.chunks.is_empty() {
+            let mut prev_plan: Vec<u8> = Vec::new();
+            sys::read_file(&[out, b"/typescript-chunks.txt"].concat(), &mut prev_plan);
+            let mut one_project_each = true;
+            for chunk in prev_plan.split(|&c| c == b'\n') {
+                let mut first = -1;
+                for f in chunk.split(|&c| c == b'\t') {
+                    if !f.is_empty() {
+                        let o = plan.owner_index(f);
+                        if first < 0 {
+                            first = o;
+                        } else if o != first {
+                            one_project_each = false;
+                        }
+                    }
+                }
+            }
+            if !prev_plan.is_empty() && one_project_each && same_file_set(&prev_plan, &plan.chunks) {
+                plan.chunks = prev_plan;
+                same_plan = true;
+            }
+            cache.write(b"typescript-chunks.txt", &plan.chunks);
+        }
+        let plan = plan;
+        let base_list = split(&plan.bases, b'\n');
+        if plan.chunks.is_empty() {
+            jobs.add_lang(report, b"scip-typescript", &target, a, child_env(&l, &[], b""), ts_fp, force_ts, b"", false);
+        } else {
+            // Each chunk extends the project's tsconfig (or Swan's own) with its
+            // own include list, plus every .d.ts, since declarations such as
+            // module augmentations shape how the chunk's code resolves.
+            //
+            // Reuse, as for Python pieces: a chunk whose files, the shared
+            // declarations and the config are unchanged, and none of whose
+            // files use a symbol defined in a changed file (by the last map),
+            // keeps its last index.
+            let signed = |v: u64| (v as i64).to_string().into_bytes();
+            let mut ts_stamps: Vec<u8> = Vec::new();
+            let mut shared: u64 = 0;
+            for r in [&b"tsconfig.json"[..], b"package.json"] {
+                let pth = [repo, b"/", r].concat();
+                if sys::file_exists(&pth) {
+                    shared = hash_combine(shared, hash_combine(hash(r), stamps.stamp(&pth)));
+                }
+            }
+            shared = hash_combine(hash_combine(shared, hash(&base)), ts_indexer);
+            for (i, b) in base_list.iter().enumerate() {
+                if i > 0 && !b.is_empty() {
+                    shared = hash_combine(shared, hash_combine(hash(b), stamps.stamp(b)));
+                }
+            }
+            for f in plan.decls.split(|&c| c == b'\n') {
+                if f.len() > repo.len() {
+                    let st = [&f[repo.len() + 1..], b"\t", &signed(stamps.stamp(f))[..]].concat();
+                    shared = hash_combine(shared, hash(&st));
+                    ts_stamps.extend_from_slice(&st);
+                    ts_stamps.push(b'\n');
+                }
+            }
+            // Repo files tsc compiles that are not roots (what the roots
+            // import from outside the include) are not indexed, but an edit
+            // to one can change how the roots resolve, so they count as
+            // shared inputs: an edit to one reruns every chunk.
+            let mut root_set: HashSet<&[u8]> = HashSet::new();
+            for f in listing.split(|&c| c == b'\n') {
+                let f = trim(f);
+                if !f.is_empty() {
+                    root_set.insert(f);
+                }
+            }
+            // A file another config owns is a root too, of its own project.
+            for line in ts_others.split(|&c| c == b'\n') {
+                let tab = find(line, b"\t");
+                if tab > 0 {
+                    root_set.insert(&line[tab as usize + 1..]);
+                }
+            }
+            for raw in program.split(|&c| c == b'\n') {
+                let f = trim(raw);
+                if f.len() > repo.len() && starts_with(f, repo) && f[repo.len()] == b'/' && find(f, b"/node_modules/") < 0 && !root_set.contains(f) {
+                    shared = hash_combine(shared, hash(&[&f[repo.len() + 1..], b"\t", &signed(stamps.stamp(f))[..]].concat()));
+                }
+            }
+            for chunk in plan.chunks.split(|&c| c == b'\n') {
+                for f in chunk.split(|&c| c == b'\t') {
+                    if f.len() > repo.len() {
+                        ts_stamps.extend_from_slice(&[&f[repo.len() + 1..], b"\t", &signed(stamps.stamp(f))[..], b"\n"].concat());
+                    }
+                }
+            }
+            // Layers index changed files against the last map's view of
+            // everything else, so they are only used while the shared inputs
+            // (config, package.json, declarations, imported non-roots) are
+            // what they were.
+            let mut prev_shared: Vec<u8> = Vec::new();
+            sys::read_file(&[out, b"/typescript-shared.txt"].concat(), &mut prev_shared);
+            let same_shared = prev_shared == shared.to_string().as_bytes();
+            cache.write(b"typescript-shared.txt", shared.to_string().as_bytes());
+            let mut prev_stamps: Vec<u8> = Vec::new();
+            sys::read_file(&[out, b"/typescript-files.tsv"].concat(), &mut prev_stamps);
+            let mut dirty = dependents_of_changes(out, &ts_stamps, &prev_stamps);
+            dirty.extend_from_slice(&forced);
+            cache.write(b"typescript-files.tsv", &ts_stamps);
+            // A small edit: rather than rerun whole chunks (each loads the
+            // shared code, about 7 s on AEON), index just the changed files
+            // and their users as a run of their own, a layer. Layers are
+            // listed newest first, before the chunks, and the flattener keeps
+            // the first rows it sees for a file, so the newest wins. Earlier
+            // layers are kept as they are. When the layers cover more than a
+            // quarter of the files, or there are more than 6, the chunks run
+            // again and the layers go.
+            let mut prev_layers: Vec<u8> = Vec::new(); // "id\tfile,file,..." per line, newest first
+            sys::read_file(&[out, b"/typescript-layers.txt"].concat(), &mut prev_layers);
+            let nfiles = count_lines(&ts_stamps);
+            let mut fresh: Vec<u8> = Vec::new(); // this map's changed files and their users
+            for rel in dirty.split(|&c| c == b'\n') {
+                if !rel.is_empty() && !contains_line(&fresh, rel) && !ends_with(rel, b".d.ts") && contains_line_prefix(&ts_stamps, &[rel, b"\t"].concat()) {
+                    fresh.extend_from_slice(rel);
+                    fresh.push(b'\n');
+                }
+            }
+            let mut covered: Vec<u8> = Vec::new();
+            for f in fresh.split(|&c| c == b'\n') {
+                if !f.is_empty() {
+                    covered.extend_from_slice(f);
+                    covered.push(b'\n');
+                }
+            }
+            let mut next_id: i64 = 0;
+            let mut nlayers: i64 = 0;
+            for line in prev_layers.split(|&c| c == b'\n') {
+                let tab = find(line, b"\t");
+                if tab > 0 {
+                    let tab = tab as usize;
+                    nlayers += 1;
+                    if let Some(id) = parse_int(&line[..tab]) {
+                        if id >= next_id {
+                            next_id = id + 1;
+                        }
+                    }
+                    for f in line[tab + 1..].split(|&c| c == b',') {
+                        if !f.is_empty() && !contains_line(&covered, f) {
+                            covered.extend_from_slice(f);
+                            covered.push(b'\n');
+                        }
+                    }
+                }
+            }
+            let n_chunks = count_lines(&plan.chunks);
+            let mut chunk_files_present = true;
+            for c in 0..n_chunks {
+                if !sys::file_exists(&[out, b"/index-typescript-", c.to_string().as_bytes(), b".scip"].concat()) {
+                    chunk_files_present = false;
+                }
+            }
+            let mut layers_present = true;
+            for line in prev_layers.split(|&c| c == b'\n') {
+                let tab = find(line, b"\t");
+                if tab > 0 && !sys::file_exists(&[out, b"/index-typescript-layer-", &line[..tab as usize], b".scip"].concat()) {
+                    layers_present = false;
+                }
+            }
+            // A layer for each config that owns changed files.
+            let mut fresh_owners: Vec<u8> = Vec::new();
+            for rel in fresh.split(|&c| c == b'\n') {
+                if !rel.is_empty() {
+                    let o = plan.owner_index(&[repo, b"/", rel].concat()).to_string();
+                    if !contains_line(&fresh_owners, o.as_bytes()) {
+                        fresh_owners.extend_from_slice(o.as_bytes());
+                        fresh_owners.push(b'\n');
+                    }
+                }
+            }
+            let use_delta = same_plan
+                && same_shared
+                && chunk_files_present
+                && layers_present
+                && !covered.is_empty()
+                && count_lines(&covered) * 4 <= nfiles
+                && nlayers + count_lines(&fresh_owners) <= 6;
+            let indexer = [&bin[..], b"scip-typescript"].concat();
+            if use_delta {
+                let mut layers: Vec<u8> = Vec::new();
+                let mut layer_id = next_id;
+                for os in fresh_owners.split(|&c| c == b'\n') {
+                    if os.is_empty() {
+                        continue;
+                    }
+                    let oi = parse_int(os).unwrap_or(0);
+                    let cfg_path = base_list[oi as usize];
+                    let dir = [out, b"/tsproject-layer-", layer_id.to_string().as_bytes()].concat();
+                    sys::make_dir(&dir);
+                    let mut cfg: Vec<u8> = Vec::new();
+                    cfg.extend_from_slice(b"{\"extends\":");
+                    json_string(&mut cfg, cfg_path);
+                    cfg.extend_from_slice(b",\"include\":[],\"files\":[");
+                    let mut first = true;
+                    let mut mine: Vec<u8> = Vec::new();
+                    let mut mine_n = 0;
+                    for f in fresh.split(|&c| c == b'\n') {
+                        if !f.is_empty() && plan.owner_index(&[repo, b"/", f].concat()) == oi {
+                            if !first {
+                                cfg.push(b',');
+                                mine.push(b',');
+                            }
+                            json_string(&mut cfg, &[repo, b"/", f].concat());
+                            mine.extend_from_slice(f);
+                            mine_n += 1;
+                            first = false;
+                        }
+                    }
+                    for line in plan.decl_of.split(|&c| c == b'\n') {
+                        let tab = find(line, b"\t");
+                        if tab > 0 && &line[..tab as usize] == cfg_path {
+                            cfg.push(b',');
+                            json_string(&mut cfg, &line[tab as usize + 1..]);
+                        }
+                    }
+                    for line in plan.ref_of.split(|&c| c == b'\n') {
+                        let tab = find(line, b"\t");
+                        if tab > 0 && &line[..tab as usize] == cfg_path && !contains_line(&fresh, &line[tab as usize + 1 + repo.len() + 1..]) {
+                            cfg.push(b',');
+                            json_string(&mut cfg, &line[tab as usize + 1..]);
+                        }
+                    }
+                    cfg.extend_from_slice(b"]}\n");
+                    sys::write_file(&[&dir[..], b"/tsconfig.json"].concat(), &cfg);
+                    let t = [out, b"/index-typescript-layer-", layer_id.to_string().as_bytes(), b".scip"].concat();
+                    let da: Vec<Vec<u8>> = vec![indexer.clone(), b"index".to_vec(), b"--output".to_vec(), t.clone(), b"--cwd".to_vec(), repo.to_vec(), dir];
+                    jobs.add(format!("scip-typescript changed files ({mine_n})").as_bytes(), &t, da, child_env(&l, &[], b""), b"", false);
+                    layers.extend_from_slice(&[layer_id.to_string().as_bytes(), b"\t", &mine[..], b"\n"].concat());
+                    layer_id += 1;
+                }
+                for line in prev_layers.split(|&c| c == b'\n') {
+                    let tab = find(line, b"\t");
+                    if tab > 0 {
+                        jobs.add(b"", &[out, b"/index-typescript-layer-", &line[..tab as usize], b".scip"].concat(), Vec::new(), Vec::new(), b"", false);
+                        layers.extend_from_slice(line);
+                        layers.push(b'\n');
+                    }
+                }
+                cache.write(b"typescript-layers.txt", &layers);
+            } else {
+                cache.write(b"typescript-layers.txt", b"");
+            }
+            let mut n: i64 = 0;
+            for chunk in plan.chunks[..plan.chunks.len() - 1].split(|&c| c == b'\n') {
+                let dir = [out, b"/tsproject-", n.to_string().as_bytes()].concat();
+                sys::make_dir(&dir);
+                let mut cfg: Vec<u8> = Vec::new();
+                // Under its own project's config.
+                let tab0 = find(chunk, b"\t");
+                let cfg_path = base_list[plan.owner_index(if tab0 > 0 { &chunk[..tab0 as usize] } else { chunk }) as usize];
+                cfg.extend_from_slice(b"{\"extends\":");
+                json_string(&mut cfg, cfg_path);
+                // "files" overrides the base's include: exactly this chunk, plus
+                // the project's own declaration files.
+                cfg.extend_from_slice(b",\"include\":[],\"files\":[");
+                let mut first = true;
+                for f in chunk.split(|&c| c == b'\t') {
+                    if !first {
+                        cfg.push(b',');
+                    }
+                    json_string(&mut cfg, f);
+                    first = false;
+                }
+                for line in plan.decl_of.split(|&c| c == b'\n') {
+                    let tab = find(line, b"\t");
+                    if tab > 0 && &line[..tab as usize] == cfg_path {
+                        cfg.push(b',');
+                        json_string(&mut cfg, &line[tab as usize + 1..]);
+                    }
+                }
+                for line in plan.ref_of.split(|&c| c == b'\n') {
+                    let tab = find(line, b"\t");
+                    if tab > 0 && &line[..tab as usize] == cfg_path && find(chunk, &line[tab as usize + 1..]) < 0 {
+                        cfg.push(b',');
+                        json_string(&mut cfg, &line[tab as usize + 1..]);
+                    }
+                }
+                cfg.extend_from_slice(b"]}\n");
+                sys::write_file(&[&dir[..], b"/tsconfig.json"].concat(), &cfg);
+                let t = [out, b"/index-typescript-", n.to_string().as_bytes(), b".scip"].concat();
+                let ca: Vec<Vec<u8>> = vec![indexer.clone(), b"index".to_vec(), b"--output".to_vec(), t.clone(), b"--cwd".to_vec(), repo.to_vec(), dir];
+                let mut fp = shared;
+                let mut touched = false;
+                for f in chunk.split(|&c| c == b'\t') {
+                    if f.len() > repo.len() {
+                        let rel = &f[repo.len() + 1..];
+                        fp = hash_combine(fp, hash_combine(hash(rel), stamps.stamp(f)));
+                        if !touched && contains_line(&dirty, rel) {
+                            touched = true;
+                        }
+                    }
+                }
+                // A chunk a changed file's users fall in counts as changed:
+                // the time is mixed in, so its fingerprint is no kept one.
+                if touched {
+                    fp = hash_combine(fp, hash(sys::time_ns().to_string().as_bytes()));
+                }
+                let label = format!("scip-typescript {n}/{n_chunks}").into_bytes();
+                if use_delta {
+                    // Kept as it is; the changed-files run covers what moved. Its
+                    // manifest line can never match, so a later full run redoes it.
+                    jobs.index_manifest.extend_from_slice(&[&label[..], b"\tstale\t", &t[..], b"\n"].concat());
+                    jobs.add(b"", &t, Vec::new(), Vec::new(), b"", false);
+                } else {
+                    jobs.add_lang(report, &label, &t, ca, child_env(&l, &[], b""), fp, false, b"", false);
+                }
+                n += 1;
+            }
+        }
     }
 
     // Carried this far (docs/rust-port.md, "Next"): what was said so far is
     // printed, and the jobs, the indexers and the rows they give are not run.
+    // Read where the jobs are run and the map's records written, still to
+    // be carried.
+    let _ = (&jobs.list, &jobs.index_manifest, jobs.reused_all);
     print(report);
     crate::not_carried(b"map", 4);
 }
