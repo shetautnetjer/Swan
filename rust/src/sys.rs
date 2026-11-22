@@ -331,6 +331,159 @@ pub fn run_capture(argv: &[&[u8]], cwd: &[u8], timeout_ms: u64) -> Option<(i32, 
     }
 }
 
+/// Runs argv (argv[0] looked up on the PATH the program itself will have)
+/// in `cwd` (empty: this process's), with `env` entries ("NAME=value") set
+/// over this process's environment, nothing to read, and a process group of
+/// its own. Appends what it writes to `out` and `err`. Returns its exit
+/// code, 128 + the signal that ended it, 127 when it could not be started
+/// (the reason goes to `err`), or -2 after killing its whole group at
+/// `timeout_ms` (0: no deadline). The deadline holds for its output and for
+/// its exit, even when it exits and a child of it keeps the output open
+/// (native/swan_sys.c, swan_run).
+pub fn run(argv: &[&[u8]], cwd: &[u8], env: &[&[u8]], timeout_ms: i64, out: &mut Vec<u8>, err: &mut Vec<u8>) -> i32 {
+    use std::os::unix::io::AsRawFd;
+    use std::os::unix::process::{CommandExt, ExitStatusExt};
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
+    let Some((first, rest)) = argv.split_first() else {
+        err.extend_from_slice(b"swan_run: cannot start");
+        return -1;
+    };
+    // The program swan_run starts says these two itself, on the way out
+    // with 127, before it becomes argv[0]; here the same words are written
+    // for it.
+    if !cwd.is_empty() {
+        let seen = fs::metadata(path(cwd)).map_err(|e| e.raw_os_error().unwrap_or(libc::ENOENT)).and_then(|m| if m.is_dir() { Ok(()) } else { Err(libc::ENOTDIR) });
+        if let Err(code) = seen {
+            err.extend_from_slice(b"chdir: ");
+            err.extend_from_slice(&strerror(code));
+            err.push(b'\n');
+            return 127;
+        }
+    }
+    // Where argv[0] may be: itself when it names a folder, else each folder
+    // of the PATH the program will have (an entry of `env`, else this
+    // process's), tried in order until one starts, as swan_run does.
+    let mut places: Vec<Vec<u8>> = Vec::new();
+    if first.contains(&b'/') {
+        places.push(first.to_vec());
+    } else {
+        let ours = env.iter().find(|e| e.starts_with(b"PATH=")).map(|e| e[5..].to_vec());
+        let dirs = ours.or_else(|| std::env::var_os("PATH").map(|v| v.into_vec())).unwrap_or_default();
+        if !dirs.is_empty() {
+            for dir in dirs.split(|&b| b == b':') {
+                if dir.len() + first.len() + 2 < 4096 {
+                    places.push([dir, b"/", first].concat());
+                }
+            }
+        }
+    }
+    let mut child = None;
+    let mut why = libc::ENOENT;
+    for place in &places {
+        let mut c = Command::new(OsStr::from_bytes(place));
+        c.arg0(OsStr::from_bytes(first)).args(rest.iter().map(|a| OsStr::from_bytes(a)));
+        c.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).process_group(0);
+        if !cwd.is_empty() {
+            c.current_dir(path(cwd));
+        }
+        for e in env {
+            if let Some(eq) = e.iter().position(|&b| b == b'=') {
+                c.env(OsStr::from_bytes(&e[..eq]), OsStr::from_bytes(&e[eq + 1..]));
+            }
+        }
+        match c.spawn() {
+            Ok(started) => {
+                child = Some(started);
+                break;
+            }
+            Err(e) => why = e.raw_os_error().unwrap_or(libc::ENOENT),
+        }
+    }
+    let Some(mut child) = child else {
+        err.extend_from_slice(b"swan_run: cannot run ");
+        err.extend_from_slice(first);
+        err.extend_from_slice(b": ");
+        err.extend_from_slice(&strerror(why));
+        err.push(b'\n');
+        return 127;
+    };
+    let group = child.id() as i32;
+    let deadline = if timeout_ms > 0 { Some(Instant::now() + Duration::from_millis(timeout_ms as u64)) } else { None };
+    // Kept until the end: dropping one closes it.
+    let streams = (child.stdout.take(), child.stderr.take());
+    let mut fds = [
+        libc::pollfd { fd: streams.0.as_ref().map_or(-1, |s| s.as_raw_fd()), events: libc::POLLIN, revents: 0 },
+        libc::pollfd { fd: streams.1.as_ref().map_or(-1, |s| s.as_raw_fd()), events: libc::POLLIN, revents: 0 },
+    ];
+    let mut open_fds = fds.iter().filter(|f| f.fd >= 0).count();
+    let mut timed_out = false;
+    let mut buf = vec![0u8; 65536];
+    while open_fds > 0 {
+        let mut wait: i32 = -1;
+        if let Some(d) = deadline {
+            let left = d.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                timed_out = true;
+                break;
+            }
+            wait = left.as_millis().clamp(1, i32::MAX as u128) as i32;
+        }
+        let r = unsafe { libc::poll(fds.as_mut_ptr(), 2, wait) };
+        if r < 0 {
+            if errno() == libc::EINTR {
+                continue;
+            }
+            break;
+        }
+        for (i, f) in fds.iter_mut().enumerate() {
+            if f.fd < 0 || (f.revents & (libc::POLLIN | libc::POLLHUP | libc::POLLERR)) == 0 {
+                continue;
+            }
+            let n = unsafe { libc::read(f.fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
+            if n > 0 {
+                (if i == 0 { &mut *out } else { &mut *err }).extend_from_slice(&buf[..n as usize]);
+            } else {
+                f.fd = -1; // closed below, with its stream
+                open_fds -= 1;
+            }
+        }
+    }
+    // Both streams can close while the program keeps running (it redirected
+    // them, or handed them to a child): the deadline still holds.
+    let mut status = None;
+    while !timed_out {
+        match child.try_wait() {
+            Ok(Some(s)) => {
+                status = Some(s);
+                break;
+            }
+            Ok(None) => {}
+            Err(_) => break,
+        }
+        match deadline {
+            Some(d) if Instant::now() >= d => timed_out = true,
+            Some(_) => std::thread::sleep(Duration::from_millis(20)),
+            None => break,
+        }
+    }
+    if timed_out {
+        unsafe { libc::kill(-group, libc::SIGKILL) };
+    }
+    drop(streams);
+    let status = match status {
+        Some(s) => Some(s),
+        None => child.wait().ok(),
+    };
+    if timed_out {
+        return -2;
+    }
+    match status {
+        Some(s) => s.code().or_else(|| s.signal().map(|g| 128 + g)).unwrap_or(-1),
+        None => -1,
+    }
+}
+
 /// A file's size in bytes (stat(2), links followed), or -1
 /// (native/swan_sys.c, swan_file_size).
 pub fn file_size(p: &[u8]) -> i64 {

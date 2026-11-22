@@ -1,6 +1,6 @@
-# Handoff: Swan in Rust (branch `rust-stage-3`)
+# Handoff: Swan in Rust (branch `rust-stage-4`)
 
-Written 2026-11-20T07:25Z; stage 2 part rewritten 2026-11-20T16:21Z, stage 3 part 2026-11-20T23:51Z and again 2026-11-22T06:15Z, when stage 3 was finished. For the next session, any agent.
+Written 2026-11-20T07:25Z; stage 2 part rewritten 2026-11-20T16:21Z, stage 3 part 2026-11-20T23:51Z and again 2026-11-22T06:15Z, when stage 3 was finished; stage 4 part 2026-11-22T06:50Z. For the next session, any agent.
 
 ## The task
 Carry Swan over from Goose to Rust, on the owner's word, as a complete
@@ -17,7 +17,8 @@ purpose are in [docs/rust-port.md](docs/rust-port.md). Read it first.
 | Stage 1, the store | Done: `index`, `refresh` and 13 of the 14 `query` kinds. The same tables, refusals, staleness and answers as the Goose build `fb8df2a4c199` on four trial repos (STATUS.md has the counts) |
 | Stage 2, planning | Done and on main (#76, merged 2026-11-20 on the owner's word): `cargo-projects`, `gradle-tasks`, `plan-python`. STATUS.md has the counts |
 | Stage 3, syntax | Done on branch `rust-stage-3`; pull request #78 is open and waits for the owner's word to merge: the trees, `query pattern`, `syntax-index`, `stamp-bench` and `stamp-worker`. STATUS.md has the counts |
-| Stages 4 to 8 | Not started. Every command of theirs exits 70 and names its stage |
+| Stage 4, the map | Under way on branch `rust-stage-4` (on `rust-stage-3`, pushed): `scip-python-patch`, `scip-typescript-patch`, `trust` and `doctor` carried, with what runs a step. Left: `swan map` itself |
+| Stages 5 to 8 | Not started. Every command of theirs exits 70 and names its stage |
 
 ## What passed, and how to see it again
 ```bash
@@ -36,6 +37,10 @@ SWAN_OLD=bin/swan scripts/port-syntax.sh [repo...]                   # stage 3: 
 SWAN_OLD=$PWD/bin/swan scripts/port-prove-syntax.py                  # stage 3: 107 of 107 breaks caught (about 6 min on 32 cores)
 SWAN_OLD=bin/swan scripts/port-stamp.sh [repo...]                    # stage 3: 82 of 82 with no repo given
 SWAN_OLD=$PWD/bin/swan scripts/port-prove-stamp.py                   # stage 3: 59 of 59 breaks caught (about 5 min on 32 cores)
+SWAN_OLD=bin/swan scripts/port-patch.sh                              # stage 4: 105 of 105
+SWAN_OLD=$PWD/bin/swan scripts/port-prove-patch.py                   # stage 4: 29 of 29 breaks caught
+SWAN_OLD=bin/swan scripts/port-run.sh                                # stage 4: 53 of 53, about a minute (PORT_RUN_QUICK=1: 3 s)
+SWAN_OLD=$PWD/bin/swan scripts/port-prove-run.py                     # stage 4: 39 of 39 breaks caught
 ```
 `$TRIES` is the folder of trial repo copies the swan-change-loop skill
 names, with the Goose program's maps of them under `maps/`. `port-store.sh`
@@ -46,24 +51,42 @@ still match the source? nothing is built) and break numbers (only those).
 The check suites judge the Goose program: the Rust program cannot run them
 before stage 8.
 
-## Next action: stage 4, the map (branch `rust-stage-4`)
+## Next action: the rest of stage 4, `swan map` (branch `rust-stage-4`)
 Stage 3's pull request is #78: main (with #77) is merged in, and the full
 suite passed in the microVM on its merged commit (`4b22745`, STATUS.md).
-It waits for the owner's word to merge.
+It waits for the owner's word to merge. `rust-stage-4` starts from
+`rust-stage-3`, because it needs stage 3's code; when #78 is merged (a
+squash), move it onto main with `git rebase --onto origin/main 0411675
+rust-stage-4` (`0411675` is the tip of `rust-stage-3` it stands on) and
+check the tree is what it was.
 
-Stage 4 (docs/rust-port.md, the stage table): `seal`, `run`, `pipeline`,
-`pypatch`, `tspatch`, `scip`, `wings`, `tsproj`, `survey`, about 4,070
-lines, judged by `swan map`: table hashes, the report, "reused" on the
-second run. Its branch, `rust-stage-4`, starts from `rust-stage-3`, because
-it needs stage 3's code and #78 is not merged; when #78 is merged (a
-squash), move it onto main with `git rebase --onto origin/main <the tip of
-rust-stage-3 it started from> rust-stage-4`. It is the first stage that
-starts other programs (the indexers, sealed), so decide first how the two
-programs are compared without either running a third-party repo's code.
-Three things carried in stage 3 are first used there and are judged there:
-`stamp_known`, `line_of_path` (with `index_lines`, not carried yet) and
-`Walk::load` with a real `git-ignored.txt`. `rust-stage-4`'s own
-HANDOFF.md says how far it is.
+Done in stage 4 (docs/rust-port.md, "Next", has the order): the two indexer
+patches, and running a step with `trust` and `doctor`.
+
+Left: `survey` (198 lines), `tsproj` (189), `wings` (455) and `seal` (213),
+which no command prints alone, and `pipeline` (2,434, of which one
+function, `map_main_locked`, is 1,557). They are judged together by `swan
+map`: table hashes (`scripts/port-tables.sh`), the report, "reused" on the
+second run. Settle these first:
+- **The children.** A map starts its own program again as `syntax-index`
+  (carried) and `lsp-index` (stage 5, not carried: Go, Goose and the other
+  languages a server indexes). Until stage 5 the Rust map can be compared
+  only on repos with none of those languages, or it has to start the Goose
+  program for that one child. Say which in docs/rust-port.md before
+  building on it.
+- **The seal.** Every indexer runs sealed in both programs, trusted or
+  not; the comparison maps a repo with each program and never loosens the
+  seal for a third-party repo. `src/seal.goose` is what to read first.
+- **The three `ensure_` functions** of pypatch and tspatch (they patch
+  Swan's own copy of an indexer before a map) come with the map. Judge
+  them from a made-up home, as `scripts/port-run.sh` does: a map must not
+  patch the indexers of the checkout it is judged in.
+- **What stage 3 left for the map**: `stamp_known`, `line_of_path` (with
+  `index_lines`, not carried yet) and `Walk::load` with the
+  `git-ignored.txt` a map writes.
+- **The time in a step's account** is already taken off by
+  `scripts/port-compare.sh`; a map's report has more times in it
+  ("scip-python tests: 2344 ms") and they go the same way.
 
 ## Decisions waiting on the owner
 - Merge #78, the pull request for stage 3?

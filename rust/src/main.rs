@@ -15,9 +15,11 @@ mod fresh;
 mod gradle;
 mod graph;
 mod index;
+mod pipeline;
 mod pypatch;
 mod pyplan;
 mod query;
+mod run;
 mod rustproj;
 mod scip;
 mod stamp;
@@ -108,14 +110,21 @@ fn main() {
 
     // The same shapes, in the same order, as main() in src/swan.goose.
     if cmd == b"doctor" {
+        let home = run::swan_home();
+        let script = [&home[..], b"/scripts/doctor.py"].concat();
+        let mut argv: Vec<&[u8]> = vec![b"python3", b"-I", &script, b"--home", &home];
         for arg in &a[2..] {
             // Diagnose this executable's installation, never a caller-supplied
             // repository passed off as a different runtime home.
             if arg.as_slice() == b"--home" || arg.starts_with(b"--home=") {
                 usage();
             }
+            argv.push(arg);
         }
-        not_carried(cmd, 4);
+        let mut result: Vec<u8> = Vec::new();
+        let code = run::run_step(b"doctor", &argv, &home, &[b"PATH=/usr/local/bin:/usr/bin:/bin"], 60000, &mut result);
+        print(&result);
+        exit(code);
     } else if cmd == b"index" && n >= 4 {
         let mut report: Vec<u8> = Vec::new();
         index::index_main(&a[2], &a[3], if n > 4 { &a[4] } else { b"" }, false, &mut report);
@@ -217,7 +226,12 @@ fn main() {
             exit(1);
         }
     } else if cmd == b"trust" && n == 3 {
-        not_carried(cmd, 4);
+        let mut report: Vec<u8> = Vec::new();
+        let ok = pipeline::trust_main(&a[2], &mut report);
+        print(&report);
+        if !ok {
+            exit(1);
+        }
     } else if cmd == b"gradle-tasks" && n == 3 {
         write_stdout(&gradle::gradle_scip_tasks(&walk::Walk::default(), &abs_path(&a[2])));
     } else if cmd == b"cargo-projects" && n == 3 {

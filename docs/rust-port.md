@@ -144,6 +144,11 @@ step added to the judge gets a break added there.
   keeps them in a table keyed by a 64-bit hash of the language and the
   name; the Rust program in a table of names for each language. The index
   is the same unless two different keys share that hash.
+- **A step's program, with an empty PATH.** `swan_run` then looks nowhere
+  and names whatever error was left over from before (`swan trust` says
+  `swan_run: cannot run mkdir: Invalid argument`); the Rust program says
+  `No such file or directory`. Exit 127 in both, and the judge compares
+  only that each says something.
 - **Stamping on threads** (`SWAN_STAMP_MODE=threads`). The stamp lines come
   back in the order the workers finish, in both programs, so `stamps.tsv`
   holds the same lines in an order that changes from run to run. How many
@@ -333,6 +338,7 @@ folders are.
 | 2026-11-22T06:15Z | The stamps carried: `rust/src/change.rs` (the code stamp of src/change.goose) and `rust/src/stamp.rs` (src/stamp.goose), the workers as processes and as threads. `scripts/port-stamp.sh`: 82 of 82 on a made-up repo of 340 files to stamp, every fixture and this repository; 94 of 94 with six repos given (rea: 7,784 files, the same bytes from one process and from 32 workers, the same lines from 4 threads). `scripts/port-prove-stamp.py`: 59 of 59 breaks caught. |
 | 2026-11-22T06:15Z | Stage 3 done on branch `rust-stage-3`. Cost: `syntax-index` 52.6 ms against the Goose program's 54.0 on 1,572 files; `stamp-bench` on rea 6,241 ms against 6,282 in one process, 468 against 459 with 32 workers, 1,668 against 1,674 on 4 threads. |
 | 2026-11-22T06:39Z | Stage 4 begun (branch `rust-stage-4`, on `rust-stage-3`). The indexer patches carried: `rust/src/pypatch.rs` and `rust/src/tspatch.rs`, their sites copied from the Goose sources by a script, and `write_file_atomic` in `sys.rs`. `scripts/port-patch.sh`: 105 of 105 on the three files Swan patches (pyright-internal.js 1.4 MB, scip-python.js, FileIndexer.js), each with and without its patch, and on nine kinds of file a patch must refuse or leave. `scripts/port-prove-patch.py`: 29 of 29 breaks caught. |
+| 2026-11-22T06:49Z | Running a step carried: `sys::run` (native/swan_sys.c's `swan_run`: its own variables, the PATH it will have, a group of its own, both streams, the deadline), `rust/src/run.rs` (src/run.goose) and, with it, `swan trust` (`rust/src/pipeline.rs`, begun) and `swan doctor`. `scripts/port-run.sh`: 53 of 53 the same, each program in a made-up home, with a made-up `mkdir` and `doctor.py`; the ten-second deadline is waited for three times in each program, timed, and nothing a step started may be left running. `scripts/port-prove-run.py`: 39 of 39 breaks caught. |
 
 ## Found while porting
 
@@ -495,6 +501,24 @@ folders are.
   `stamp-worker` after they moved to stage 3. Both are carried now.
 - Stage 3: `scripts/port-compare.sh` takes the time off `stamp-bench`'s
   last line ("stamp-bench: N ms"), which does not end in " in N ms".
+- Stage 4: a step's account has its time in it ("mkdir: 3 ms", "doctor:
+  exit 2 after 41 ms"), so `scripts/port-compare.sh` now takes the time
+  off every line of those two shapes, not `stamp-bench`'s alone.
+- Stage 4: `trust` and `doctor` write into Swan's own folder and read
+  its scripts, so each program is judged from a made-up home of its own
+  (a copy of the program in `home/bin/`). Neither touches an installed
+  Swan. The program a step starts is replaced too: a made-up `mkdir` on
+  PATH and a made-up `scripts/doctor.py` are how the judge sees what a
+  step is given and what becomes of its exit code, its output, a signal
+  and its deadline.
+- Stage 4: the Rust side first let the system look a step's program up on
+  PATH. `swan_run` tries each folder itself, in order, until one starts,
+  and reports the last failure; the Rust side does the same now, so "may
+  not be run" and "not there" are told apart the same way. A program file
+  with no `#!` line is refused by both ("Exec format error").
+- Stage 4: the line the suite ends on, `typescript test: exit 127 after 0
+  ms`, is such an account: a step labelled `typescript test` whose program
+  could not be started.
 
 ## Next
 
@@ -513,7 +537,8 @@ trusted:
    makes sure of the patches before a map (the three `ensure_` functions)
    comes with the map.
 2. `run` (Swan's home, running a step, the whole of `swan_run`), with the
-   two commands that need only it: `trust` and `doctor`.
+   two commands that need only it: `trust` and `doctor`. Done 2026-11-22:
+   `scripts/port-run.sh`.
 3. `survey`, `tsproj`, `wings` and `seal`, which no command prints alone,
    with
 4. `pipeline`: `swan map`. It is the first that starts other programs, so

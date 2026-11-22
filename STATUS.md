@@ -2043,3 +2043,48 @@ Limits:
 - The judge needs the indexers' files in tools/node_modules
   (`scripts/fetch-tools.sh`); without them it stops with exit 2.
 - The suite was not run for this piece: no Goose source changed.
+
+## 2026-11-22T06:49Z: stage 4: running a step, `swan trust` and `swan doctor` in Rust
+
+What was missing: the Rust program answered `swan trust` and `swan doctor`
+with exit 70, and could start a program only to read its output
+(`rustup show home`).
+
+Changed (branch `rust-stage-4`):
+- `sys::run`, native/swan_sys.c's `swan_run`: a step's own variables set
+  over the caller's, its program looked up on the PATH it will have, each
+  folder tried in order, nothing to read, a group of its own, what it
+  prints and what it complains of kept apart, one deadline for its output
+  and its exit, the whole group ended at the deadline.
+- `rust/src/run.rs` carries src/run.goose: Swan's home (the folder above
+  `bin/`) and `run_step`, which writes a step's account.
+- `rust/src/pipeline.rs`, begun: `swan trust` (the list in
+  `data/trusted-repos`). `swan doctor` is in `main.rs`, as in
+  src/swan.goose.
+- `scripts/port-compare.sh` takes the time off every step's account.
+
+Checked, Goose program built from this branch against the Rust program:
+
+| Judge | Result |
+|---|---|
+| `port-run.sh` | 53 of 53 the same |
+| `trust` | 15 cases: a first repo, the same again, a second, a longer name, a link, slashes, a space, a file, a repo that is not there; a list with no line end, with a longer name, with empty lines; `data` a file, not to be written, the list a folder |
+| How a step is run, through a made-up `mkdir` | what it is given (two arguments, the folder, PATH, a variable, nothing to read); exit 3 with a long account; 599, 600 and 601 bytes of error text; text that is not UTF-8; three megabytes on each stream; signals 9 and 15; no such program, one that may not be run, a folder of that name, one with no `#!` line (alone, and before one that runs), the first folder of PATH that has it |
+| The deadline | three cases wait for it in each program: a step that never ends, one that closes its output and goes on, one that ends and leaves a child holding its output. Each program must take 9 to 15 seconds, and nothing the step started may be left running |
+| `doctor` | 10 ways of asking the real one; a made-up one for what it is given (its arguments, its folder, PATH once, `-I`), exit 5, two megabytes on each stream, signal 9; python3 from the step's own PATH, not the caller's |
+| `port-prove-run.py` | 39 of 39 breaks caught |
+| Earlier judges | `port-patch.sh` 105 of 105, `port-syntax.sh` 57 of 57, `port-stamp.sh` 82 of 82, wrong calls 47 of 47 |
+
+One difference, kept: with an empty PATH `swan_run` looks nowhere and
+names an error left over from before ("Invalid argument"); the Rust
+program says "No such file or directory". Exit 127 in both
+(docs/rust-port.md, "What differs").
+
+Limits:
+- Four things `trust` and `doctor` cannot show have no break; the prover
+  lists them. Among them `doctor`'s own deadline of a minute.
+- The judge takes about a minute, for the three deadline cases;
+  `PORT_RUN_QUICK=1` leaves them out.
+- Cases that need a folder or a file that cannot be written only show
+  when the judge does not run as root.
+- The suite was not run for this piece: no Goose source changed.
