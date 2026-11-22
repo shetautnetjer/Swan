@@ -14,17 +14,19 @@ engine underneath.
 The program that ships, builds and installs today is still written in
 [Goose](https://aardappel.github.io/goose/) (`src/*.goose`). It is being
 carried over to Rust, a complete overhaul done one stage at a time, in
-`rust/`. Done: stages 0 to 3, four of the nine. Stage 0 (commands, usage
-text, exit codes), stage 1 (the store: `index`, `refresh` and `query`) and
-stage 2 (planning that runs nothing: `cargo-projects`, `gradle-tasks` and
-`plan-python`) were merged on 2026-11-20. Stage 3 (syntax: structural
-search behind `query <db> pattern`, the syntax-level index behind
-`syntax-index`, and the stamps behind `stamp-bench` and `stamp-worker`) was
-finished on 2026-11-22. Each was checked against the Goose program answer by
-answer (the numbers are in [STATUS.md](STATUS.md)). Not done: stages 4 to 8
-(the map, language servers, checking and editing, the server, the switch).
-Nothing of the Rust program is built by `scripts/build.sh`, installed or
-shipped yet, and the rest of this page describes the Goose program. The bar, the stages and the log are in
+`rust/`. The owner's reason: Rust has a more developed ecosystem
+([DECISIONS.md](DECISIONS.md)). Done: stages 0 to 3, four of the nine.
+Stage 0 (commands, usage text, exit codes), stage 1 (the store: `index`,
+`refresh` and `query`) and stage 2 (planning that runs nothing:
+`cargo-projects`, `gradle-tasks` and `plan-python`) were merged on
+2026-11-20. Stage 3 (syntax: structural search behind `query <db> pattern`,
+the syntax-level index behind `syntax-index`, and the stamps behind
+`stamp-bench` and `stamp-worker`) was finished on 2026-11-22. Each was
+checked against the Goose program answer by answer (the numbers are in
+[STATUS.md](STATUS.md)). Not done: stages 4 to 8 (the map, language
+servers, checking and editing, the server, the switch). Nothing of the Rust
+program is built by `scripts/build.sh`, installed or shipped yet, and the
+rest of this page describes the Goose program. The bar, the stages and the log are in
 [docs/rust-port.md](docs/rust-port.md); the work in progress is in
 [HANDOFF.md](HANDOFF.md).
 
