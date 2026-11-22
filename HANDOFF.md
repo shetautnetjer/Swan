@@ -16,7 +16,7 @@ purpose are in [docs/rust-port.md](docs/rust-port.md). Read it first.
 | Stage 0 | Done: 47 of 47 wrong calls answered as the Goose build answers them |
 | Stage 1, the store | Done: `index`, `refresh` and 13 of the 14 `query` kinds. The same tables, refusals, staleness and answers as the Goose build `fb8df2a4c199` on four trial repos (STATUS.md has the counts) |
 | Stage 2, planning | Done and on main (#76, merged 2026-11-20 on the owner's word): `cargo-projects`, `gradle-tasks`, `plan-python`. STATUS.md has the counts |
-| Stage 3, syntax | Done on branch `rust-stage-3`, pushed, no pull request yet (the owner asks for it): the trees, `query pattern`, `syntax-index`, `stamp-bench` and `stamp-worker`. STATUS.md has the counts |
+| Stage 3, syntax | Done on branch `rust-stage-3`; pull request #78 is open and waits for the owner's word to merge: the trees, `query pattern`, `syntax-index`, `stamp-bench` and `stamp-worker`. STATUS.md has the counts |
 | Stages 4 to 8 | Not started. Every command of theirs exits 70 and names its stage |
 
 ## What passed, and how to see it again
@@ -46,33 +46,27 @@ still match the source? nothing is built) and break numbers (only those).
 The check suites judge the Goose program: the Rust program cannot run them
 before stage 8.
 
-## Next action: stage 3's pull request, then stage 4, the map
-1. **The pull request for stage 3**, when the owner asks: `rust-stage-3`
-   into main. Before it: the full suite in the microVM on the commit that
-   merges (`scripts/space-test.sh`; it passed on `2a75e1c`, STATUS.md), and
-   main merged in. #77 (below) changes the note at the top of `README.md`
-   and appends to `STATUS.md`, as this branch does: keep this branch's
-   note, which names stage 3, with #77's sentence on the owner's reason;
-   keep both sets of entries, in time order.
-2. **Stage 4, the map** (docs/rust-port.md, the stage table): `seal`,
-   `run`, `pipeline`, `pypatch`, `tspatch`, `scip`, `wings`, `tsproj`,
-   `survey`, about 4,070 lines, judged by `swan map`: table hashes, the
-   report, "reused" on the second run. Its own branch from main. It is the
-   first stage that starts other programs (the indexers, sealed), so decide
-   first how the two programs are compared without either running a
-   third-party repo's code. Three things carried in stage 3 are first used
-   there and are judged there: `stamp_known`, `line_of_path` (with
-   `index_lines`, not carried yet) and `Walk::load` with a real
-   `git-ignored.txt`.
+## Next action: stage 4, the map (branch `rust-stage-4`)
+Stage 3's pull request is #78: main (with #77) is merged in, and the full
+suite passed in the microVM on its merged commit (`4b22745`, STATUS.md).
+It waits for the owner's word to merge.
 
-## Open pull request
-- #77, `readme-port-status`: the note at the top of `README.md` named
-  stage 2 as on a branch; it is on main. It also records the owner's reason
-  for the port (DECISIONS.md, 2026-11-22). Words only. Waits for the
-  owner's word to merge.
+Stage 4 (docs/rust-port.md, the stage table): `seal`, `run`, `pipeline`,
+`pypatch`, `tspatch`, `scip`, `wings`, `tsproj`, `survey`, about 4,070
+lines, judged by `swan map`: table hashes, the report, "reused" on the
+second run. Its branch, `rust-stage-4`, starts from `rust-stage-3`, because
+it needs stage 3's code and #78 is not merged; when #78 is merged (a
+squash), move it onto main with `git rebase --onto origin/main <the tip of
+rust-stage-3 it started from> rust-stage-4`. It is the first stage that
+starts other programs (the indexers, sealed), so decide first how the two
+programs are compared without either running a third-party repo's code.
+Three things carried in stage 3 are first used there and are judged there:
+`stamp_known`, `line_of_path` (with `index_lines`, not carried yet) and
+`Walk::load` with a real `git-ignored.txt`. `rust-stage-4`'s own
+HANDOFF.md says how far it is.
 
 ## Decisions waiting on the owner
-- Merge #77? Open the pull request for stage 3?
+- Merge #78, the pull request for stage 3?
 - The next experiment after the port's stage 3, proposed in
   docs/agent-gaps-2026-11-20.md (branch `ccr-6c949a09-uhlhfn`): "sealed
   dependencies". Without a repo's packages, 70% of flask's errors, 93% of
@@ -114,7 +108,7 @@ The owner's direction of 2026-11-20 (DECISIONS.md): Spread-Wings in Swan,
 a file watcher such as `notify`, hidden files and git-ignored folders left
 out for privacy, and one report of every area left out and why; serena-rs
 as a reference at stage 5. docs/rust-port.md, "Held for after the port".
-The owner's reason for the port (DECISIONS.md, 2026-11-22, on #77): Rust
+The owner's reason for the port (DECISIONS.md, 2026-11-22): Rust
 has a more developed ecosystem. The port uses none of it yet: it names
 four libraries, and stays that way until the stage each would touch has
 passed.

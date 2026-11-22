@@ -1979,3 +1979,26 @@ did not find what prints it.
 
 Limit: this entry is one commit after the tree that was tested; that
 commit changes STATUS.md and HANDOFF.md only.
+
+## 2026-11-22T06:38Z: #77 merged, main merged in, the suite again, and the pull request for stage 3 (#78)
+
+On the owner's word ("merge, open pr and continue"): #77 was merged into
+main (`15e2687`), main was merged into `rust-stage-3` (`4b22745`), and the
+pull request for stage 3 was opened, #78. It is not merged: his word
+covered #77.
+
+The merge: README.md's note keeps this branch's stages with #77's sentence
+on the owner's reason; STATUS.md and DECISIONS.md keep both sets of
+entries, in time order. No other file differed.
+
+Checked on `4b22745`:
+- `scripts/space-test.sh` in the microVM: 58 checks passed, 0 failed; the
+  cosmetic, layer and piece checks passed; 56 Python tests OK; 322 checks
+  passed, 0 failed. Exit 0.
+- `port-syntax.sh` 57 of 57, `port-stamp.sh` 82 of 82, wrong calls 47 of
+  47.
+- Not run again: the three provers. The Rust sources are those of
+  `2a75e1c`, where they caught 33 of 33, 107 of 107 and 59 of 59.
+
+Limit: this entry is one commit after the tree that was tested; that
+commit changes STATUS.md and HANDOFF.md only.
