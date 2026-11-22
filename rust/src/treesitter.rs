@@ -154,16 +154,16 @@ fn is_meta_char(c: u8) -> bool {
 const MV: &[u8] = b"zswan_mv_"; // $X becomes zswan_mv_X
 const MVM: &[u8] = b"zswan_mvm_"; // $$$X becomes zswan_mvm_X
 
-fn sym(n: &[i32], i: i64) -> i64 {
+pub fn sym(n: &[i32], i: i64) -> i64 {
     n[i as usize * R] as i64
 }
-fn flags(n: &[i32], i: i64) -> i64 {
+pub fn flags(n: &[i32], i: i64) -> i64 {
     n[i as usize * R + 1] as i64
 }
-fn start(n: &[i32], i: i64) -> i64 {
+pub fn start(n: &[i32], i: i64) -> i64 {
     n[i as usize * R + 2] as i64
 }
-fn end(n: &[i32], i: i64) -> i64 {
+pub fn end(n: &[i32], i: i64) -> i64 {
     n[i as usize * R + 3] as i64
 }
 fn row(n: &[i32], i: i64) -> i64 {
@@ -172,10 +172,10 @@ fn row(n: &[i32], i: i64) -> i64 {
 fn col(n: &[i32], i: i64) -> i64 {
     n[i as usize * R + 5] as i64
 }
-fn first(n: &[i32], i: i64) -> i64 {
+pub fn first(n: &[i32], i: i64) -> i64 {
     n[i as usize * R + 6] as i64
 }
-fn next(n: &[i32], i: i64) -> i64 {
+pub fn next(n: &[i32], i: i64) -> i64 {
     n[i as usize * R + 7] as i64
 }
 

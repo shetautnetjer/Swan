@@ -1872,3 +1872,70 @@ Limits: `fill_template`, the rewrite half of the matcher, is not carried.
 It goes with `rewrite_pattern` in the server's stage. Six of the eight
 maps were built with empty symbol rows, so `in_symbol` is judged only on
 the made-up repo, swan-rust and flask.
+
+## 2026-11-22T06:15Z: stage 3 of the port done: `syntax-index` and the stamps in Rust, the same bytes
+
+What was missing: the Rust program answered `swan syntax-index`,
+`stamp-bench` and `stamp-worker` with exit 70, "not carried over yet".
+
+Changed:
+- `rust/src/syntax.rs` carries src/syntax.goose: the walk, the line
+  patterns of Go, shell, Make, Ruby and Lua, where a body ends, uses found
+  by name (same file, then folder, then repo, at most three), and the SCIP
+  file. `swan syntax-index <repo> <out.scip> [--skip go]`.
+- `rust/src/change.rs` carries the code stamp of src/change.goose
+  (`cosmetic_lang`, `code_hash`, the comments that count) and
+  `line_of_path`; the rest of that file is stage 6.
+- `rust/src/stamp.rs` carries src/stamp.goose: a stamp line, the workers as
+  processes and as threads, `stamp-bench` and `stamp-worker`.
+- `sys.rs`: writing a file, making a folder, the processor count, starting
+  a worker with its output in a log, and waiting for it. `util.rs`:
+  Goose's hash of a whole number.
+- Judges: `scripts/port-syntax.sh` and `scripts/port-stamp.sh`, each with
+  its prover (`port-prove-syntax.py`, `port-prove-stamp.py`).
+  `scripts/port-compare.sh` takes the time off `stamp-bench`'s last line.
+
+Checked, Goose program built from this commit against the Rust program:
+
+| Judge | Result |
+|---|---|
+| `port-syntax.sh` | 57 of 57 the same: a made-up repo (62 files, asked 15 ways), 20 fixtures and this repository, each with and without `--skip go` |
+| `port-syntax.sh` with 8 repos | 73 of 73. The largest: 1,572 files, 3,592 definitions, 91,170 occurrences, an index of 8,402,085 bytes, the same bytes |
+| `port-prove-syntax.py` | 107 of 107 breaks caught. The first run caught 105 of 107 |
+| `port-stamp.sh` | 82 of 82 the same: a made-up repo (340 files to stamp) with one process, 3 to 64 worker processes, 2 and 3 threads, and each way the two commands fail; 20 fixtures and this repository |
+| `port-stamp.sh` with 6 repos | 94 of 94. rea, 7,784 files: the same bytes from one process and from 32 workers; the same lines, in another order, from 4 threads |
+| `port-prove-stamp.py` | 59 of 59 breaks caught |
+| Earlier judges | wrong calls 47 of 47; `port-pattern.sh` 182 of 182; `cargo test` 7 passed; no warnings |
+
+The two breaks the first judge missed: a file one byte over the largest
+size read where one of exactly that size was meant, and a carriage return
+that changed nothing the made-up lines showed. Both have a case now.
+
+Cost, the median of 7 or 9 runs on 32 cores:
+
+| | Goose | Rust |
+|---|---|---|
+| `syntax-index`, 1,572 shell and Lua files | 54.0 ms | 52.6 ms |
+| `stamp-bench`, rea, one process | 6,282 ms | 6,241 ms |
+| `stamp-bench`, rea, 32 worker processes | 459 ms | 468 ms |
+| `stamp-bench`, rea, 4 threads | 1,674 ms | 1,668 ms |
+
+The first Rust `syntax-index` took 63 ms: each word was looked up through
+Rust's standard hash with a key made for the lookup. It now uses the hash
+the rest of the port uses.
+
+Limits:
+- The check suites judge the Goose program, whose sources this branch does
+  not change; the Rust program cannot run them before stage 8.
+- `stamp_known` and `line_of_path` are carried but nothing here reaches
+  them: `stamp-bench` starts from no stamps. They are judged with the map,
+  at stage 4.
+- On threads the two programs can report another thread count when more
+  are asked for than one runtime allows; the judge asks for 2 and 3.
+- A file that cannot be read is left out by both, which only shows when
+  the judge does not run as root.
+- Four rules of `syntax-index` and three of the stamps cannot be shown by
+  either command and have no break; the provers list them.
+- The pull request for stage 3 is not opened, and the note at the top of
+  README.md is changed here and in #77: whichever merges second keeps this
+  branch's note with #77's sentence on the owner's reason.

@@ -297,6 +297,12 @@ fn hash_lanes(s: &[u8]) -> u64 {
     h ^ (h >> 32)
 }
 
+/// Goose's `hash` of a whole number (stdlib/std.goose, hash_mix).
+pub fn hash_int(x: i64) -> u64 {
+    let h = (x as u64).wrapping_mul(K1);
+    h ^ (h >> 32)
+}
+
 pub fn hash_combine(seed: u64, h: u64) -> u64 {
     seed ^ (h.wrapping_add(K1).wrapping_add(seed << 6).wrapping_add(seed >> 2))
 }

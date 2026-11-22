@@ -8,6 +8,7 @@
 // stages). A command whose stage is not carried over yet says so and exits
 // with NOT_CARRIED, so a comparison can tell "not yet" from "wrong".
 
+mod change;
 mod db;
 mod diag;
 mod fresh;
@@ -18,7 +19,9 @@ mod pyplan;
 mod query;
 mod rustproj;
 mod scip;
+mod stamp;
 mod structural;
+mod syntax;
 mod sys;
 mod treesitter;
 mod util;
@@ -173,7 +176,10 @@ fn main() {
     } else if cmd == b"map" && (n == 4 || (n == 5 && is(4, "--clean"))) {
         not_carried(cmd, 4);
     } else if cmd == b"syntax-index" && (n == 4 || (n == 6 && is(4, "--skip"))) {
-        not_carried(cmd, 3);
+        let skip_go = n == 6 && is(5, "go");
+        if !syntax::syntax_index_main(&a[2], &a[3], skip_go) {
+            exit(1);
+        }
     } else if cmd == b"plan-python" && (n == 3 || n == 4) {
         // The Python pieces a map would index in parallel, one per line ("" = the whole repo).
         let mut k: i64 = 6;
@@ -189,9 +195,13 @@ fn main() {
     } else if cmd == b"scip-typescript-patch" && (n == 3 || (n == 4 && is(3, "--revert"))) {
         not_carried(cmd, 4);
     } else if cmd == b"stamp-bench" && n == 4 {
-        not_carried(cmd, 2);
+        if !stamp::stamp_bench_main(&a[2], &a[3]) {
+            exit(1);
+        }
     } else if cmd == b"stamp-worker" && n == 6 {
-        not_carried(cmd, 2);
+        if !stamp::stamp_worker_main(&a[2], &a[3], &a[4], &a[5]) {
+            exit(1);
+        }
     } else if cmd == b"trust" && n == 3 {
         not_carried(cmd, 4);
     } else if cmd == b"gradle-tasks" && n == 3 {
@@ -223,7 +233,7 @@ fn main() {
 
 /// The real path of a path given on the command line; it ends the run when
 /// there is none (src/pipeline.goose, abs_path).
-fn abs_path(p: &[u8]) -> Vec<u8> {
+pub(crate) fn abs_path(p: &[u8]) -> Vec<u8> {
     match sys::realpath(p) {
         Some(o) => o,
         None => die(&[&b"swan: no such path: "[..], p].concat()),

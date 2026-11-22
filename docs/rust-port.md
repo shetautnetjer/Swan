@@ -79,7 +79,7 @@ build and the Rust build of the same commit.
 | 0 | Skeleton: commands, usage text, exit codes, the compare script | `swan.goose` | 248 | usage and exit code for every wrong call |
 | 1 | The store: reading flattened SCIP into a map, refresh, questions | `swan_sys.c`, `db`, `scip`, `index`, `fresh`, `graph`, `query`, `writer` | 2,110 | `index`, `refresh`: table hashes. `query`: bytes, 13 of the 14 kinds (`pattern` reads source with tree-sitter: stage 3). Done 2026-11-20: `scripts/port-store.sh` |
 | 2 | Planning that runs nothing | `rustproj`, `gradle`, `pyplan` (and the toolchain helpers of `seal` that `rustproj` uses) | 934 | `cargo-projects`, `gradle-tasks`, `plan-python`: bytes. Done 2026-11-20: `scripts/port-plan.sh`. `stamp`, `tsproj`, `survey` and `modules` moved to the stage of their first user (2026-11-20, "Found while porting") |
-| 3 | Syntax | `syntax`, `structural`, `stamp` and the code stamps of `change` (`cosmetic_lang`, `code_hash`); goose-treesitter's `treesitter.goose` (the matcher), with its `ts_shim.c`, the runtime and the grammars built as they are | 1,080 + 237 + some of 280 + 750 | the trees (`scripts/port-trees.sh`); `syntax-index` rows; `query pattern` bytes; `stamp-bench`'s stamps.tsv and `stamp-worker` |
+| 3 | Syntax | `syntax`, `structural`, `stamp` and the code stamps of `change` (`cosmetic_lang`, `code_hash`); goose-treesitter's `treesitter.goose` (the matcher), with its `ts_shim.c`, the runtime and the grammars built as they are | 1,080 + 237 + some of 280 + 750 | the trees (`scripts/port-trees.sh`); `syntax-index` rows; `query pattern` bytes; `stamp-bench`'s stamps.tsv and `stamp-worker`. Done 2026-11-22: `scripts/port-trees.sh`, `port-pattern.sh`, `port-syntax.sh` and `port-stamp.sh` |
 | 4 | The map | `seal`, `run`, `pipeline`, `pypatch`, `tspatch`, `scip`, `wings`, `tsproj`, `survey` | 3,681 + 387 | `swan map`: table hashes, the report, "reused" on the second run |
 | 5 | Language servers | `golsp.goose`, `proc.c`, `glue.c`, `lspindex`, `live` | 1,815 | `lsp-index` SCIP output; `lsp-ask` answers |
 | 6 | Checking and editing | `checkers`, `diag`, `broke`, `change`, `edit`, `modules` | 1,549 + 449 | `check`, `broke`, `format`, `test`, `diagnostics`: reports and rows |
@@ -140,8 +140,18 @@ step added to the judge gets a break added there.
   because nothing Swan does reaches them: full-text search, R-trees and the
   other built-in extras; `STAT4` (Swan never runs `ANALYZE`); foreign keys
   on by default (the schema has none).
-- **`swan query <db> pattern`** exits 70 from the Rust program until
-  stage 3.
+- **How `syntax-index` finds a name's definitions.** The Goose program
+  keeps them in a table keyed by a 64-bit hash of the language and the
+  name; the Rust program in a table of names for each language. The index
+  is the same unless two different keys share that hash.
+- **Stamping on threads** (`SWAN_STAMP_MODE=threads`). The stamp lines come
+  back in the order the workers finish, in both programs, so `stamps.tsv`
+  holds the same lines in an order that changes from run to run. How many
+  threads a machine allows is each runtime's own count (Goose's
+  `hardware_threads()` is held down by its stack budget; Rust asks the
+  system), so the report can name another number when more threads are
+  asked for than one of them allows. Worker processes, the default, give
+  the same bytes.
 
 ## Speed: what was measured, and what waits
 
@@ -319,6 +329,9 @@ folders are.
 | 2026-11-20T20:19Z | Stage 2 done. `plan-python` carried: `rust/src/pyplan.rs` (src/pyplan.goose). `scripts/port-plan.sh` with 21 made-up Python repos, each at six values of k: 577 of 577 the same, with the 14 public repos (requests, flask, pytest and django among them; django 2,943 .py files, 239 pieces, 22 to 28 ms in both). `scripts/port-prove-plan.py`: 76 of 76. `stamp`, `tsproj`, `survey` and `modules` moved to stages 3, 4 and 6 (stage table). |
 | 2026-11-20T21:10Z | Stage 3 begun (branch `rust-stage-3`, on #75). Tree-sitter in Rust: `rust/build.rs` builds goose-treesitter's own C (its `ts_shim.c`, the runtime 0.25.10 and 17 grammars) from the Goose build's copy at the commit `src/swan.goose` imports, with the lists of that package's `treesitter.build`; `rust/src/treesitter.rs` calls the shim. `scripts/port-trees.sh` (dumpers `scripts/port-trees.goose` and `rust/src/bin/port-trees.rs`): 25,300 of 25,300 files the same tree, 46 million nodes, every grammar. Seen failing: a `.h` file taken for C++, and a column one too far in a changed shim, each caught. |
 | 2026-11-20T23:53Z | `query pattern` carried: `rust/src/treesitter.rs` (goose-treesitter's matcher) and `rust/src/structural.rs` (src/structural.goose). `scripts/port-pattern.sh`: 182 of 182 on a made-up repo in all 17 languages, 1630 of 1630 with eight maps (swan-rust, django, laravel, godot-demo-projects, wgpu, ripgrep, shadcn-ui, flask). `scripts/port-prove-pattern.py`: 33 of 33 breaks caught, after the first judge caught 23 of 34 (below). About as fast as the Goose program (STATUS.md). |
+| 2026-11-22T06:15Z | `syntax-index` carried: `rust/src/syntax.rs` (src/syntax.goose). `scripts/port-syntax.sh`: 57 of 57 on a made-up repo of 62 files in the five languages (15 ways of asking), every fixture and this repository; 73 of 73 with eight repos given, one of 1,572 shell and Lua files (3,592 definitions, 91,170 occurrences, an index of 8.4 MB). `scripts/port-prove-syntax.py`: 107 of 107 breaks caught (105 of 107 at first; below). |
+| 2026-11-22T06:15Z | The stamps carried: `rust/src/change.rs` (the code stamp of src/change.goose) and `rust/src/stamp.rs` (src/stamp.goose), the workers as processes and as threads. `scripts/port-stamp.sh`: 82 of 82 on a made-up repo of 340 files to stamp, every fixture and this repository; 94 of 94 with six repos given (rea: 7,784 files, the same bytes from one process and from 32 workers, the same lines from 4 threads). `scripts/port-prove-stamp.py`: 59 of 59 breaks caught. |
+| 2026-11-22T06:15Z | Stage 3 done on branch `rust-stage-3`. Cost: `syntax-index` 52.6 ms against the Goose program's 54.0 on 1,572 files; `stamp-bench` on rea 6,241 ms against 6,282 in one process, 468 against 459 with 32 workers, 1,668 against 1,674 on 4 threads. |
 
 ## Found while porting
 
@@ -461,15 +474,40 @@ folders are.
 - Stage 3: `fill_template` (the rewrite half of the matcher) is not used
   by `query pattern`. It goes with `rewrite_pattern`, in the server's
   stage.
+- Stage 3: `syntax-index` gave the same bytes on its first build, on this
+  repository, three fixtures and a clone of 1,572 shell and Lua files. Its
+  first judge still caught only 105 of 107 breaks. The file meant to be
+  exactly 1,000,000 bytes, the largest read, was one byte over, so both
+  programs left it out whatever the limit said; and no made-up line showed
+  a carriage return, which only counts where a line's length is written (a
+  Go variable, a plain type, a body with no brace, a file's last line).
+  Both have a case now, and the size of the big file is checked before
+  anything is compared.
+- Stage 3: four things in `syntax-index` and three in the stamps show
+  nothing either command can see, so they have no break; each prover lists
+  them at its head.
+- Stage 3: the first Rust `syntax-index` took 63 ms where the Goose
+  program took 53 (1,572 files). It looked each word up through Rust's
+  standard hash with a key made for the lookup. With the hash the rest of
+  the port uses and a table for each language, 52.6 ms against 54.0.
+- Stage 3: `rust/src/main.rs` named stage 2 for `stamp-bench` and
+  `stamp-worker` after they moved to stage 3. Both are carried now.
+- Stage 3: `scripts/port-compare.sh` takes the time off `stamp-bench`'s
+  last line ("stamp-bench: N ms"), which does not end in " in N ms".
 
 ## Next
 
-Stage 3, syntax, on branch `rust-stage-3`. Done: the trees, and the
-matcher with `swan query <db> pattern` (above). Left, in this order, each
-judged against the Goose program and seen failing before it is trusted:
-1. `src/syntax.goose`, behind `swan syntax-index` (its rows).
-2. `src/stamp.goose` with `cosmetic_lang` and `code_hash` from
-   `src/change.goose`, behind `stamp-bench` and `stamp-worker`; the
-   workers as processes.
+Stage 3 is done on branch `rust-stage-3`; its pull request is opened when
+the owner asks, after the full suite in the microVM on the commit that
+merges.
+
+Stage 4, the map, on its own branch from main: `seal`, `run`, `pipeline`,
+`pypatch`, `tspatch`, `scip`, `wings`, `tsproj` and `survey`, judged by
+`swan map` (table hashes, the report, "reused" on the second run). It is
+the first stage that starts other programs, so the first thing to settle
+is how the two programs are compared with every third-party repo still
+sealed in both. Carried in stage 3 and first used there, so judged there:
+`stamp_known` and `line_of_path` (no stamp is known when `stamp-bench`
+starts), and `Walk::load` with the `git-ignored.txt` a map writes.
 Rebuild the Goose program first (`scripts/build.sh`), which also fetches
 the goose-treesitter copy `rust/build.rs` builds from.
