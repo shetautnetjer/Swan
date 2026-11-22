@@ -1939,3 +1939,23 @@ Limits:
 - The pull request for stage 3 is not opened, and the note at the top of
   README.md is changed here and in #77: whichever merges second keeps this
   branch's note with #77's sentence on the owner's reason.
+
+## 2026-11-22T06:22Z: the full suite in the microVM on stage 3's commit
+
+`scripts/space-test.sh` on `2a75e1c` (branch `rust-stage-3`), in a fork of
+the checkpoint `swan-test-v4`, about five minutes: 58 checks passed, 0
+failed (mcp and maps); the cosmetic, layer and piece checks passed; 56
+Python tests OK; 322 checks passed, 0 failed (rust, split, agnostic, diag,
+kotlin, game, live, trust, edit, lang, structural, pypatch). Exit 0, and
+the fork was deleted.
+
+What it judges: the Goose program. Outside `rust/`, the `scripts/port-*`
+judges and the records, this commit is main's (`049fd7c`), so this is also
+the first full run on those sources since #74 and #76 went in.
+
+Seen and not explained: after the count the run's last line was
+`typescript test: exit 127 after 0 ms`. It is not among the checks, and I
+did not find what prints it.
+
+Limit: this entry is one commit after the tree that was tested; that
+commit changes STATUS.md and HANDOFF.md only.

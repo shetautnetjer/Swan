@@ -49,7 +49,7 @@ before stage 8.
 ## Next action: stage 3's pull request, then stage 4, the map
 1. **The pull request for stage 3**, when the owner asks: `rust-stage-3`
    into main. Before it: the full suite in the microVM on the commit that
-   merges (`scripts/space-test.sh`; STATUS.md says whether it has run), and
+   merges (`scripts/space-test.sh`; it passed on `2a75e1c`, STATUS.md), and
    main merged in. #77 (below) changes the note at the top of `README.md`
    and appends to `STATUS.md`, as this branch does: keep this branch's
    note, which names stage 3, with #77's sentence on the owner's reason;
@@ -81,7 +81,10 @@ before stage 8.
   branch): indexing needs no trust, and declared packages may be downloaded
   with install scripts off. The build is not started; that branch is not
   merged.
-- The microVM suite has not run on main since #74 and #76 went in.
+- The microVM suite ran on `rust-stage-3` at `2a75e1c` on 2026-11-22: 58
+  + 322 checks, 0 failed, 56 Python tests OK. Its Goose sources are main's,
+  so main has now been run since #74 and #76 in all but name. Run it on
+  main itself as well, or take this?
 - `plan-python`'s overflow on an enormous piece count (Graphify, #75, #76):
   the same in Goose and Rust; a one-line fix to both (`sizes.len / 2 < k`)
   as its own pull request, or not?
