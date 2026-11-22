@@ -16,8 +16,8 @@ purpose are in [docs/rust-port.md](docs/rust-port.md). Read it first.
 | Stage 0 | Done: 47 of 47 wrong calls answered as the Goose build answers them |
 | Stage 1, the store | Done: `index`, `refresh` and 13 of the 14 `query` kinds. The same tables, refusals, staleness and answers as the Goose build `fb8df2a4c199` on four trial repos (STATUS.md has the counts) |
 | Stage 2, planning | Done and on main (#76, merged 2026-11-20 on the owner's word): `cargo-projects`, `gradle-tasks`, `plan-python`. STATUS.md has the counts |
-| Stage 3, syntax | Done on branch `rust-stage-3`; pull request #78 is open and waits for the owner's word to merge: the trees, `query pattern`, `syntax-index`, `stamp-bench` and `stamp-worker`. STATUS.md has the counts |
-| Stage 4, the map | Under way on branch `rust-stage-4` (on `rust-stage-3`, pushed): `scip-python-patch`, `scip-typescript-patch`, `trust` and `doctor` carried, with what runs a step and reads JSON; of `swan map`, its opening. The Rust map then stops with exit 70. Left: the rest of the map |
+| Stage 3, syntax | Done and on main (#78, merged 2026-11-22 on the owner's word): the trees, `query pattern`, `syntax-index`, `stamp-bench` and `stamp-worker`. STATUS.md has the counts |
+| Stage 4, the map | Under way on branch `rust-stage-4` (from main, pushed): `scip-python-patch`, `scip-typescript-patch`, `trust` and `doctor` carried, with what runs a step and reads JSON; of `swan map`, its opening. The Rust map then stops with exit 70. Left: the rest of the map |
 | Stages 5 to 8 | Not started. Every command of theirs exits 70 and names its stage |
 
 ## What passed, and how to see it again
@@ -56,13 +56,9 @@ The check suites judge the Goose program: the Rust program cannot run them
 before stage 8.
 
 ## Next action: the rest of `swan map` (branch `rust-stage-4`)
-Stage 3's pull request is #78: main (with #77) is merged in, and the full
-suite passed in the microVM on its merged commit (`4b22745`, STATUS.md).
-It waits for the owner's word to merge. `rust-stage-4` starts from
-`rust-stage-3`, because it needs stage 3's code; when #78 is merged (a
-squash), move it onto main with `git rebase --onto origin/main 0411675
-rust-stage-4` (`0411675` is the tip of `rust-stage-3` it stands on) and
-check the tree is what it was.
+Stage 3 is on main (#78). `rust-stage-4` was begun on `rust-stage-3` and
+has main merged in since (`7e0647a`): main's tree was the tip it stood on,
+so the merge keeps this branch's tree as it was.
 
 Done in stage 4 (docs/rust-port.md, "Next", has the order): the two indexer
 patches; running a step, with `trust` and `doctor`; reading JSON; and the
@@ -109,7 +105,13 @@ used here); the jobs of each language; running them; the flattener;
   first shown by an indexer that builds; nothing carried so far shows it.
 
 ## Decisions waiting on the owner
-- Merge #78, the pull request for stage 3?
+- SolidLSP for every language a server maps, not Go alone? The owner asked
+  on 2026-11-21 why it was not used "for everything else". Today Go is
+  mapped through it (`tools/solidlsp/bridge.py`, Python, with a virtualenv
+  of its own in `.tools/`), Goose through `goose lsp` and Swan's own
+  client, and the other languages by SCIP indexers, which give a whole repo
+  in one run where a server answers file by file. No record says why it
+  stopped at Go. It is a question for stage 5, where the client is carried.
 - The next experiment after the port's stage 3, proposed in
   docs/agent-gaps-2026-11-20.md (branch `ccr-6c949a09-uhlhfn`): "sealed
   dependencies". Without a repo's packages, 70% of flask's errors, 93% of

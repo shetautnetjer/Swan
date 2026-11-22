@@ -17,6 +17,9 @@
 # Exit 0: all the same. 1: some differ. 2: a comparison could not be made
 # (a program is missing). 3: the command is not carried yet.
 set -uo pipefail
+# A repo given by a path from where this was started is found from there.
+given=(); for a in "$@"; do given+=("$(realpath -- "$a" 2>/dev/null || printf '%s' "$a")"); done
+set -- "${given[@]+"${given[@]}"}"
 cd "$(dirname "$0")/.."
 here=$PWD
 

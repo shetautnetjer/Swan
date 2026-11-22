@@ -15,6 +15,9 @@
 # K of N texts". Exit 0: all the same. 1: some differ. 2: a dumper is
 # missing or does not build.
 set -uo pipefail
+# A repo given by a path from where this was started is found from there.
+given=(); for a in "$@"; do given+=("$(realpath -- "$a" 2>/dev/null || printf '%s' "$a")"); done
+set -- "${given[@]+"${given[@]}"}"
 cd "$(dirname "$0")/.."
 GOOSE=${GOOSE:-.tools/goose/goose-v2026.3-linux-x64/goose}
 export GOOSE_HOME=${GOOSE_HOME:-$PWD/.tools/goose-home}
