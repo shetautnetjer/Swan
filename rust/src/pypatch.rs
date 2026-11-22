@@ -44,7 +44,7 @@
 // map itself.
 
 use crate::sys;
-use crate::util::find;
+use crate::util::{find, trim};
 
 const PYPATCH_MARK: &[u8] = b"__swanReach";
 
@@ -72,7 +72,7 @@ const PYPATCH_SITES: [&[u8]; 12] = [
     b"try{let s;return t.preFinallyGate.isGateClosed=!0,__swanGate++,e.useSpeculativeMode(t.finallyNode,(()=>{s=E(t.antecedent)})),s.isIncomplete?s:b(t,s.type,!1)}finally{t.preFinallyGate.isGateClosed=n,__swanGate--}",
 ];
 
-fn pypatch_count(text: &[u8], what: &[u8]) -> i64 {
+pub fn pypatch_count(text: &[u8], what: &[u8]) -> i64 {
     let mut n = 0;
     let mut at = 0;
     while at < text.len() {
@@ -214,4 +214,63 @@ const PYSITE_SITES: [&[u8]; 10] = [
 // scip-python's scip-python.js, with that fix or (revert) without.
 pub fn pysite_file(path: &[u8], revert: bool) -> &'static [u8] {
     sites_patch_file(path, &PYSITE_SITES, PYSITE_MARK, revert)
+}
+
+// Before a map runs scip-python: make sure Swan's copy has the second fix.
+// `size` is the size of dist/scip-python.js now (0 if it is not there).
+pub fn ensure_scip_python_site_patch(home: &[u8], size: i64, report: &mut Vec<u8>) {
+    if size <= 0 {
+        return;
+    }
+    if sys::env(b"SWAN_SCIP_PYTHON_PATCH") == b"0" {
+        return;
+    }
+    let dist = [home, b"/tools/node_modules/@sourcegraph/scip-python/dist"].concat();
+    let marker = [&dist[..], b"/.swan-site-patch"].concat();
+    let mut seen: Vec<u8> = Vec::new();
+    if sys::read_file(&marker, &mut seen) && trim(&seen) == size.to_string().as_bytes() {
+        return;
+    }
+    let path = [&dist[..], b"/scip-python.js"].concat();
+    let r = pysite_file(&path, false);
+    // The words are the Goose program's, its file's name included.
+    if r == b"patched" {
+        report.extend_from_slice(b"scip-python: a package in a virtualenv inside the repo is now named as that package, not as the repo (src/pypatch.goose)\n");
+    } else if r == b"no match" {
+        report.extend_from_slice(b"scip-python: Swan's fix for packages in a virtualenv inside the repo does not fit this scip-python; their classes are named as the repo\n");
+    }
+    let mut now: Vec<u8> = Vec::new();
+    if sys::read_file(&path, &mut now) {
+        sys::write_file(&marker, now.len().to_string().as_bytes());
+    }
+}
+
+// Before a map runs scip-python: make sure Swan's copy has the memo. `size`
+// is the bundle's size now (0 if it is not there). A line goes in the
+// report only when something was done or could not be.
+pub fn ensure_scip_python_patch(home: &[u8], size: i64, report: &mut Vec<u8>) {
+    if size <= 0 {
+        return;
+    }
+    if sys::env(b"SWAN_SCIP_PYTHON_PATCH") == b"0" {
+        return;
+    }
+    let dist = [home, b"/tools/node_modules/@sourcegraph/scip-python/dist"].concat();
+    let marker = [&dist[..], b"/.swan-reach-patch"].concat();
+    let mut seen: Vec<u8> = Vec::new();
+    if sys::read_file(&marker, &mut seen) && trim(&seen) == size.to_string().as_bytes() {
+        return;
+    }
+    let path = [&dist[..], b"/pyright-internal.js"].concat();
+    let r = pypatch_file(&path, false);
+    if r == b"patched" {
+        report.extend_from_slice(b"scip-python: applied Swan's reachability memo to its bundled pyright (src/pypatch.goose)\n");
+    } else if r == b"no match" {
+        report.extend_from_slice(b"scip-python: Swan's reachability memo does not fit this scip-python; indexing unpatched (a long script of try/except blocks can be very slow)\n");
+    }
+    // Whatever the outcome, this exact file needs no second look.
+    let mut now: Vec<u8> = Vec::new();
+    if sys::read_file(&path, &mut now) {
+        sys::write_file(&marker, now.len().to_string().as_bytes());
+    }
 }

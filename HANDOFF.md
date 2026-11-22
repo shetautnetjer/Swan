@@ -1,6 +1,6 @@
 # Handoff: Swan in Rust (branch `rust-stage-4`)
 
-Written 2026-11-20T07:25Z; stage 2 part rewritten 2026-11-20T16:21Z, stage 3 part 2026-11-20T23:51Z and again 2026-11-22T06:15Z, when stage 3 was finished; stage 4 part 2026-11-22T06:50Z, 2026-11-22T07:26Z and 2026-11-22T16:46Z, when the session that carried TypeScript's chunks was ended before its prover had run. For the next session, any agent. **Start at "Next action".**
+Written 2026-11-20T07:25Z; stage 2 part rewritten 2026-11-20T16:21Z, stage 3 part 2026-11-20T23:51Z and again 2026-11-22T06:15Z, when stage 3 was finished; stage 4 part 2026-11-22T06:50Z, 2026-11-22T07:26Z 2026-11-22T16:46Z and 2026-11-22T18:18Z, when the prover had run on TypeScript's chunks and Python's pieces were carried. For the next session, any agent. **Start at "Next action".**
 
 ## The task
 Carry Swan over from Goose to Rust, on the owner's word, as a complete
@@ -17,7 +17,7 @@ purpose are in [docs/rust-port.md](docs/rust-port.md). Read it first.
 | Stage 1, the store | Done: `index`, `refresh` and 13 of the 14 `query` kinds. The same tables, refusals, staleness and answers as the Goose build `fb8df2a4c199` on four trial repos (STATUS.md has the counts) |
 | Stage 2, planning | Done and on main (#76, merged 2026-11-20 on the owner's word): `cargo-projects`, `gradle-tasks`, `plan-python`. STATUS.md has the counts |
 | Stage 3, syntax | Done and on main (#78, merged 2026-11-22 on the owner's word): the trees, `query pattern`, `syntax-index`, `stamp-bench` and `stamp-worker`. STATUS.md has the counts |
-| Stage 4, the map | Under way on branch `rust-stage-4` (from main, pushed): `scip-python-patch`, `scip-typescript-patch`, `trust` and `doctor` carried, with what runs a step and reads JSON; of `swan map`, its opening, its content stamps, and all of TypeScript (config, tsc's list, projects, chunks, layers), planned and not run. The Rust map then stops with exit 70. The prover has not yet run on the last part (below). Left: the rest of the map |
+| Stage 4, the map | Under way on branch `rust-stage-4` (from main, pushed): `scip-python-patch`, `scip-typescript-patch`, `trust` and `doctor` carried, with what runs a step and reads JSON; of `swan map`, its opening, its content stamps, all of TypeScript and Python's pieces (src/pipeline.goose to line 1920), planned and not run. The Rust map then stops with exit 70. The prover has run on everything but Python's pieces, which have no breaks yet (below). Left: the rest of the map |
 | Stages 5 to 8 | Not started. Every command of theirs exits 70 and names its stage |
 
 ## What passed, and how to see it again
@@ -45,8 +45,8 @@ scripts/port-json.sh                                                 # stage 4: 
 scripts/port-prove-json.py                                           # stage 4: 23 of 23 breaks caught
 scripts/port-sort.sh                                                 # stage 4: 7,718 of 7,718 lists, under a second
 scripts/port-prove-sort.py                                           # stage 4: 30 of 30 breaks caught (under a minute)
-SWAN_OLD=bin/swan scripts/port-map.sh                                # stage 4: 317 of 317 in the carried part; 4.5 min the first time, seconds after
-SWAN_OLD=$PWD/bin/swan scripts/port-prove-map.py                     # stage 4: 370 of 370 breaks caught (an hour on 32 cores, six parts side by side)
+SWAN_OLD=bin/swan scripts/port-map.sh                                # stage 4: 395 of 395 in the carried part; 5 min the first time, under a minute after
+SWAN_OLD=$PWD/bin/swan scripts/port-prove-map.py                     # stage 4: 370 of 370 breaks caught (an hour on 32 cores, six parts side by side); none yet for Python's pieces
 ```
 `$TRIES` is the folder of trial repo copies the swan-change-loop skill
 names, with the Goose program's maps of them under `maps/`. `port-store.sh`
@@ -59,38 +59,35 @@ before stage 8.
 
 ## Next action: the rest of `swan map` (branch `rust-stage-4`)
 
-### First: the prover has not run on the last part
-The last session carried TypeScript's chunks and layers and was ended, on
-the owner's word, before the map's prover had run. What is true of the
-tree as committed:
+### First: the owner's answer on the prover
+On 2026-11-22 the owner asked why a prover is used, why Jev does not look
+for what is wrong instead, and said the work is going into Python scripts
+and not into moving Swan to Rust. He was told: the judge (a byte
+comparison of the two programs) is what finds where the Rust program is
+wrong; the prover tests the judge, on AGENTS.md rule 4; Jev reads a
+summary an agent writes and cannot find a byte that differs (asked that
+day, it put 0.11 on a model as the judge). The agent recommended keeping
+the byte comparison, carrying the rest of the map with cases and no new
+breaks, and running the prover once at the end of the stage, since a map
+made end to end can be compared whole on real repos. That loosens rule 4
+for the port, so it is his word to give. He had not answered when this was
+written.
+
+So, as the tree stands:
 
 | | |
 |---|---|
-| Goose's sort (`rust/src/gsort.rs`) | Done and proven: `scripts/port-sort.sh` 7,718 of 7,718 lists, `scripts/port-prove-sort.py` 30 of 30 |
-| TypeScript's chunks and layers (`rust/src/pipeline.rs`, to src/pipeline.goose line 1739) | Carried. `scripts/port-map.sh`: 317 of 317, 88 cases new |
-| `scripts/port-prove-map.py` | Run 2026-11-22T18:10Z on the tree of `7fc1276`: 370 of 371 caught, and the one let through (306) was no break and is taken out. 370 of 370 |
+| TypeScript's chunks and layers | Proven: the prover ran on the tree of `7fc1276`, 370 of 371 caught, and the one let through (306) was no break. 370 of 370 |
+| Python's pieces (`rust/src/pipeline.rs`, to src/pipeline.goose line 1920) | Carried. `scripts/port-map.sh`: 395 of 395, 78 cases new |
+| `scripts/port-prove-map.py` for Python's pieces | No breaks written. The 370 there are fit the source (`--fit`) |
 
-So the new cases are not yet shown to catch what they were made for
-(AGENTS.md rule 4). Do this before carrying anything more:
-1. `scripts/build.sh` if `bin/swan` is not this commit's, then build the
-   Rust program (commands under "What passed").
-2. `SWAN_OLD=bin/swan scripts/port-map.sh` once, so the Goose program's
-   answers are kept (4.5 minutes if `build/port-map/` was cleared, seconds
-   if not). It must end "the same: 317 of 317".
-3. Run all 371 breaks, six parts side by side (below; about 40 minutes on
-   32 cores). The parts do not touch each other, so they can be given to
-   helpers.
-4. Read each miss. It is one of three things: a hole (no case turns on
-   that rule: add one, after the cases already there), a case that does
-   not single its rule out (change the case), or no break at all (the
-   broken program behaves the same: take it out and say why in the
-   prover's docstring, under "Not among the breaks"). The first run of
-   each earlier part missed 5 of 74, 11 of 214 and 2 of 31, so expect some.
-5. Run the missed ones again by number until all are caught, then write
-   the result down: a dated entry in STATUS.md after the last one (which
-   says the prover had not run), a row in the log of docs/rust-port.md,
-   each miss under "Found while porting", the two numbers in this file.
-   Commit and push on `rust-stage-4`.
+If he says the prover stays as it was: write a break for each rule of
+Python's part (the cases are grouped in `scripts/port-map.sh` under
+"Python:"; STATUS.md, 2026-11-22T18:18Z, lists what each group is for), run the new
+ones by number in six parts, read each miss, and record it. If he says
+once at the end of the stage: go on carrying, add cases as before, and
+write DECISIONS.md's entry with his words. Either way, do not say Python's
+cases are proven until a prover has run on them.
 
 ### Then
 - A mend to what is on main, as its own branch from main and its own pull
@@ -100,28 +97,30 @@ So the new cases are not yet shown to catch what they were made for
   said with one empty line more. It needs a comparison of both programs
   on a map lacking each table in turn, seen failing first. Ask the owner
   before opening its pull request; he has not been asked.
-- The next part of the map: Python's pieces, src/pipeline.goose lines
-  1741 to 1920. It needs, none carried yet: `ensure_scip_python_patch` and
-  `ensure_scip_python_site_patch` (src/pypatch.goose; the patching itself
-  is in `pypatch.rs`), `python_of`, `venv_read` (the virtualenv of a repo
-  that is not trusted, which `detect` drops today), `pyvenv_version`,
-  `survey_python_envs`, `py_site_dirs`, `py_standin_dir`, the two Python
-  snippets (`PY_VENV_SNIPPET`, `PY_ENV_SNIPPET`), `pypatch_count`,
-  `py_stamps`, `python_src_roots`, `env_entry`, `piece_target`,
-  `piece_fingerprint`, `piece_has`, `in_piece`, `list_dir`. Carried
-  already and used there: `plan_python`, `dependents_of_changes`, `Jobs`,
-  `Cache`, `child_env` (its `extra` and `first` arguments are first used
-  by Python). Before it: give `home_of` in the judge the home's own copies
-  of `scip-python/dist/pyright-internal.js`, `scip-python.js` and their
-  two marks (the package is one link to the checkout's today, and a map
-  must never write through a link), and compare them in `home_state`.
-- After Python, in the map's own order: Rust (from line 1922), Java, C#,
-  C and CUDA, the language servers' child, `syntax-index`, "no language
-  found to index" (exit 1); running the jobs; the flattener; `index` or
-  `refresh`; the end of the report, where `index-manifest.tsv` and
-  content-stamps.tsv are written and `finish_cosmetic` moves rows
-  (`shift_cosmetic` of src/change.goose and `mark_edited` of src/edit.goose
-  are needed there, though the stage table has them at stage 6).
+- The next part of the map: Rust, src/pipeline.goose lines 1922 to 2003.
+  Most of what it calls is carried already in `rustproj.rs`
+  (`cargo_manifest_dirs`, `rust_projects`, `rust_toolchain_dir`,
+  `rust_std_source`, `rust_toolchain_override`, `rust_analyzer_config`,
+  `cargo_inside`, `toolchain_home`) and in `pipeline.rs`
+  (`lang_fingerprint`, `Jobs::add_lang`, `child_env`). Still to carry
+  for it: `skipped` (the indexers that wait for trust, said later by
+  `untrusted_note`), `add_toolchain_env`, and the removal of
+  `index-rust*.scip` from a map of a repo that is not trusted and not
+  sealed. It writes `rust-analyzer-<hash>.json` into the map folder
+  (`WRITTEN` cannot name it ahead: compare it the way the chunks' configs
+  are, wherever either program has one).
+- After Rust, in the map's own order: Java (from line 2004), C#, C and
+  CUDA, "not run:" (`untrusted_note`), the language servers' child,
+  `syntax-index`, "no language found to index" (exit 1); running the
+  jobs; the flattener; `index` or `refresh`; the end of the report, where
+  `index-manifest.tsv` and content-stamps.tsv are written and
+  `finish_cosmetic` moves rows (`shift_cosmetic` of src/change.goose and
+  `mark_edited` of src/edit.goose are needed there, though the stage
+  table has them at stage 6). Where the indexers' runs are read, a failed
+  Python piece is taken out of `python-pieces.tsv`, and at the end every
+  `index-*.scip` no job names is removed: the judge steps around both
+  today (`LATER` on three cases, a stale file that is no `.scip`); take
+  those steps out when the parts are carried.
 
 ### Where stage 4 stands
 Stage 3 is on main (#78). `rust-stage-4` was begun on `rust-stage-3` and
@@ -131,12 +130,13 @@ for stage 4; the owner asks for it.
 
 Done in stage 4 (docs/rust-port.md, "Next", has the order): the two indexer
 patches; running a step, with `trust` and `doctor`; reading JSON; Goose's
-sort; and a map to the end of TypeScript (src/pipeline.goose line 1739:
+sort; and a map to the end of Python (src/pipeline.goose line 1920:
 the opening, the stamps, cosmetic edits found, files to index again, the
 repo's tsconfig or Swan's own, the indexer's patch, tsc's files and roots,
 which config owns each file, the chunks, what they share, which indexes
-are kept, the layers). `rust/src/pipeline.rs` ends there with what the map
-has said so far and exit 70. The jobs are in a list (`Jobs`) that nothing
+are kept, the layers; scip-python's two fixes, a virtualenv read or run,
+the pieces and which are kept). `rust/src/pipeline.rs` ends there with
+what the map has said so far and exit 70. The jobs are in a list (`Jobs`) that nothing
 runs yet.
 
 ### How the map is carried and judged, a part at a time
@@ -180,7 +180,10 @@ runs yet.
   `tools/`, with files of its own for what a map writes (so far the
   TypeScript indexer's `FileIndexer.js` and its mark) and for what a case
   swaps (`tsc`). Never write through one of the links, and never `chmod
-  -R` a home: the links are to the checkout's own files.
+  -R` a home: the links are to the checkout's own files. scip-python's
+  package is in a home as hard links to its files and links to its
+  folders, with the two files a map patches and their two marks as the
+  home's own; `HOME_PREP=home_py_plain` and the like set how they stand.
 - `HOME_PREP="home_tsc <name>"` gives a case a made-up tsc that says what
   `repos/tsc/<name>/` holds; `HOME_PREP=home_plain` and the like set how
   the indexer's patch stands. After each case the judge also compares how
@@ -190,8 +193,15 @@ runs yet.
   writes (no case needs it today).
 - A second map. `PREP=<function>` fills the map folder first, from a map
   the Goose program made: `prep_copy <from> <to>` copies one and moves its
-  record of where its indexes are (`index-manifest.tsv` holds whole
-  paths; without that no index is ever "reused"). A repo that is changed
+  records of where its indexes are (`index-manifest.tsv` and
+  `python-pieces.tsv` hold whole paths; without that no index is ever
+  "reused"). Python's repos that change after a first map are in
+  `BEFORE_PY`, mapped with `SWAN_JOBS=6`; give a case of pieces that
+  setting too, since without it the count follows the memory free at the
+  time. `ALSO="<files>"` on a case names more files of the map folder to
+  compare, `LATER="<files>"` those a later part writes over (not
+  compared). `pkg` and `pyf` make a package in a site-packages folder
+  and a Python file of an exact size; both count in the hash. A repo that is changed
   after its first map is in `BEFORE` (mapped as it is), `BEFORE_TWO`
   (with `SWAN_JOBS=2`: two chunks) or `BEFORE_FOUR` (four: the projects),
   and changed at the end of `make_before`; `prep_before` copies the map
@@ -215,8 +225,7 @@ Settle before the jobs are run:
   on 2026-11-22 and he said "continue" without choosing; Jev leaned the
   same way, weakly (59 to 40). Say which in docs/rust-port.md before
   building on it.
-- **Left out until the part that reads them**: the virtualenv of a repo
-  that is not trusted (`venv_read`, for the Python step), two things
+- **Left out until the part that reads them**: two things
   `detect` notes (Maven and Gradle files at the top of the repo), and what
   is worked out and not yet read: the jobs' list, the new record of
   indexes and whether every index was kept (`jobs.list`,

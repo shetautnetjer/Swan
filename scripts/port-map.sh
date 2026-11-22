@@ -17,8 +17,8 @@
 #     a map over an older one, at least those, since the Goose program drops
 #     the ones no record names when it ends. When the Rust program ends as
 #     the Goose program does, the whole folder;
-#   - the TypeScript indexer in its home is left as the Goose program
-#     leaves it: patched or not, marked or not.
+#   - the indexers in its home are left as the Goose program leaves them:
+#     TypeScript's file and scip-python's two, patched or not, marked or not.
 # The repos are made up here to hold the corners of what is carried: what
 # git ignores, which languages a repo holds, a virtualenv, the survey (with
 # a made-up spread-wings that says what each case needs), an older map and
@@ -26,7 +26,9 @@
 # map, an edit of a comment only, a file whose indexed text is unknown),
 # and TypeScript's config, tsc's list of files and the projects of a repo
 # (with the real tsc, and with a made-up one that says what each case
-# needs). Some fixtures are mapped too.
+# needs), and Python's pieces (a virtualenv read and not run, one run once
+# the repo is trusted, the survey's virtualenvs, a src layout, which pieces
+# are kept on a second map). Some fixtures are mapped too.
 #
 #   scripts/port-map.sh
 #
@@ -53,14 +55,24 @@ for f in bin/eggshell bin/spread-wings bin/swan-flatten; do [ -x "$f" ] || { ech
 command -v sqlite3 >/dev/null || { echo "port-map: sqlite3 is needed"; exit 2; }
 
 put() { mkdir -p "$(dirname "$1")"; cat >"$1"; }
+# pkg <site-packages> <name> <version>: a package as pip leaves it there.
+pkg() {
+    printf 'Metadata-Version: 2.1\nName: %s\nVersion: %s\n' "$2" "$3" | put "$1/$2-$3.dist-info/METADATA"
+    printf '%s/__init__.py,,\n%s-%s.dist-info/METADATA,,\n' "$2" "$2" "$3" >"$1/$2-$3.dist-info/RECORD"
+    printf 'def %s():\n    return 1\n' "$2" | put "$1/$2/__init__.py"
+}
+# pyf <file> <bytes> <text>: a Python file of exactly that size, the text and then a comment.
+pyf() { local have; mkdir -p "$(dirname "$1")"; printf "$3" >"$1"; have=$(stat -c %s "$1"); printf '# %0*d\n' $(($2 - have - 3)) 0 >>"$1"; }
 TSI='tools/node_modules/@sourcegraph/scip-typescript/dist/src'
+PYD='tools/node_modules/@sourcegraph/scip-python/dist'
 
 # ---- the homes ----
 # Each program maps from a made-up home of its own: its programs in bin/,
 # and tools/ as this checkout's, by links, but for what a map may change
-# (the TypeScript indexer's package, whose FileIndexer.js it patches) and
-# what a case may swap for a made-up one (tsc, in node_modules/.bin): those
-# are the home's own. The Goose program has one home, kept; the Rust program
+# (the TypeScript indexer's package, whose FileIndexer.js it patches, and
+# scip-python's, whose pyright-internal.js and scip-python.js it patches)
+# and what a case may swap for a made-up one (tsc, in node_modules/.bin):
+# those are the home's own. The Goose program has one home, kept; the Rust program
 # gets a new one for every case, so that its cases can run side by side.
 # home_of <folder> <the folder its programs are in>
 home_of() {
@@ -73,11 +85,20 @@ home_of() {
         case "${e##*/}" in .bin | @sourcegraph) ;; *) ln -s "$e" "$h/tools/node_modules/" ;; esac
     done
     cp -a "$here/tools/node_modules/.bin" "$h/tools/node_modules/.bin"
-    for e in "$here"/tools/node_modules/@sourcegraph/*; do [ "${e##*/}" = scip-typescript ] || ln -s "$e" "$h/tools/node_modules/@sourcegraph/"; done
+    for e in "$here"/tools/node_modules/@sourcegraph/*; do case "${e##*/}" in scip-typescript | scip-python) ;; *) ln -s "$e" "$h/tools/node_modules/@sourcegraph/" ;; esac; done
     cp -al "$here/tools/node_modules/@sourcegraph/scip-typescript" "$h/tools/node_modules/@sourcegraph/scip-typescript"
+    # scip-python's package: its files as hard links, its folders (the
+    # typeshed, thousands of files) as links. The two files a map patches
+    # and their marks are made the home's own by home_as_installed.
+    mkdir -p "$h/$PYD"
+    for e in "$here/${PYD%/dist}"/*; do
+        [ "${e##*/}" = dist ] && continue
+        if [ -d "$e" ]; then ln -s "$e" "$h/${PYD%/dist}/"; else ln "$e" "$h/${PYD%/dist}/"; fi
+    done
+    for e in "$here/$PYD"/*; do if [ -d "$e" ]; then ln -s "$e" "$h/$PYD/"; else ln "$e" "$h/$PYD/"; fi; done
     home_as_installed "$h"
 }
-# As Swan's installer leaves a home: the indexer patched and marked so, and
+# As Swan's installer leaves a home: the indexers patched and marked so, and
 # the real tsc. The files are the home's own, never a link to the checkout's.
 home_as_installed() {
     rm -f "$1/$TSI/FileIndexer.js" "$1/$TSI/.swan-stable-names" "$1/tools/node_modules/.bin/tsc"
@@ -85,6 +106,10 @@ home_as_installed() {
     cp "$base/ts-indexer.patched" "$1/$TSI/FileIndexer.js"
     printf '%s stable' "$(stat -c %s "$base/ts-indexer.patched")" >"$1/$TSI/.swan-stable-names"
     ln -s ../typescript/bin/tsc "$1/tools/node_modules/.bin/tsc"
+    rm -f "$1/$PYD/pyright-internal.js" "$1/$PYD/scip-python.js" "$1/$PYD/.swan-reach-patch" "$1/$PYD/.swan-site-patch"
+    cp "$base/py-reach.patched" "$1/$PYD/pyright-internal.js"; cp "$base/py-site.patched" "$1/$PYD/scip-python.js"
+    printf '%s' "$(stat -c %s "$base/py-reach.patched")" >"$1/$PYD/.swan-reach-patch"
+    printf '%s' "$(stat -c %s "$base/py-site.patched")" >"$1/$PYD/.swan-site-patch"
 }
 # What a case may do to a home before a map (HOME_PREP="<function> [word]").
 home_plain() { rm -f "$1/$TSI/FileIndexer.js" "$1/$TSI/.swan-stable-names"; cp "$base/ts-indexer.plain" "$1/$TSI/FileIndexer.js"; }
@@ -100,10 +125,13 @@ home_tsc() {
     cp "$r/tsc/tsc" "$2/tools/node_modules/.bin/tsc"
     cp -r "$r/tsc/$1" "$2/tools/node_modules/.bin/tsc-says"
 }
-# How the indexer was left: its bytes, and its mark.
+# How the indexers were left: their bytes, and their marks.
 home_state() {
+    local f
     if [ -e "$1/$TSI/FileIndexer.js" ]; then sha256sum <"$1/$TSI/FileIndexer.js"; else echo "no indexer"; fi
     if [ -e "$1/$TSI/.swan-stable-names" ]; then cat "$1/$TSI/.swan-stable-names"; echo; else echo "no mark"; fi
+    for f in pyright-internal.js scip-python.js; do if [ -e "$1/$PYD/$f" ]; then sha256sum <"$1/$PYD/$f"; else echo "no $f"; fi; done
+    for f in .swan-reach-patch .swan-site-patch; do if [ -e "$1/$PYD/$f" ]; then echo "$f: $(cat "$1/$PYD/$f" | od -An -c | tr -s ' \n' ' ')"; else echo "no $f"; fi; done
 }
 
 # ---- made-up repos, made once ----
@@ -618,6 +646,120 @@ EOF
         for f in a b c d e f g empty gone; do printf '        "./%s.ts",\n' "$f"; done
         printf '        "./types.d.ts",\n        "./node_modules/p/index.ts",\n        "@REPO@x/sibling.ts",\n        "/nowhere/z.ts",\n        "%s/z.ts"\n    ]\n}\n' "$far"
     } | says chunks-odd show-repo
+    # ---- Python ----
+    # A virtualenv at the top that is read and not run: two packages, and a
+    # pyvenv.cfg whose lines try what counts as naming the Python.
+    printf 'import alpha\nx = alpha.alpha()\n' | put "$r/py-venv/a.py"
+    printf 'home = /usr/bin\n=3.1\nversions = 3.2\nversion\n  version   =   3.9.18  \nversion = 3.3\n' | put "$r/py-venv/.venv/pyvenv.cfg"
+    pkg "$r/py-venv/.venv/lib/python3.9/site-packages" alpha 1.0; pkg "$r/py-venv/.venv/lib/python3.9/site-packages" beta 2.5
+    for d in same more newer; do cp -r "$r/py-venv" "$r/py-venv-$d"; done
+    # One package; the first line that could name the Python names none.
+    printf 'x = 1\n' | put "$r/py-venv-one/a.py"
+    printf 'version =\nversion_info = 3.11.4\nversion = 3.3\n' | put "$r/py-venv-one/.venv/pyvenv.cfg"
+    pkg "$r/py-venv-one/.venv/lib/python3.11/site-packages" alpha 1.0
+    # No Python named, and the virtualenv under its other name.
+    printf 'x = 1\n' | put "$r/py-venv-nover/a.py"; printf 'home = /usr/bin\n' | put "$r/py-venv-nover/venv/pyvenv.cfg"
+    pkg "$r/py-venv-nover/venv/lib/python3.12/site-packages" alpha 1.0
+    # Under lib: two Pythons, a folder that is no Python's, one with no
+    # site-packages, one whose site-packages is a file.
+    printf 'x = 1\n' | put "$r/py-venv-libs/a.py"; printf 'version = 3.10.1\n' | put "$r/py-venv-libs/.venv/pyvenv.cfg"
+    pkg "$r/py-venv-libs/.venv/lib/python3.9/site-packages" alpha 1.0; pkg "$r/py-venv-libs/.venv/lib/python3.10/site-packages" beta 2.5
+    pkg "$r/py-venv-libs/.venv/lib/notpython/site-packages" gamma 3.0
+    mkdir -p "$r/py-venv-libs/.venv/lib/python3.8"; : | put "$r/py-venv-libs/.venv/lib/python3.7/site-packages"
+    # A virtualenv under each name: the first is the one.
+    printf 'x = 1\n' | put "$r/py-venv-both/a.py"
+    printf 'version = 3.9.1\n' | put "$r/py-venv-both/.venv/pyvenv.cfg"; pkg "$r/py-venv-both/.venv/lib/python3.9/site-packages" alpha 1.0
+    printf 'version = 3.8.1\n' | put "$r/py-venv-both/venv/pyvenv.cfg"; pkg "$r/py-venv-both/venv/lib/python3.8/site-packages" beta 2.5
+    # The survey's virtualenvs (a made-up spread-wings names them): the one
+    # at the top, which the walk found already; one named twice; one with
+    # no Python named; one with no folder of packages; one in a folder git
+    # ignores; and what names none: a project of another kind, one with no
+    # environment, an empty name, a name that is no text, a project with
+    # no path, a kind that is no text. Each of those has packages, so that
+    # one taken by mistake is counted and named.
+    for d in py-envs py-envs-late; do
+        printf 'x = 1\n' | put "$r/$d/a.py"
+        for v in svc tool out web nopath odd; do
+            printf 'y = 1\n' | put "$r/$d/$v/m.py"; pkg "$r/$d/$v/.venv/lib/python3.12/site-packages" "p$v" 1.0; printf 'version = 3.0.0\n' >"$r/$d/$v/.venv/pyvenv.cfg"
+        done
+        pkg "$r/$d/.venv/lib/python3.9/site-packages" alpha 1.0
+        printf 'home = /usr/bin\n' | put "$r/$d/nolib/.venv/pyvenv.cfg"
+        printf 'out/\n' >"$r/$d/.gitignore"; git -C "$r/$d" init -q
+    done
+    printf 'version = 3.9.18\n' >"$r/py-envs/.venv/pyvenv.cfg"; printf 'home = /usr/bin\n' >"$r/py-envs-late/.venv/pyvenv.cfg"
+    sw py-envs <<'EOF'
+#!/bin/sh
+cat <<'JSON'
+{"projects":[
+ {"kind":"python","path":".","environment":{"venv":".venv","python":"3.1.1"}},
+ {"kind":"python","path":"svc","environment":{"venv":"svc/.venv","python":" 3.12.1\n"}},
+ {"kind":"python","path":"svc/sub","environment":{"venv":"svc/.venv","python":"3.2.2"}},
+ {"kind":"python","path":"tool","environment":{"venv":"tool/.venv"}},
+ {"kind":"python","path":"nolib","environment":{"venv":"nolib/.venv","python":"3.7.0"}},
+ {"kind":"python","path":"out","environment":{"venv":"out/.venv","python":"3.6.0"}},
+ {"kind":"node","path":"web","environment":{"venv":"web/.venv","python":"3.5.0"}},
+ {"kind":"python","path":"bare"},
+ {"kind":"python","path":"empty","environment":{"venv":""}},
+ {"kind":"python","path":"num","environment":{"venv":7}},
+ {"kind":"python","environment":{"venv":"nopath/.venv"}},
+ {"kind":7,"path":"odd","environment":{"venv":"odd/.venv"}}
+]}
+JSON
+EOF
+    sw py-envs-nover <<'EOF'
+#!/bin/sh
+printf '%s\n' '{"projects":[{"kind":"python","path":"svc","environment":{"venv":"svc/.venv"}},{"kind":"python","path":"tool","environment":{"venv":"tool/.venv","python":""}}]}'
+EOF
+    # No virtualenv the walk finds at the top: the survey's alone, with the
+    # Python the survey says; then one whose name ends another's; then one
+    # that is not there.
+    printf 'x = 1\n' | put "$r/py-envs-sub/a.py"; printf 'y = 1\n' | put "$r/py-envs-sub/svc/m.py"
+    pkg "$r/py-envs-sub/svc/.venv/lib/python3.12/site-packages" psvc 1.0; printf 'version = 3.0.0\n' >"$r/py-envs-sub/svc/.venv/pyvenv.cfg"
+    pkg "$r/py-envs-sub/.venv/lib/python3.9/site-packages" alpha 1.0
+    sw py-envs-sub <<'EOF'
+#!/bin/sh
+printf '%s\n' '{"projects":[{"kind":"python","path":"svc","environment":{"venv":"svc/.venv","python":" 3.12.1 "}}]}'
+EOF
+    sw py-envs-inner <<'EOF'
+#!/bin/sh
+printf '%s\n' '{"projects":[{"kind":"python","path":"svc","environment":{"venv":"svc/.venv","python":"3.12.1"}},{"kind":"python","path":".","environment":{"venv":".venv"}}]}'
+EOF
+    sw py-envs-ghost <<'EOF'
+#!/bin/sh
+printf '%s\n' '{"projects":[{"kind":"python","path":"ghost","environment":{"venv":"ghost/.venv","python":"3.12.1"}}]}'
+EOF
+    # A virtualenv that is run, once the repo is trusted: its python is a
+    # made-up one that has pip, has none, or answers nothing.
+    fakepy() { put "$r/$1/.venv/bin/python"; chmod +x "$r/$1/.venv/bin/python"; printf 'x = 1\n' >"$r/$1/a.py"; printf 'version = 3.10.2\n' >"$r/$1/.venv/pyvenv.cfg"; }
+    fakepy py-run <<'EOF'
+#!/bin/sh
+[ "$1" = -m ] && { echo "pip 1.0 from nowhere"; exit 0; }
+echo "asked: $1" >&2; exit 3
+EOF
+    pkg "$r/py-run/.venv/lib/python3.10/site-packages" alpha 1.0
+    fakepy py-run-nopip <<'EOF'
+#!/bin/sh
+[ "$1" = -c ] && { printf '%s\n' '[{"name": "made", "version": "1", "files": []}, {"name": "up", "version": "2", "files": []}]'; exit 0; }
+echo "no module named pip" >&2; exit 1
+EOF
+    fakepy py-run-broken <<'EOF'
+#!/bin/sh
+echo "this python answers nothing: $1" >&2; exit 2
+EOF
+    # A src layout: a package under src, a module under src, a src that
+    # holds neither, and a src that is a file.
+    : | put "$r/py-src/src/pkg/__init__.py"; printf 'def core():\n    return 1\n' >"$r/py-src/src/pkg/core.py"; printf 'from pkg.core import core\n' | put "$r/py-src/tests/test_core.py"
+    printf 'def mod():\n    return 1\n' | put "$r/py-src-mod/src/mod.py"; printf 'x = 1\n' >"$r/py-src-mod/a.py"
+    printf 'words\n' | put "$r/py-src-not/src/readme.txt"; printf 'x = 1\n' | put "$r/py-src-not/src/sub/x.py"
+    printf 'words\n' | put "$r/py-src-file/src"; printf 'x = 1\n' >"$r/py-src-file/a.py"
+    # Pieces, with room for six: five folders that are a piece each (p1 and
+    # p10 among them: one name starts the other) and one too big to be a
+    # piece, whose two files are a piece each. A file of p2 uses what p1
+    # defines.
+    for p in 1 3 4 10; do pyf "$r/py-dep/p$p/mod.py" 40 "def f$p(x):\n    return x + 1\n"; pyf "$r/py-dep/p$p/__init__.py" 40 ''; done
+    pyf "$r/py-dep/p2/use.py" 40 'from p1.mod import f1\ny = f1(2)\n'; pyf "$r/py-dep/p2/__init__.py" 40 ''
+    pyf "$r/py-dep/q/a.py" 60 'def qa(x):\n    return x + 1\n'; pyf "$r/py-dep/q/b.py" 60 'def qb(x):\n    return x + 1\n'
+    for d in same edit file gone more; do cp -r "$r/py-dep" "$r/py-dep-$d"; done
 }
 
 # The Goose program maps these once, as they are made, and they are changed
@@ -627,6 +769,8 @@ BEFORE="ts-edit-config ts-edit-pkg ts-edit-nested ts-edit-code ts-edit-touch ts-
 # chunks, and these with room for four: app in two chunks and lib in one.
 BEFORE_TWO="ts-ch-same ts-ch-edit ts-ch-comment ts-ch-more ts-ch-gone ts-ch-pkg ts-ch-decl ts-ch-lone ts-ch-helper ts-ch-many ts-ch-many5 ts-ch-twice ts-ch-ref"
 BEFORE_FOUR="ts-chp-same ts-chp-one ts-chp-two"
+# These hold Python, mapped with room for six pieces.
+BEFORE_PY="py-dep-same py-dep-edit py-dep-file py-dep-gone py-dep-more py-venv-same py-venv-more py-venv-newer"
 make_before() {
     local d jobs f
     for jobs in 2 4; do
@@ -667,12 +811,26 @@ make_before() {
     touch "$r/ts-edit-touch/tsconfig.json" "$r/ts-edit-touch/package.json" "$r/ts-edit-touch/src/a.ts"
     printf 'export const c = 1;\n' >"$r/ts-edit-more/src/c.ts"
     rm "$r/ts-edit-gone/src/b.ts"
+    # Python. Changed after: a file that another piece uses; a file that is
+    # a piece itself; a file gone, which leaves too few to split; a folder
+    # more; a package more in the virtualenv; another Python named there.
+    for d in $BEFORE_PY; do
+        home_as_installed "$base/old/home"
+        (cd "$base/old" && env "${UNSET[@]}" SWAN_JOBS=6 home/bin/swan map "$r/$d" "$base/before/$d" >/dev/null 2>&1 </dev/null)
+        [ -e "$base/before/$d/python-pieces.tsv" ] || { echo "port-map: the Goose program kept no record of Python's pieces for $d"; exit 2; }
+    done
+    [ "$(wc -l <"$base/before/py-dep-same/python-pieces.tsv")" = 7 ] || { echo "port-map: the Goose program did not plan seven pieces for py-dep-same"; exit 2; }
+    sed -i 's/x + 1/x + 2/' "$r/py-dep-edit/p1/mod.py" "$r/py-dep-file/q/a.py"
+    rm "$r/py-dep-gone/p3/mod.py"
+    pyf "$r/py-dep-more/p5/mod.py" 40 'def f5(x):\n    return x + 1\n'; pyf "$r/py-dep-more/p5/__init__.py" 40 ''
+    pkg "$r/py-venv-more/.venv/lib/python3.9/site-packages" gamma 3.0
+    sed -i 's/3\.9\.18/3.9.19/' "$r/py-venv-newer/.venv/pyvenv.cfg"
 }
 
 # Everything of one Goose program and one set of made-up repos lives in one
 # folder, at the same path every run: the repos, the Goose program's home
 # and what it said of each case.
-key=$( { sha256sum <"$old"; declare -f make_repos make_before home_of home_as_installed | sha256sum; } | sha256sum | cut -c1-16)
+key=$( { sha256sum <"$old"; declare -f make_repos make_before home_of home_as_installed pkg pyf | sha256sum; } | sha256sum | cut -c1-16)
 base="$here/build/port-map/$key"
 mkdir -p "$base"
 # What an earlier Goose program or set of repos left is of no use.
@@ -683,7 +841,7 @@ work=$(mktemp -d "$here/build/port-map/run.XXXXXX")
 trap '[ -n "${PORT_MAP_KEEP:-}" ] || { chmod -R u+rwx "${work:?}"/c/*/maps 2>/dev/null; rm -rf "${work:?}"; }' EXIT
 r="$base/repos"
 # What a map must not be handed down from whoever runs this.
-UNSET=(-u SWAN_SPREAD_WINGS -u SWAN_TRUST_BUILD -u SWAN_SANDBOX -u SWAN_JOBS -u SWAN_TS_LAYER_MIN -u SWAN_SCIP_TYPESCRIPT_PATCH
+UNSET=(-u SWAN_SPREAD_WINGS -u SWAN_TRUST_BUILD -u SWAN_SANDBOX -u SWAN_JOBS -u SWAN_TS_LAYER_MIN -u SWAN_SCIP_TYPESCRIPT_PATCH -u SWAN_SCIP_PYTHON_PATCH
        -u SWAN_NODE_HEAP_MB -u SWAN_STAMP_JOBS -u SWAN_STAMP_MIN -u SWAN_STAMP_MODE -u JAVA_HOME -u VIRTUAL_ENV -u NODE_OPTIONS)
 # The indexer's file without Swan's patch and with it, as the Goose program makes them.
 if [ ! -e "$base/ts-indexer.patched" ]; then
@@ -694,6 +852,19 @@ if [ ! -e "$base/ts-indexer.patched" ]; then
     "$old" scip-typescript-patch "$base/tsi/FileIndexer.js" >/dev/null 2>&1
     cmp -s "$base/ts-indexer.plain" "$base/tsi/FileIndexer.js" && { echo "port-map: the Goose program does not patch $TSI/FileIndexer.js"; exit 2; }
     mv "$base/tsi/FileIndexer.js" "$base/ts-indexer.patched"
+fi
+# scip-python's two files without Swan's fixes and with them, the same way.
+if [ ! -e "$base/py-site.patched" ]; then
+    rm -rf "${base:?}/pyi"; mkdir -p "$base/pyi"
+    for f in pyright-internal.js scip-python.js; do
+        cp "$PYD/$f" "$base/pyi/$f"
+        "$old" scip-python-patch "$base/pyi/$f" --revert >/dev/null 2>&1
+        cp "$base/pyi/$f" "$base/pyi/$f.plain"
+        "$old" scip-python-patch "$base/pyi/$f" >/dev/null 2>&1
+        cmp -s "$base/pyi/$f.plain" "$base/pyi/$f" && { echo "port-map: the Goose program does not patch $PYD/$f"; exit 2; }
+    done
+    mv "$base/pyi/pyright-internal.js.plain" "$base/py-reach.plain"; mv "$base/pyi/pyright-internal.js" "$base/py-reach.patched"
+    mv "$base/pyi/scip-python.js.plain" "$base/py-site.plain"; mv "$base/pyi/scip-python.js" "$base/py-site.patched"
 fi
 if [ ! -e "$r/ready" ]; then
     rm -rf "${r:?}" "${base:?}/before" "${base:?}/said" "${base:?}/old"
@@ -713,34 +884,37 @@ cp bin/eggshell bin/spread-wings bin/swan-flatten "$work/programs/"; cp "$new" "
 # ---- running a case ----
 # What the carried part of a map writes into the map folder. A case of the
 # plain repo that starts from a folder with files in it (WATCH) also watches
-# three it removes or leaves, which no later part makes again for a repo
-# with no Python.
+# one it leaves, and a case may name more of its own (ALSO): indexes of
+# Python pieces no longer planned, which a map removes. A case may also
+# name what a later part writes over, which is then not compared (LATER):
+# the record of Python's pieces loses the pieces whose indexer failed.
 # The config of each of TypeScript's chunks and layers (tsproject-<n>/,
 # tsproject-layer-<id>/) is compared as well, wherever either program has one.
-WRITTEN="git-ignored.txt git-ignored-all.txt survey.json scip-started tsproject/tsconfig.json"
+WRITTEN="git-ignored.txt git-ignored-all.txt survey.json scip-started tsproject/tsconfig.json python-env.json py-standin/python3 py-standin/python py-standin/standin.py"
 # What it keeps to use again. A clean map holds these back until it ends.
-CACHED="tsc-files.txt tsc-program.txt tsc-projects.txt typescript-chunks.txt typescript-shared.txt typescript-files.tsv typescript-layers.txt"
+CACHED="tsc-files.txt tsc-program.txt tsc-projects.txt typescript-chunks.txt typescript-shared.txt typescript-files.tsv typescript-layers.txt python-files.tsv python-pieces.tsv"
 # The lines of the report the carried part writes: the Goose program's
 # report starts with these, and the Rust program's is these and no more.
 # Two are the ends of what a made-up program said over more than one line:
 # spread-wings inside "projects: not surveyed (...)", tsc inside
 # "typescript: the repo's tsconfig.json cannot be read (...)".
-OPENING='^(languages:|not mapped, git ignores |projects: |node: dependencies are not installed |map schema |clean rebuild: cached |line [0-9]+ of what went wrong|stamps: |cosmetic edits: [0-9]+ file.s. changed only |reindexing [0-9]+ file.s. whose indexed text is unknown|typescript: the repo.s tsconfig.json cannot be read |.*[)]; indexing with Swan.s own config$|scip-typescript: applied Swan.s stable names |scip-typescript: Swan.s stable names are not applied |typescript: [0-9]+ more tsconfig |scip-typescript( [0-9]+/[0-9]+)?: reused .no changes.$)'
+OPENING='^(languages:|not mapped, git ignores |projects: |node: dependencies are not installed |map schema |clean rebuild: cached |line [0-9]+ of what went wrong|stamps: |cosmetic edits: [0-9]+ file.s. changed only |reindexing [0-9]+ file.s. whose indexed text is unknown|typescript: the repo.s tsconfig.json cannot be read |.*[)]; indexing with Swan.s own config$|scip-typescript: applied Swan.s stable names |scip-typescript: Swan.s stable names are not applied |typescript: [0-9]+ more tsconfig |scip-typescript( [0-9]+/[0-9]+)?: reused .no changes.$|scip-python: applied Swan.s reachability memo |scip-python: Swan.s reachability memo does not fit |scip-python: a package in a virtualenv inside the repo is now named |scip-python: Swan.s fix for packages in a virtualenv inside the repo does not fit |python: [0-9]+ packages? read from the project.?.? own virtualenvs? |python: [0-9]+ pieces reused$)'
 # The steps the carried part runs and gives an account of on standard
 # error: the Goose program's standard error starts with these (each with
 # whatever its step said when it failed), and the Rust program's is these
 # and no more. A program that leaves a step out says less, and that is a
 # difference like any other.
-STEPS='^(mkdir|tsc --listFilesOnly|tsc --showConfig): '
-WATCHED="python-files.tsv python-pieces.tsv other.txt"
+STEPS='^(mkdir|tsc --listFilesOnly|tsc --showConfig|python packages [(]read from the virtualenv[)]|python packages [(]importlib[.]metadata[)]): '
+WATCHED="other.txt"
 PAR=${PORT_MAP_JOBS:-8}
 total=0
 tidy() { sed -E -e 's/ in [0-9]+ ms$//' -e 's/^(.*): [0-9]+ ms$/\1: N ms/' -e 's/^(.*): exit (-?[0-9]+) after [0-9]+ ms$/\1: exit \2 after N ms/' -e "s|$2|<its folder>|g" -e 's/^goose runtime error: //' -e '$s/ \([^()]*\.goose:[0-9]+\)$//' "$1"; }
 # The prep_ and home_ functions there are so far: the Goose program maps a
 # case again when one of them changes.
-# A copy of a map the Goose program made, with its record of where its
-# indexes are (index-manifest.tsv) moved with it, as if made where it is.
-prep_copy() { cp -r "$1" "$2"; [ ! -f "$2/index-manifest.tsv" ] || sed -i "s|$1/|$2/|g" "$2/index-manifest.tsv"; }
+# A copy of a map the Goose program made, with its records of where its
+# indexes are (index-manifest.tsv, python-pieces.tsv) moved with it, as if
+# made where it is.
+prep_copy() { local f; cp -r "$1" "$2"; for f in index-manifest.tsv python-pieces.tsv; do [ ! -f "$2/$f" ] || sed -i "s|$1/|$2/|g" "$2/$f"; done; }
 preps() { declare -f $(compgen -A function | grep -E '^(prep_|home_|mtime_ns$)') | sha256sum | cut -c1-16; }
 # case_of <name> <repo> [--clean] [NAME=value...]: both programs map the
 # repo into maps/<name> of their own folder. PREP names a function that
@@ -799,16 +973,20 @@ case_of() {
         fi
         if [ -z "$why" ] && [ "$code" = 70 ]; then
             configs=$(for d in "$n" "$o"; do (cd "$d" 2>/dev/null && ls -d tsproject-*/tsconfig.json 2>/dev/null); done | sort -u | tr '\n' ' ')
-            for f in $WRITTEN $configs ${WATCH:+$WATCHED} $([ ${#clean[@]} = 0 ] && echo "$CACHED"); do
+            for f in $WRITTEN $configs ${WATCH:+$WATCHED} ${ALSO:-} $([ ${#clean[@]} = 0 ] && echo "$CACHED"); do
+                case " ${LATER:-} " in *" $f "*) continue ;; esac
                 if { [ -e "$n/$f" ] && [ ! -e "$o/$f" ]; } || { [ ! -e "$n/$f" ] && [ -e "$o/$f" ]; }; then
                     why="the map folder's $f is there for one program only"; break
                 fi
+                [ -d "$n/$f" ] && continue
                 # With Swan's own config for TypeScript, which is in the map
                 # folder, the fingerprint of what the chunks share takes in
                 # that folder's path, and each program has its own.
                 [ "$f" = typescript-shared.txt ] && [ -e "$o/tsproject/tsconfig.json" ] && continue
                 # The same bytes, each program's own folder apart.
                 if [ -e "$n/$f" ] && ! cmp -s <(sed "s|$w|<its folder>|g" "$n/$f") <(sed "s|$base/old|<its folder>|g" "$o/$f"); then why="the map folder's $f differs"; break; fi
+                # And, for the stand-in a map makes runnable, whether it can be run.
+                case "$f" in py-standin/*) [ ! -e "$n/$f" ] || [ "$(stat -c %a "$n/$f")" = "$(stat -c %a "$o/$f")" ] || { why="the map folder's $f is not runnable as the Goose program's is"; break; } ;; esac
             done
             # A clean map holds back what it keeps until its rows are published.
             if [ -z "$why" ] && [ ${#clean[@]} != 0 ]; then
@@ -837,7 +1015,7 @@ case_of() {
             fi
         fi
         if [ -z "$why" ] && ! home_state "$w/home" | cmp -s - "$kept/home"; then
-            why="the indexer in its home is not left as the Goose program leaves it (Goose: $(tr '\n' ' ' <"$kept/home" | cut -c1-12,65-90); Rust: $(home_state "$w/home" | tr '\n' ' ' | cut -c1-12,65-90))"
+            why="an indexer in its home is not left as the Goose program leaves it: $(home_state "$w/home" | diff "$kept/home" - | grep '^[<>]' | cut -c1-60 | tr '\n' ' ')"
         fi
         if [ -n "$why" ]; then
             echo "DIFFERENT ($name)"; echo "    $why"
@@ -1221,6 +1399,114 @@ prep_edit_layers_over() { prep_edit "$1"; prep_layers "$1" 0 src/d.ts,src/e.ts,s
 for p in shared no_db no_table no_stamps user_too layers layers_five layers_six layers_quarter layers_over; do PREP=prep_edit_$p case_of "ch-edit-${p//_/-}" "$r/ts-ch-edit" SWAN_JOBS=2; done
 prep_lone_shared() { prep_lone "$1"; printf '1' >"$1/typescript-shared.txt"; }
 PREP=prep_lone_shared case_of ch-lone-shared "$r/ts-ch-lone" SWAN_JOBS=2
+# ---- Python: scip-python's two fixes, as a map finds them in its home ----
+home_py_gone() { rm -f "$1/$PYD/pyright-internal.js" "$1/$PYD/scip-python.js" "$1/$PYD/.swan-reach-patch" "$1/$PYD/.swan-site-patch"; }
+home_py_plain() { home_py_gone "$1"; cp "$base/py-reach.plain" "$1/$PYD/pyright-internal.js"; cp "$base/py-site.plain" "$1/$PYD/scip-python.js"; }
+home_py_plain_marked() { home_py_plain "$1"; printf '%s' "$(stat -c %s "$base/py-reach.plain")" >"$1/$PYD/.swan-reach-patch"; printf '%s' "$(stat -c %s "$base/py-site.plain")" >"$1/$PYD/.swan-site-patch"; }
+home_py_unmarked() { rm -f "$1/$PYD/.swan-reach-patch" "$1/$PYD/.swan-site-patch"; }
+# home_py_marks <format> <home>: what the marks say of each file's size.
+home_py_marks() { home_py_unmarked "$2"; printf "$1" "$(stat -c %s "$base/py-reach.patched")" >"$2/$PYD/.swan-reach-patch"; printf "$1" "$(stat -c %s "$base/py-site.patched")" >"$2/$PYD/.swan-site-patch"; }
+home_py_reach_plain() { rm -f "$1/$PYD/pyright-internal.js" "$1/$PYD/.swan-reach-patch"; cp "$base/py-reach.plain" "$1/$PYD/pyright-internal.js"; }
+home_py_site_plain() { rm -f "$1/$PYD/scip-python.js" "$1/$PYD/.swan-site-patch"; cp "$base/py-site.plain" "$1/$PYD/scip-python.js"; }
+home_py_empty() { home_py_gone "$1"; : >"$1/$PYD/pyright-internal.js"; : >"$1/$PYD/scip-python.js"; }
+home_py_other() { home_py_gone "$1"; printf 'no bundle of pyright\n' >"$1/$PYD/pyright-internal.js"; printf 'no scip-python\n' >"$1/$PYD/scip-python.js"; }
+PYR="$r/py-src-not"
+HOME_PREP=home_py_plain case_of py-home-plain "$PYR"
+HOME_PREP=home_py_plain case_of py-home-plain-off "$PYR" SWAN_SCIP_PYTHON_PATCH=0
+HOME_PREP=home_py_plain case_of py-home-plain-on "$PYR" SWAN_SCIP_PYTHON_PATCH=1
+HOME_PREP=home_py_plain case_of py-home-plain-00 "$PYR" SWAN_SCIP_PYTHON_PATCH=00
+HOME_PREP=home_py_plain case_of py-home-plain-no-word "$PYR" SWAN_SCIP_PYTHON_PATCH=
+HOME_PREP=home_py_plain_marked case_of py-home-plain-marked "$PYR"
+HOME_PREP=home_py_unmarked case_of py-home-unmarked "$PYR"
+HOME_PREP=home_py_unmarked case_of py-home-unmarked-off "$PYR" SWAN_SCIP_PYTHON_PATCH=0
+HOME_PREP='home_py_marks %s1' case_of py-home-other-size "$PYR"
+HOME_PREP='home_py_marks \n%s\n' case_of py-home-mark-lines "$PYR"
+HOME_PREP='home_py_marks x%s' case_of py-home-mark-word "$PYR"
+HOME_PREP=home_py_reach_plain case_of py-home-reach-plain "$PYR"
+HOME_PREP=home_py_site_plain case_of py-home-site-plain "$PYR"
+# Without its two files scip-python fails, and where the indexers' runs are
+# read (a later part) the Goose program takes the failed piece out of the record.
+LATER=python-pieces.tsv HOME_PREP=home_py_gone case_of py-home-gone "$PYR"
+LATER=python-pieces.tsv HOME_PREP=home_py_empty case_of py-home-empty "$PYR"
+LATER=python-pieces.tsv HOME_PREP=home_py_other case_of py-home-other "$PYR"
+HOME_PREP=home_py_plain case_of py-home-no-python "$r/plain"
+# ---- Python: a virtualenv that is read, and one that is run ----
+case_of py-venv "$r/py-venv"
+case_of py-venv-trusted "$r/py-venv" SWAN_TRUST_BUILD=1
+case_of py-venv-unsealed "$r/py-venv" SWAN_SANDBOX=0
+case_of py-venv-clean "$r/py-venv" --clean
+case_of py-venv-one "$r/py-venv-one"
+case_of py-venv-nover "$r/py-venv-nover"
+case_of py-venv-libs "$r/py-venv-libs"
+case_of py-venv-both "$r/py-venv-both"
+case_of py-venv-both-trusted "$r/py-venv-both" SWAN_TRUST_BUILD=1
+case_of py-run "$r/py-run" SWAN_TRUST_BUILD=1
+case_of py-run-untrusted "$r/py-run"
+LISTED="$r/py-run" case_of py-run-listed "$r/py-run"
+case_of py-run-nopip "$r/py-run-nopip" SWAN_TRUST_BUILD=1
+case_of py-run-broken "$r/py-run-broken" SWAN_TRUST_BUILD=1
+# ---- Python: the survey's virtualenvs ----
+case_of py-envs "$r/py-envs" "SWAN_SPREAD_WINGS=$r/sw/py-envs"
+case_of py-envs-late "$r/py-envs-late" "SWAN_SPREAD_WINGS=$r/sw/py-envs"
+case_of py-envs-nover "$r/py-envs-late" "SWAN_SPREAD_WINGS=$r/sw/py-envs-nover"
+case_of py-envs-sub "$r/py-envs-sub" "SWAN_SPREAD_WINGS=$r/sw/py-envs-sub"
+case_of py-envs-inner "$r/py-envs-sub" "SWAN_SPREAD_WINGS=$r/sw/py-envs-inner"
+case_of py-envs-ghost "$r/py-envs-sub" "SWAN_SPREAD_WINGS=$r/sw/py-envs-ghost"
+case_of py-envs-not-surveyed "$r/py-envs" "SWAN_SPREAD_WINGS=$r/sw/not-there"
+case_of py-envs-trusted "$r/py-envs" "SWAN_SPREAD_WINGS=$r/sw/py-envs" SWAN_TRUST_BUILD=1
+case_of py-envs-real-survey "$r/py-envs"
+# ---- Python: a src layout ----
+case_of py-src "$r/py-src"
+case_of py-src-mod "$r/py-src-mod"
+case_of py-src-not "$r/py-src-not"
+case_of py-src-file "$r/py-src-file"
+# ---- Python: the pieces, and which of their indexes are kept ----
+case_of py-dep "$r/py-dep" SWAN_JOBS=6
+case_of py-dep-one-job "$r/py-dep" SWAN_JOBS=1
+case_of py-dep-two-jobs "$r/py-dep" SWAN_JOBS=2
+case_of py-dep-nine-jobs "$r/py-dep" SWAN_JOBS=9
+prep_dep() { prep_copy "$base/before/py-dep-same" "$1"; }
+# The index a piece's line names; and a file's stamp in the record, made another.
+prep_dep_index() { awk -F'\t' -v p="$2" '$1 == p { print $3 }' "$1/python-pieces.tsv"; }
+prep_dep_set_stamp() { sed -i -E "s|^($2)\t.*|\1\t7|" "$1/python-files.tsv"; }
+prep_dep_no_index() { prep_dep "$1"; rm "$(prep_dep_index "$1" p3)"; }
+prep_dep_other_fp() { prep_dep "$1"; sed -i -E '/^p3\t/s/\t[^\t]+\t/\t1-n2\t/' "$1/python-pieces.tsv"; }
+prep_dep_old_names() { prep_dep "$1"; sed -i -E '/^p3\t/s/-n2\t/\t/' "$1/python-pieces.tsv"; }
+prep_dep_four_fields() { prep_dep "$1"; sed -i -E '/^p3\t/s/$/\tmore/' "$1/python-pieces.tsv"; }
+prep_dep_two_fields() { prep_dep "$1"; sed -i -E '/^p3\t/s/\t[^\t]+$//' "$1/python-pieces.tsv"; }
+prep_dep_other_target() { prep_dep "$1"; sed -i -E "/^p3\t/s|\t[^\t]+$|\t$1/swan.db|" "$1/python-pieces.tsv"; }
+prep_dep_other_piece() { prep_dep "$1"; sed -i -E 's/^p3\t/p33\t/' "$1/python-pieces.tsv"; }
+prep_dep_no_pieces() { prep_dep "$1"; rm "$1/python-pieces.tsv"; }
+prep_dep_stamp_p10() { prep_dep "$1"; prep_dep_set_stamp "$1" 'p10/mod\.py'; }
+prep_dep_stamp_used() { prep_dep "$1"; prep_dep_set_stamp "$1" 'p1/mod\.py'; }
+prep_dep_stamp_file() { prep_dep "$1"; prep_dep_set_stamp "$1" 'q/a\.py'; }
+prep_dep_stamps_gone() { prep_dep "$1"; printf 'p3/zz.py\t5\nno tab here\np4\t9\n' >>"$1/python-files.tsv"; }
+prep_dep_no_stamps() { prep_dep "$1"; : >"$1/python-files.tsv"; }
+prep_dep_stamps_missing() { prep_dep "$1"; rm "$1/python-files.tsv"; }
+prep_dep_unknown() { prep_dep "$1"; sed -i -E 's/^(p4\/mod\.py)\t[^\t]+\t/\1\t?\t/' "$1/indexed-texts.tsv"; }
+prep_dep_stale() { prep_dep "$1"; for f in index-python-1.scip index-python-notes.txt index-pythonx.txt; do printf 'old\n' >"$1/$f"; done; mkdir "$1/index-python-folder"; }
+prep_dep_edit_no_db() { prep_copy "$base/before/py-dep-edit" "$1"; rm "$1/swan.db"; }
+prep_venv_same() { prep_copy "$base/before/py-venv-same" "$1"; }
+prep_py_many_stamp() { prep_py_many "$1"; sed -i -E 's/^(pkg\/m100\.py)\t.*/\1\t7/' "$1/python-files.tsv"; }
+STALE="index-python-1.scip index-python-notes.txt index-pythonx.txt index-python-folder"
+PREP=prep_dep case_of py-dep-again "$r/py-dep-same" SWAN_JOBS=6
+PREP=prep_dep case_of py-dep-again-clean "$r/py-dep-same" --clean SWAN_JOBS=6
+ALSO="$(cd "$base/before/py-dep-same" && ls index-python-*.scip | tr '\n' ' ')" PREP=prep_dep case_of py-dep-again-one-job "$r/py-dep-same" SWAN_JOBS=1
+for p in no_index other_fp old_names four_fields two_fields other_target other_piece no_pieces stamp_p10 stamp_used stamp_file stamps_gone no_stamps stamps_missing unknown; do
+    PREP=prep_dep_$p case_of "py-dep-$(printf '%s' "$p" | tr _ -)" "$r/py-dep-same" SWAN_JOBS=6
+done
+ALSO=$STALE PREP=prep_dep_stale case_of py-dep-stale "$r/py-dep-same" SWAN_JOBS=6
+ALSO=$STALE PREP=prep_dep_stale case_of py-dep-stale-clean "$r/py-dep-same" --clean SWAN_JOBS=6
+PREP=prep_before case_of py-dep-edit "$r/py-dep-edit" SWAN_JOBS=6
+PREP=prep_before case_of py-dep-file "$r/py-dep-file" SWAN_JOBS=6
+ALSO="$(cd "$base/before/py-dep-gone" && ls index-python-*.scip | tr '\n' ' ')" PREP=prep_before case_of py-dep-gone "$r/py-dep-gone" SWAN_JOBS=6
+PREP=prep_before case_of py-dep-more "$r/py-dep-more" SWAN_JOBS=6
+PREP=prep_dep_edit_no_db case_of py-dep-edit-no-db "$r/py-dep-edit" SWAN_JOBS=6
+PREP=prep_before case_of py-venv-same "$r/py-venv-same"
+PREP=prep_before case_of py-venv-more "$r/py-venv-more"
+PREP=prep_before case_of py-venv-newer "$r/py-venv-newer"
+PREP=prep_venv_same case_of py-venv-same-trusted "$r/py-venv-same" SWAN_TRUST_BUILD=1
+DEPENDS=py-many PREP=prep_py_many_stamp case_of py-many-stamp "$r/py-many"
 # ---- fixtures ----
 for f in tiny-ts tiny-py tiny-go tiny-rs tiny-java tiny-lua tiny-game go-modules; do
     [ -d "fixtures/$f" ] && case_of "fixture-$f" "$here/fixtures/$f"

@@ -20,6 +20,17 @@ fn is_alnum(c: u8) -> bool {
 }
 
 // The first word of `m`: letters, digits and '_'.
+// What scip-python is told for a piece: a prefix piece ("dir/ab*": every
+// path starting with dir/ab) loses its star; a folder or file piece is its
+// own path.
+pub fn piece_target(piece: &[u8]) -> &[u8] {
+    if !piece.is_empty() && piece[piece.len() - 1] == b'*' {
+        &piece[..piece.len() - 1]
+    } else {
+        piece
+    }
+}
+
 fn first_word(m: &[u8]) -> &[u8] {
     let mut e = 0;
     while e < m.len() && (is_alnum(m[e]) || m[e] == b'_') {

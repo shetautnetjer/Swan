@@ -2361,3 +2361,75 @@ Limits:
   twice the cores. No step ran past its deadline: the unbroken program
   passed in all six parts under that load.
 - The suite was not run for this piece: no Goose source changed.
+
+## 2026-11-22T18:18Z: stage 4: Python's pieces in the Rust map (no breaks written for them yet)
+
+The Rust map is carried to the end of Python (src/pipeline.goose line
+1920), planned and not run. It then stops with exit 70 as before.
+
+What the part does, now the same in both programs: scip-python's two fixes
+are made sure of in Swan's own copy, each with its mark and its line in the
+report; a virtualenv of a repo that is not trusted is read and not run (the
+one at the top, then the ones the survey names), its packages listed from
+its site-packages folders through a stand-in interpreter written into the
+map folder; a trusted repo's virtualenv is run as before, pip asked for, and
+Python's own list taken when there is no pip; a src layout goes on the
+search path; the pieces are planned, and each keeps its index while its
+files, the search path, the packages and the Python are what they were and
+no file in it uses what a changed file defines; indexes of pieces no longer
+planned are removed.
+
+| Judge | Result |
+|---|---|
+| `port-map.sh` | 395 of 395 the same in the carried part: the 317 of before, and 78 new |
+| The new cases, first run | 59 of 78 the same. The 19 that differed were three faults of the judge (below), none of the Rust program |
+| `port-prove-map.py` | No breaks for this part yet. 370 of 370 of the earlier ones fit the source (`--fit`), two of them anchored again because their text is now in two places or changed |
+| Others | `cargo test` 9 and 2 passed, `port-patch.sh` 105 of 105, `port-plan.sh` 443 of 443 |
+
+The 78 new cases: scip-python's files in the home plain, patched, marked
+with another size, marked with line ends around the size, gone, empty and
+holding something else, with the switch off, on and set to other words (17);
+a virtualenv read, under each name, with two Pythons under lib, with no
+Python named, run once trusted with a made-up python that has pip, has none
+or answers nothing (14); the survey's virtualenvs from a made-up
+spread-wings, one named twice, one in a folder git ignores, one whose name
+ends another's, one that is not there (9); a src layout four ways (4); and
+the pieces (34): a repo of five folder pieces and two file pieces mapped
+again unchanged, clean, with one job, with an index gone, a record altered
+seven ways, a stamp altered for a file nobody uses, for one another piece
+uses and for a file that is a piece itself, a file whose indexed text is
+unknown, stale index files, a file changed that another piece uses (5 of 7
+kept: its piece and its user's), a file gone, a folder more, a package more
+in the virtualenv, another Python named there.
+
+What the judge learned:
+- A copy of a map now moves its record of Python's pieces with it
+  (`python-pieces.tsv` holds whole paths, as `index-manifest.tsv` does).
+  Before, a second map kept pieces by finding the first map's files where
+  they were made.
+- A made-up home now has scip-python's two patched files and their marks as
+  its own, and how they are left is compared after every case.
+- Two things a later part of the Goose program does to what this part
+  writes: where the indexers' runs are read, a piece whose run failed is
+  taken out of the record (three cases name the record as a later part's,
+  `LATER`); and at the end every `index-*.scip` no job names is removed (so
+  the file watched to show that only `index-python-` names go is not a
+  `.scip`).
+- The three faults: a pattern for the report's line that took "projects'"
+  and not "project's" (14 cases), and the two above (5 cases).
+
+Limits:
+- A map is still not made by the Rust program.
+- The prover has no breaks for this part, so its 78 cases are not yet shown
+  to catch what they were made for (AGENTS.md rule 4). The owner asked on
+  2026-11-22 why the prover is used at all; he was told what it is for and
+  what it costs (an hour a run now), and asked whether it should run after
+  every part or once at the end of the stage. No answer yet.
+- What each Python job is to run and with what is worked out and not
+  judged: the jobs are first run in a part still to be carried.
+- This machine's python3 has no pip, so the branch where pip answers is
+  shown only by a made-up python in a trusted made-up repo.
+- `python-env.json` from Python's own list holds the machine's packages.
+  The Goose program's kept answers go stale when those change: remove
+  `build/port-map/` then.
+- The suite was not run for this piece: no Goose source changed.

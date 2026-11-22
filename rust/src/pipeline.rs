@@ -1,10 +1,11 @@
 // The map: what `swan map` runs, in what order, and what it keeps.
 //
-// Carried over from src/pipeline.goose so far: `swan trust`, and the head of
-// `swan map` (what git ignores, what the repo holds, its survey, an older
-// or a clean map). The walk at the head of that file is in walk.rs. A map
-// stops where the carrying has got to, with what it would have said so far
-// and exit 70.
+// Carried over from src/pipeline.goose so far: `swan trust`, and `swan map`
+// to the end of Python (what git ignores, what the repo holds, its survey,
+// an older or a clean map, the content stamps, TypeScript's chunks and
+// layers, Python's pieces), planned and not run. The walk at the head of
+// that file is in walk.rs. A map stops where the carrying has got to, with
+// what it would have said so far and exit 70.
 
 use std::collections::{HashMap, HashSet};
 
@@ -12,17 +13,18 @@ use crate::change::{code_hash, cosmetic_lang, index_lines, line_of_path};
 use crate::db::Db;
 use crate::gsort::goose_sort;
 use crate::index::SCHEMA_VERSION;
-use crate::pyplan::plan_python;
+use crate::pypatch::{ensure_scip_python_patch, ensure_scip_python_site_patch, pypatch_count};
+use crate::pyplan::{piece_target, plan_python};
 use crate::query::meta_value;
 use crate::run::{run_step, swan_home};
 use crate::seal::{sealed_run, sealed_step};
 use crate::stamp::prestamp;
-use crate::survey::{survey_ignored, survey_report, survey_run};
+use crate::survey::{survey_ignored, survey_python_envs, survey_report, survey_run};
 use crate::sys;
 use crate::treesitter;
 use crate::tspatch::ensure_scip_typescript_patch;
 use crate::tsproj::ts_other_projects;
-use crate::util::{contains_line, die, ends_with, find, hash, hash_combine, json_string, parse_int, print, push_int, split, starts_with, trim, Dict};
+use crate::util::{contains_line, die, ends_with, find, hash, hash_combine, json_string, parse_int, print, push_int, rfind, split, starts_with, trim, Dict};
 use crate::walk::Walk;
 
 // What a repo holds, found by walking it.
@@ -505,6 +507,152 @@ WHERE s.def_file = ?1 AND o.file != ?1 AND o.is_def = 0",
     dirty
 }
 
+fn python_of(l: &Langs) -> Vec<u8> {
+    if !l.venv.is_empty() {
+        [&l.venv[..], b"/bin/python"].concat()
+    } else {
+        b"python3".to_vec()
+    }
+}
+
+// The repo's src folder when it holds Python packages or modules (the "src
+// layout"), as a PYTHONPATH value; empty otherwise.
+fn python_src_roots(repo: &[u8]) -> Vec<u8> {
+    let src = [repo, b"/src"].concat();
+    let mut found = false;
+    if let Some(names) = sys::list_dir(&src) {
+        for nm in names {
+            if !nm.is_empty() && (ends_with(&nm, b".py") || sys::file_exists(&[&src[..], b"/", &nm[..], b"/__init__.py"].concat())) {
+                found = true;
+            }
+        }
+    }
+    if found {
+        src
+    } else {
+        Vec::new()
+    }
+}
+
+// scip-python asks pip which packages are installed, to name outside symbols
+// by package and version. Without pip the same list comes from Python's own
+// importlib.metadata, written where --environment can read it.
+#[rustfmt::skip]
+const PY_ENV_SNIPPET: &[u8] = b"import json, importlib.metadata as m\nseen = set()\nout = []\nfor d in m.distributions():\n    n = d.metadata['Name']\n    if not n or n.lower() in seen: continue\n    seen.add(n.lower())\n    out.append({'name': n, 'version': d.version, 'files': [str(f) for f in (d.files or []) if str(f).endswith(('.py', '.pyi'))]})\nprint(json.dumps(out))\n";
+
+// The same list for virtualenvs that are read and not run: each argument is
+// a site-packages folder, and importlib.metadata reads the *.dist-info
+// folders there (METADATA and RECORD). No package is imported.
+#[rustfmt::skip]
+const PY_VENV_SNIPPET: &[u8] = b"import json, sys, importlib.metadata as m\nseen = set()\nout = []\nfor d in m.distributions(path=sys.argv[1:]):\n    n = d.metadata['Name']\n    if not n or n.lower() in seen: continue\n    seen.add(n.lower())\n    out.append({'name': n, 'version': d.version, 'files': [str(f) for f in (d.files or []) if str(f).endswith(('.py', '.pyi'))]})\nprint(json.dumps(out))\n";
+
+// A stand-in for the Python interpreter, first on PATH for scip-python when
+// a project's own virtualenv is used. scip-python's pyright asks `python3
+// -c <script>` two things: where packages are (sys.path) and which Python
+// this is (sys.version_info). The virtualenv's own interpreter is the
+// repo's to run, not Swan's, and inside the seal it is usually not even
+// there (bin/python is a link out of the repo). The stand-in runs the
+// script in the machine's python3 with those two answers set from the
+// virtualenv: $SWAN_PY_SITE, its site-packages folders, and
+// $SWAN_PY_VERSION, the Python its pyvenv.cfg names. So the packages the
+// project installed are found and nothing in the virtualenv is run.
+// $PYTHONPATH is passed on as python3 itself would (Swan sets it for src
+// layouts). scip-python 0.6.8 asks only the first question; the version
+// reaches it through Swan's fix in src/pypatch.rs. The texts are the Goose
+// program's, its file's name included.
+#[rustfmt::skip]
+const PY_STANDIN_SH: &[u8] = b"#!/bin/sh\n# Swan's stand-in for python3 (src/pipeline.goose): the next python3 on PATH runs standin.py.\n# PATH goes on without this folder: a version manager's shim looks python3 up again.\nself=${SWAN_PY_STANDIN:-$(dirname \"$0\")}\nrest=\nIFS=:\nfor d in $PATH; do\n    [ \"$d\" = \"$self\" ] || rest=${rest:+$rest:}$d\ndone\nPATH=$rest\nexec python3 -I \"$self/standin.py\" \"$@\"\n";
+#[rustfmt::skip]
+const PY_STANDIN_PY: &[u8] = b"# Swan's stand-in for the Python interpreter (src/pipeline.goose).\n# Runs the script it is given with sys.path and sys.version_info set from a\n# virtualenv that is read and not run. Answers nothing but `-c <script>`.\nimport os, sys\nargs = sys.argv[1:]\nwhile args and args[0].startswith('-') and args[0] not in ('-c', '-m'):\n    args.pop(0)\nif len(args) < 2 or args[0] != '-c':\n    sys.exit(2)\nfolders = lambda name: [p for p in os.environ.get(name, '').split(os.pathsep) if p]\nown = [p for p in sys.path if p and 'site-packages' not in p and 'dist-packages' not in p]\nsys.path[:] = folders('PYTHONPATH') + own + folders('SWAN_PY_SITE')\nn = [int(x) for x in os.environ.get('SWAN_PY_VERSION', '').split('.')[:3] if x.isdigit()]\nif len(n) >= 2:\n    sys.version_info = (n[0], n[1], n[2] if len(n) > 2 else 0, 'final', 0)\nsys.argv = ['-c'] + args[2:]\nexec(compile(args[1], '<string>', 'exec'), {'__name__': '__main__'})\n";
+
+// Writes text to path, unless the file already holds it.
+fn write_unless_same(path: &[u8], text: &[u8]) {
+    let mut have: Vec<u8> = Vec::new();
+    if !sys::read_file(path, &mut have) || have != text {
+        sys::write_file(path, text);
+    }
+}
+
+// Writes the stand-in into <out>/py-standin (python3, python, standin.py)
+// and returns that folder, or "" when it could not be made runnable.
+fn py_standin_dir(out: &[u8]) -> Vec<u8> {
+    let d = [out, b"/py-standin"].concat();
+    sys::make_dir(&d);
+    let python3 = [&d[..], b"/python3"].concat();
+    let python = [&d[..], b"/python"].concat();
+    write_unless_same(&python3, PY_STANDIN_SH);
+    write_unless_same(&python, PY_STANDIN_SH);
+    write_unless_same(&[&d[..], b"/standin.py"].concat(), PY_STANDIN_PY);
+    let mut o: Vec<u8> = Vec::new();
+    let mut e: Vec<u8> = Vec::new();
+    if sys::run(&[b"chmod", b"755", &python3, &python], &d, &[], 10000, &mut o, &mut e) == 0 {
+        d
+    } else {
+        Vec::new()
+    }
+}
+
+// The Python a virtualenv was made with, as its pyvenv.cfg says ("version"
+// or "version_info"); "" when it says neither.
+fn pyvenv_version(venv: &[u8]) -> Vec<u8> {
+    let mut v: Vec<u8> = Vec::new();
+    let mut cfg: Vec<u8> = Vec::new();
+    if !sys::read_file(&[venv, b"/pyvenv.cfg"].concat(), &mut cfg) {
+        return v;
+    }
+    for l in cfg.split(|&c| c == b'\n') {
+        let eq = find(l, b"=");
+        if v.is_empty() && eq > 0 {
+            let key = trim(&l[..eq as usize]);
+            if key == b"version" || key == b"version_info" {
+                v.extend_from_slice(trim(&l[eq as usize + 1..]));
+            }
+        }
+    }
+    v
+}
+
+// The site-packages folders of a virtualenv (<venv>/lib/python*/site-packages),
+// appended to dirs with ':' between.
+fn py_site_dirs(venv: &[u8], dirs: &mut Vec<u8>) {
+    let Some(names) = sys::list_dir(&[venv, b"/lib"].concat()) else {
+        return;
+    };
+    for nm in names {
+        let d = [venv, b"/lib/", &nm[..], b"/site-packages"].concat();
+        if starts_with(&nm, b"python") && sys::is_dir(&d) {
+            if !dirs.is_empty() {
+                dirs.push(b':');
+            }
+            dirs.extend_from_slice(&d);
+        }
+    }
+}
+
+fn in_piece(path: &[u8], piece: &[u8]) -> bool {
+    // A prefix piece ("dir/ab*") holds every path that starts with dir/ab.
+    if !piece.is_empty() && piece[piece.len() - 1] == b'*' {
+        return starts_with(path, &piece[..piece.len() - 1]);
+    }
+    piece.is_empty() || path == piece || (starts_with(path, piece) && path.len() > piece.len() && path[piece.len()] == b'/')
+}
+
+// A piece's fingerprint: the stamps of the files in it.
+fn piece_fingerprint(stamps: &[u8], piece: &[u8]) -> u64 {
+    let mut h: u64 = 0;
+    for line in stamps.split(|&c| c == b'\n') {
+        let tab = find(line, b"\t");
+        if tab > 0 && in_piece(&line[..tab as usize], piece) {
+            h = hash_combine(h, hash(line));
+        }
+    }
+    h
+}
+
+fn piece_has(files: &[u8], piece: &[u8]) -> bool {
+    files.split(|&c| c == b'\n').any(|f| !f.is_empty() && in_piece(f, piece))
+}
+
 /// One indexer run of a map, or an index kept from the last map (no label
 /// and nothing to run).
 #[allow(dead_code)] // read where the jobs are run, still to be carried
@@ -824,8 +972,9 @@ fn map_main_locked(repo: &[u8], out: &[u8], report: &mut Vec<u8>, clean: bool) -
     // A virtualenv inside the repo is the repo's own code (its python, its pip, its PATH):
     // run it only once the repo is trusted, like any other build-running step.
     // Until then it is read and not run (the Python step below).
+    let mut venv_read: Vec<u8> = Vec::new();
     if !trusted {
-        l.venv.clear();
+        venv_read = std::mem::take(&mut l.venv);
     }
     // The projects the repo holds (src/survey.rs): read by Spread-Wings,
     // nothing of the repo run.
@@ -1622,6 +1771,224 @@ fn map_main_locked(repo: &[u8], out: &[u8], report: &mut Vec<u8>, clean: bool) -
                     jobs.add_lang(report, &label, &t, ca, child_env(&l, &[], b""), fp, false, b"", false);
                 }
                 n += 1;
+            }
+        }
+    }
+
+    if l.py {
+        // Swan's copy of scip-python gets its reachability memo first
+        // (src/pypatch.rs): without it one long script of try/except
+        // blocks can hold a map for minutes.
+        let dist = [&home[..], b"/tools/node_modules/@sourcegraph/scip-python/dist"].concat();
+        ensure_scip_python_patch(&home, sys::file_size(&[&dist[..], b"/pyright-internal.js"].concat()), report);
+        ensure_scip_python_site_patch(&home, sys::file_size(&[&dist[..], b"/scip-python.js"].concat()), report);
+        let python = python_of(&l);
+        let mut env_args: Vec<Vec<u8>> = Vec::new();
+        // The Python projects' own virtualenvs, where the survey found them
+        // (not only at the top of the repo): read, not run. Their packages
+        // are listed from their dist-info folders and found through a
+        // stand-in interpreter (PY_STANDIN_SH), so this needs no trust. A
+        // virtualenv at the top of a trusted repo is run as before (l.venv).
+        let mut py_site: Vec<u8> = Vec::new(); // site-packages folders, ':' between
+        let mut py_version: Vec<u8> = Vec::new(); // the first virtualenv's Python
+        let mut py_venvs: Vec<u8> = Vec::new(); // the virtualenvs read, for the report
+        let mut py_standin: Vec<u8> = Vec::new();
+        let mut py_listing: Vec<u8> = Vec::new();
+        if l.venv.is_empty() {
+            // The one at the top that detect() found (a repo of scripts has
+            // no manifest, so the survey names no project there), then the
+            // survey's: "<virtualenv, relative to the repo>\t<its Python>".
+            let mut found: Vec<u8> = Vec::new();
+            if venv_read.len() > repo.len() + 1 {
+                found.extend_from_slice(&[&venv_read[repo.len() + 1..], b"\t", &pyvenv_version(&venv_read)[..], b"\n"].concat());
+            }
+            let surveyed = survey_python_envs(&survey, &survey_skip);
+            for line in surveyed.split(|&c| c == b'\n') {
+                let f = split(line, b'\t');
+                if f.len() == 3 && find(&found, &[f[1], b"\t"].concat()) != 0 && find(&found, &[b"\n", f[1], b"\t"].concat()) < 0 {
+                    found.extend_from_slice(&[f[1], b"\t", f[2], b"\n"].concat());
+                }
+            }
+            for line in found.split(|&c| c == b'\n') {
+                let f = split(line, b'\t');
+                if f.len() == 2 {
+                    let had = py_site.len();
+                    py_site_dirs(&[repo, b"/", f[0]].concat(), &mut py_site);
+                    if py_site.len() > had {
+                        if !py_venvs.is_empty() {
+                            py_venvs.extend_from_slice(b", ");
+                        }
+                        py_venvs.extend_from_slice(f[0]);
+                        if py_version.is_empty() {
+                            py_version.extend_from_slice(f[1]);
+                        }
+                    }
+                }
+            }
+        }
+        if !py_site.is_empty() {
+            py_standin = py_standin_dir(out);
+        }
+        // Otherwise, as before: is there a pip to ask? Sealed: run with the
+        // repo as working directory, `python -m pip` and `python -c` would
+        // import a repo file named pip.py or json.py.
+        let env_file = [out, b"/python-env.json"].concat();
+        let plain_env = child_env(&l, &[], b"");
+        let plain_env: Vec<&[u8]> = plain_env.iter().map(|e| &e[..]).collect();
+        let mut o: Vec<u8> = Vec::new();
+        let mut e: Vec<u8> = Vec::new();
+        if !py_standin.is_empty() {
+            let mut p: Vec<&[u8]> = vec![b"python3", b"-I", b"-c", PY_VENV_SNIPPET];
+            for d in py_site.split(|&c| c == b':') {
+                p.push(d);
+            }
+            if sealed_step(b"python packages (read from the virtualenv)", &p, repo, out, trusted, &plain_env, 60000, &mut py_listing) != 0 {
+                py_listing.clear();
+                py_listing.extend_from_slice(b"[]");
+            }
+            sys::write_file(&env_file, &py_listing);
+            env_args.push(b"--environment".to_vec());
+            env_args.push(env_file.clone());
+            let held = pypatch_count(&py_listing, b"{\"name\": ");
+            report.extend_from_slice(b"python: ");
+            push_int(report, held);
+            report.extend_from_slice(if held == 1 { &b" package"[..] } else { b" packages" });
+            if find(&py_venvs, b", ") < 0 {
+                report.extend_from_slice(&[b" read from the project's own virtualenv (", &py_venvs[..]].concat());
+                if !py_version.is_empty() {
+                    report.extend_from_slice(&[b", Python ", &py_version[..]].concat());
+                }
+                report.extend_from_slice(b"); nothing in it was run\n");
+            } else {
+                // One environment for the whole repo: see STATUS.md, 2026-11-18.
+                report.extend_from_slice(&[b" read from the projects' own virtualenvs (", &py_venvs[..], b"), a package two of them hold from the first"].concat());
+                if !py_version.is_empty() {
+                    report.extend_from_slice(&[b"; read as the first one's Python ", &py_version[..]].concat());
+                }
+                report.extend_from_slice(b"; nothing in them was run\n");
+            }
+        } else if sealed_run(&[&python, b"-m", b"pip", b"--version"], repo, out, trusted, &plain_env, 30000, &mut o, &mut e) != 0 {
+            let mut listing: Vec<u8> = Vec::new();
+            if sealed_step(b"python packages (importlib.metadata)", &[&python, b"-c", PY_ENV_SNIPPET], repo, out, trusted, &plain_env, 60000, &mut listing) == 0 {
+                sys::write_file(&env_file, &listing);
+            } else {
+                sys::write_file(&env_file, b"[]");
+            }
+            env_args.push(b"--environment".to_vec());
+            env_args.push(env_file.clone());
+        }
+        let slash = rfind(repo, b"/");
+        let pieces = plan_python(&walk, repo, jobs_limit().min(6));
+        // "<file, relative to the repo>\t<its content stamp>" for every .py.
+        let mut py_stamps: Vec<u8> = Vec::new();
+        walk.each_file(repo, |full, name| {
+            if ends_with(name, b".py") {
+                py_stamps.extend_from_slice(&[&full[repo.len() + 1..], b"\t", (stamps.stamp(full) as i64).to_string().as_bytes(), b"\n"].concat());
+            }
+        });
+        // A src layout (src/<package>/__init__.py) is importable only once
+        // the package is installed, which Swan never does, so tests and
+        // scripts that `import <package>` resolved to nothing. Putting src on
+        // PYTHONPATH lets scip-python find it, and names the package's
+        // modules as their importers do (`click.core`, not `src.click.core`).
+        let py_path = python_src_roots(repo);
+        let mut py_env: Vec<Vec<u8>> = Vec::new();
+        if !py_path.is_empty() {
+            py_env.push([&b"PYTHONPATH="[..], &py_path].concat());
+        }
+        if !py_standin.is_empty() {
+            py_env.push([&b"SWAN_PY_SITE="[..], &py_site].concat());
+            py_env.push([&b"SWAN_PY_STANDIN="[..], &py_standin].concat());
+        }
+        // The Python the code is read as: the virtualenv's, run or read.
+        if !l.venv.is_empty() {
+            py_version = pyvenv_version(&l.venv);
+        }
+        if !py_version.is_empty() {
+            py_env.push([&b"SWAN_PY_VERSION="[..], &py_version].concat());
+        }
+        let py_env: Vec<&[u8]> = py_env.iter().map(|e| &e[..]).collect();
+        // What is installed, and which Python, change symbol names and
+        // what resolves: both are part of each piece's key.
+        let env_key: Vec<u8> = if !py_standin.is_empty() {
+            let held = [&py_site[..], b"|", &py_version[..], b"|", hash(&py_listing).to_string().as_bytes()].concat();
+            format!("-{}", hash(&held)).into_bytes()
+        } else if !py_version.is_empty() {
+            format!("-{}", hash(&py_version)).into_bytes()
+        } else {
+            Vec::new()
+        };
+
+        // Reuse: a piece whose files are unchanged since the last map, and
+        // none of whose files use a symbol defined in a changed file, keeps
+        // its last index. Each file is stamped by its content.
+        let mut prev_stamps: Vec<u8> = Vec::new();
+        sys::read_file(&[out, b"/python-files.tsv"].concat(), &mut prev_stamps);
+        let mut prev_manifest: Vec<u8> = Vec::new();
+        sys::read_file(&[out, b"/python-pieces.tsv"].concat(), &mut prev_manifest);
+        let mut dirty = dependents_of_changes(out, &py_stamps, &prev_stamps);
+        dirty.extend_from_slice(&forced);
+        cache.write(b"python-files.tsv", &py_stamps);
+        let mut manifest: Vec<u8> = Vec::new();
+        let mut reused: i64 = 0;
+        for piece in pieces[..pieces.len() - 1].split(|&c| c == b'\n') {
+            // The search path changes symbol names, so it is part of the key.
+            let fp0 = if !py_path.is_empty() {
+                format!("{}-{}", piece_fingerprint(&py_stamps, piece), hash(&py_path))
+            } else {
+                piece_fingerprint(&py_stamps, piece).to_string()
+            };
+            // "-n2": names as Swan's second scip-python fix gives them
+            // (src/pypatch.rs). A piece kept from before it would name
+            // an outside class differently from a piece indexed now.
+            let fp = [fp0.as_bytes(), &env_key[..], b"-n2"].concat();
+            let target = [out, b"/index-python-", hash(piece).to_string().as_bytes(), b".scip"].concat();
+            let mut hit = false;
+            for line in prev_manifest.split(|&c| c == b'\n') {
+                let f = split(line, b'\t');
+                if f.len() == 3 && f[0] == piece && f[1] == &fp[..] && sys::file_exists(f[2]) {
+                    hit = true;
+                }
+            }
+            if hit && !piece_has(&dirty, piece) {
+                reused += 1;
+                jobs.add(b"", &target, Vec::new(), Vec::new(), piece, false); // already done: no argv
+            } else {
+                let mut a: Vec<Vec<u8>> = vec![
+                    [&bin[..], b"scip-python"].concat(),
+                    b"index".to_vec(),
+                    b".".to_vec(),
+                    b"--quiet".to_vec(),
+                    b"--project-name".to_vec(),
+                    repo[(slash + 1) as usize..].to_vec(),
+                    b"--project-version".to_vec(),
+                    b"0".to_vec(),
+                    b"--output".to_vec(),
+                    target.clone(),
+                ];
+                if !piece.is_empty() {
+                    a.push(b"--target-only".to_vec());
+                    a.push(piece_target(piece).to_vec());
+                }
+                a.extend(env_args.iter().cloned());
+                let label = if !piece.is_empty() { [b"scip-python ", piece].concat() } else { b"scip-python".to_vec() };
+                jobs.add(&label, &target, a, child_env(&l, &py_env, &py_standin), piece, false);
+            }
+            manifest.extend_from_slice(&[piece, b"\t", &fp[..], b"\t", &target[..], b"\n"].concat());
+        }
+        cache.write(b"python-pieces.tsv", &manifest);
+        if reused > 0 {
+            report.extend_from_slice(b"python: ");
+            push_int(report, reused);
+            report.extend_from_slice(b" pieces reused\n");
+        }
+        // Index files of pieces no longer in the plan go.
+        if let Some(names) = sys::list_dir(out) {
+            for nm in names {
+                let path = [out, b"/", &nm[..]].concat();
+                if starts_with(&nm, b"index-python-") && find(&manifest, &path) < 0 {
+                    sys::delete_file(&path);
+                }
             }
         }
     }

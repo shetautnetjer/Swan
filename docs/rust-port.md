@@ -361,6 +361,7 @@ folders are.
 | 2026-11-22T09:21Z | `swan map` carried as far as the projects TypeScript is split into (src/pipeline.goose to line 1449, and src/tsproj.goose whole as `tsproj.rs`): the config probe, Swan's own tsconfig, `ensure_scip_typescript_patch` (`tspatch.rs`), `child_env`, `jobs_limit`, `ts_root_listing`, `lang_fingerprint`, the kept lists and their key, `ts_other_projects`. `scripts/port-map.sh` reworked (cases side by side, a home each, a made-up tsc, steps compared whole): 229 of 229, 131 of them new. `scripts/port-prove-map.py`: 256 of 256 breaks caught: 254 in a run of them all, and the two it missed by the case added for them (the other 254 were not run again after that case went in). |
 | 2026-11-22T16:48Z | `swan map` carried to the end of TypeScript (src/pipeline.goose to line 1739): `plan_ts`, `same_file_set`, `dependents_of_changes`, the jobs' list (`Jobs`: `add_job`, `add_lang_job`), the plan (`TsPlan`), what the chunks share, the layers. Goose's sort carried as `rust/src/gsort.rs`: `scripts/port-sort.sh` 7,718 of 7,718 lists, `scripts/port-prove-sort.py` 30 of 30 (29 of 31 on its first run). `scripts/port-map.sh`: 317 of 317, 88 of them new. `scripts/port-prove-map.py` has 371 breaks, 115 new, all fitting the source, and has not run on this tree: the session was ended on the owner's word first. HANDOFF.md has it as the next thing. |
 | 2026-11-22T18:10Z | The map's prover run on the tree of `7fc1276`, all 371 breaks in six parts side by side, 66 minutes: the unbroken program 317 of 317 in every part, 370 of 371 breaks caught on the first run. The one let through was no break ("Found while porting") and is taken out: 370 of 370. The 88 cases for TypeScript's chunks and layers are shown to catch what they were made for. |
+| 2026-11-22T18:18Z | `swan map` carried to the end of Python (src/pipeline.goose to line 1920): `ensure_scip_python_patch` and `ensure_scip_python_site_patch` (`pypatch.rs`), `survey_python_envs` (`survey.rs`), `piece_target` (`pyplan.rs`) and, in `pipeline.rs`, the virtualenv kept aside for a repo that is not trusted, the stand-in interpreter, the two lists of packages, the src layout, each piece's key and which pieces are kept. `scripts/port-map.sh`: 395 of 395, 78 of them new (59 of 78 on the first run; the 19 were the judge's). The judge gives each home scip-python's two files as its own and compares how they are left. No breaks for this part in the prover yet: the owner is asked first whether it runs after every part or at the end of the stage. |
 
 ## Found while porting
 
@@ -680,6 +681,22 @@ folders are.
   follows the last line end is an empty line, so an empty name is always
   "counted already". The program without the first check does the same.
   The prover names it under "Not among the breaks".
+- Stage 4: `python-pieces.tsv` holds whole paths, like `index-manifest.tsv`.
+  The judge's second maps of Python start from a copy of a map made
+  elsewhere, and kept their pieces only because the first map's index
+  files were still where they were made. The copy's record is now moved
+  with it.
+- Stage 4: two things a later part of a map does to what Python's part
+  writes, seen when the judge's first cases for them differed. Where the
+  indexers' runs are read, a piece whose run failed is taken out of
+  `python-pieces.tsv`; and at the end every `index-*.scip` that no job
+  names is removed, whatever language's. Until those parts are carried the
+  judge names the record as a later part's in the cases where scip-python
+  fails, and watches a stale file that is no `.scip`.
+- Stage 4: this machine's python3 has no pip, so every map of a Python
+  repo without a virtualenv to read takes Python's own list of packages
+  (`python packages (importlib.metadata)`), which holds whatever the
+  machine has installed.
 
 ## Next
 
@@ -746,12 +763,15 @@ trusted:
      from the last map's rows) are indexed as a layer over the chunks
      while layers are few and small. The jobs are listed (`Jobs`) and
      their configs written; nothing runs them yet.
-   - Left, in order: Python's pieces, Rust, Java, C#, the language
-     servers, `syntax-index`, and "no language found";
-     running them, at most so many at once; the flattener; `index` or
-     `refresh`; the end of the report, with the record of the indexes
-     (`index-manifest.tsv`). The two `ensure_` functions of the Python
-     patches come with Python's jobs.
+   - Done 2026-11-22: Python's pieces, planned and not yet run. The two
+     fixes to scip-python are made sure of; a virtualenv is read (or, in a
+     trusted repo, run) for its packages and its Python; the pieces are
+     planned and each keeps its index while its key and its files' users
+     are unchanged. No breaks for it in the prover yet.
+   - Left, in order: Rust, Java, C#, C and CUDA, the language servers,
+     `syntax-index`, and "no language found"; running them, at most so
+     many at once; the flattener; `index` or `refresh`; the end of the
+     report, with the record of the indexes (`index-manifest.tsv`).
    - A map starts its own program again as `syntax-index` (carried) and
      `lsp-index` (stage 5). Until stage 5 the Rust map is compared on
      repos with no language a server indexes, or starts the Goose program

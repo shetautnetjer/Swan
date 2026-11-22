@@ -11,9 +11,9 @@
 // Without Spread-Wings, or when the survey fails, a map goes on as before
 // and says so.
 //
-// Carried over from src/survey.goose so far: running the survey and what
-// the report says of it. Its lists for Go and Python (survey_paths,
-// survey_python_envs) come with the steps of the map that read them, and
+// Carried over from src/survey.goose so far: running the survey, what the
+// report says of it, and the virtualenvs of its Python projects. Its list
+// for Go (survey_paths) comes with the step of the map that reads it, and
 // survey_left_out with the server.
 
 use crate::json;
@@ -69,6 +69,41 @@ pub fn survey_ignored(out: &[u8]) -> Vec<u8> {
 
 fn in_ignored(ignored: &[u8], path: &[u8]) -> bool {
     ignored.split(|&c| c == b'\n').any(|d| !d.is_empty() && (path == d || (path.len() > d.len() && starts_with(path, d) && path[d.len()] == b'/')))
+}
+
+// The virtualenvs of a survey's Python projects, one per line, in the
+// survey's order (the top of the repo first):
+// "<project folder>\t<virtualenv, relative to the repo>\t<its Python>".
+// The Python version is what the virtualenv's pyvenv.cfg says ("" when it
+// says none). Without the projects in folders git ignores.
+pub fn survey_python_envs(survey: &[u8], ignored: &[u8]) -> Vec<u8> {
+    let mut envs: Vec<u8> = Vec::new();
+    if survey.is_empty() {
+        return envs;
+    }
+    let Some(doc) = json::parse(survey) else {
+        return envs;
+    };
+    let Some(list) = doc.member(doc.root(), b"projects") else {
+        return envs;
+    };
+    for p in doc.each(list) {
+        let k = doc.as_string(doc.member(Some(p), b"kind"));
+        let at = doc.as_string(doc.member(Some(p), b"path"));
+        let e = doc.member(Some(p), b"environment");
+        let v = doc.as_string(doc.member(e, b"venv"));
+        let py = doc.as_string(doc.member(e, b"python"));
+        if let (Some(k), Some(at), Some(v)) = (k, at, v) {
+            if k == b"python" && !v.is_empty() && !in_ignored(ignored, at) {
+                envs.extend_from_slice(&[at, b"\t", v, b"\t"].concat());
+                if let Some(py) = py {
+                    envs.extend_from_slice(trim(py));
+                }
+                envs.push(b'\n');
+            }
+        }
+    }
+    envs
 }
 
 // What the repo holds, for the map's report: the projects by kind, and the
