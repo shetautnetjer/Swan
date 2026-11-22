@@ -1790,3 +1790,23 @@ out of range" (exit 1), the Rust program panics (exit 101). The port
 carries Goose as it is; the fix (`sizes.len / 2 < k`, the same answer for
 every k that does not overflow) is a change to both programs, waiting for
 the owner.
+
+## 2026-11-22T05:38Z: the README said stage 2 of the port was on a branch
+
+What was wrong: the note at the top of `README.md` still read "Done on a
+branch, not yet on main: stage 2", and counted stages 3 to 8 as not done.
+Stage 2 has been on main since #76 (2026-11-20), and stage 3 is under way
+on a branch.
+
+Changed: that note now names stages 0, 1 and 2 as merged (three of the
+nine), and says stages 3 to 8 are not on main, with stage 3 under way. It
+also gives the owner's reason for the port, which no record held: Rust has
+a more developed ecosystem (DECISIONS.md has his words and what was seen
+that day). Nothing else on the page changed.
+
+Checked: read against `git log origin/main` (#73, #76) and the stage table
+in `docs/rust-port.md`. Words only: no code, no build and no suite run.
+
+Limits: the note will be stale again when stage 3 merges; that pull
+request has to update it. The page below the note still describes the
+Goose program, as the note says.
