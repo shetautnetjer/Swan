@@ -115,22 +115,40 @@ cases are proven until a prover has run on them.
   one child (the agent proposed the second, with a variable that names
   the Goose program while the port is under way; Jev leaned the same way,
   59 to 40; the owner said "continue" without choosing).
-- Then, in the map's own order: the record of the indexes and the removal
-  of every `index-*.scip` no job names (from line 2296); the flattener
-  (`bin/swan-flatten`, run as a step); `index` or `refresh` (carried at
-  stage 1); the end of the report, where content-stamps.tsv is written, a
-  clean map publishes what it held back (`Cache::pending`) and
-  `finish_cosmetic` moves rows (`shift_cosmetic` of src/change.goose and
-  `mark_edited` of src/edit.goose are needed there, though the stage
-  table has them at stage 6); `rust_gaps`. The closures of
-  src/pipeline.goose lines 961 to 1266 still to carry are `note_indexed`,
-  `kept_texts` and `finish_cosmetic`.
+- Then, in the map's own order (src/pipeline.goose lines 2296 to 2434):
+  the record of the indexes (`index-manifest.tsv`, failures left out) and
+  the removal of every `index-*.scip` no job names; content-stamps.tsv;
+  the two short ends, "nothing changed since the last map" (every index
+  kept: rows of cosmetic edits moved, the map's time moved up with
+  `scip_time_of`) and "flatten: skipped" (only failed indexers ran, by
+  `flattened-inputs.txt`); `fresh-indexes.txt` and `kept-texts.tsv`; the
+  flattener (`bin/swan-flatten`, run as the step "flatten"); for a clean
+  map, the old rows removed first and `clean_rows_valid` after; `index` or
+  `refresh` (`index_main_locked`, carried at stage 1 and reached today by
+  the empty map); `note_indexed` with documents.tsv; `finish_cosmetic`
+  (`shift_cosmetic` of src/change.goose and `mark_edited` of
+  src/edit.goose are needed there, though the stage table has them at
+  stage 6); what a clean map held back, published (`Cache::pending`);
+  `rust_gaps` (`rust_unmapped` of src/rustproj.goose); the last line. The
+  closures of src/pipeline.goose lines 961 to 1266 still to carry are
+  `note_indexed`, `kept_texts` and `finish_cosmetic`.
 - When the jobs run, the judge changes kind: the Rust program then runs
   the real indexers too, so a first run takes about twice as long, and
   every case can be compared whole (the rows by `db_text`, as the 32
   cases that end today are). Take out then what steps around later parts:
   `LATER` on three cases, the stale file that is no `.scip`, `LATER_TEXTS`,
-  and the patterns `OPENING` and `STEPS`.
+  and the patterns `OPENING` and `STEPS`. Expect things in a finished map
+  folder that two runs never share, to be left out or made alike before
+  the folders are compared: the jobs' logs (`log-<n>.txt`: times,
+  process numbers), `cargo-target/` and `java-targetroot/`, and the
+  last 400 bytes of a failed job's log in the report (rust-analyzer's
+  lines carry the time). Find out which of the kept records name times of
+  index files (`flattened-inputs.txt`, `fresh-indexes.txt`) before
+  trusting a difference in them. If the jobs are carried before the rest,
+  cut the Goose program's report at the first line of what is not carried
+  ("flatten", "swan index", "swan refresh", "nothing changed", "no code
+  changed", "rust: no rows", "every indexer failed") in place of
+  `OPENING`: a failed job's log is several lines of anything.
 
 ### Where stage 4 stands
 Stage 3 is on main (#78). `rust-stage-4` was begun on `rust-stage-3` and
