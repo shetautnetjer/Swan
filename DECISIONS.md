@@ -729,3 +729,24 @@ repo to run.
 over as it is (its rule: a better design is its own change afterwards).
 docs/rust-port.md, "Held for after the port", has serena-rs and what of
 this already exists.
+
+## 2026-11-22T05:45Z — Why Rust: the ecosystem
+
+**Reason (the owner's, in his words):** "rust has a more developed
+ecosystem basically". He was asked because the port's records said it
+was started on his word and did not say why.
+
+**What was seen the same day, in a map of this repository at 8d3417a:**
+every use in Swan's own Rust files is resolved by the compiler (8,663 of
+8,663, none matched by name), and a language server answers for those
+files in the agent's editor tool. The Goose files have no server there;
+Swan indexes them with its own `goose lsp` step, the longest of a refresh
+(25.6 s of 30 s).
+
+**What it means now:** nothing changes in how the port is done. It carries
+Swan over as it is, and its Rust names four libraries (libc, memchr,
+libsqlite3-sys, cc): SCIP is read by hand and tree-sitter is built from
+the Goose build's C, so the answers stay the same bytes. docs/rust-port.md
+names crates the port could use for the language-server client at stage 5
+and holds better designs for after the port; each is a change of its own,
+measured.

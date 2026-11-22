@@ -14,15 +14,18 @@ engine underneath.
 The program that ships, builds and installs today is still written in
 [Goose](https://aardappel.github.io/goose/) (`src/*.goose`). It is being
 carried over to Rust, a complete overhaul done one stage at a time, in
-`rust/`. Done and merged on 2026-11-20: stage 0 (commands, usage text, exit
-codes) and stage 1 (the store: `index`, `refresh` and 13 of the 14 `query`
-kinds), checked against the Goose program on the fixtures and four trial
-repos. Done on a branch, not yet on main: stage 2 (planning that runs
-nothing: `cargo-projects`, `gradle-tasks` and `plan-python`). Not done:
-stages 3 to 8 (syntax and pattern search, the map, language servers,
-checking and editing, the server, the switch). Nothing of the Rust program is built by
-`scripts/build.sh`, installed or shipped yet, and the rest of this page
-describes the Goose program. The bar, the stages and the log are in
+`rust/`. The owner's reason: Rust has a more developed ecosystem
+([DECISIONS.md](DECISIONS.md)). Done and merged on 2026-11-20, three of the
+nine stages: stage 0
+(commands, usage text, exit codes), stage 1 (the store: `index`, `refresh`
+and 13 of the 14 `query` kinds) and stage 2 (planning that runs nothing:
+`cargo-projects`, `gradle-tasks` and `plan-python`), each checked against
+the Goose program answer by answer (the numbers are in
+[STATUS.md](STATUS.md)). Not on main: stages 3 to 8 (syntax and pattern
+search, the map, language servers, checking and editing, the server, the
+switch); stage 3 is under way on a branch. Nothing of the Rust program is
+built by `scripts/build.sh`, installed or shipped yet, and the rest of this
+page describes the Goose program. The bar, the stages and the log are in
 [docs/rust-port.md](docs/rust-port.md); the work in progress is in
 [HANDOFF.md](HANDOFF.md).
 
