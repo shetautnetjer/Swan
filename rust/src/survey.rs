@@ -12,9 +12,9 @@
 // and says so.
 //
 // Carried over from src/survey.goose so far: running the survey, what the
-// report says of it, and the virtualenvs of its Python projects. Its list
-// for Go (survey_paths) comes with the step of the map that reads it, and
-// survey_left_out with the server.
+// report says of it, the folders of its projects of one kind, and the
+// virtualenvs of its Python projects. survey_left_out comes with the
+// server.
 
 use crate::json;
 use crate::seal::sealed_run;
@@ -69,6 +69,32 @@ pub fn survey_ignored(out: &[u8]) -> Vec<u8> {
 
 fn in_ignored(ignored: &[u8], path: &[u8]) -> bool {
     ignored.split(|&c| c == b'\n').any(|d| !d.is_empty() && (path == d || (path.len() > d.len() && starts_with(path, d) && path[d.len()] == b'/')))
+}
+
+// The folders of a survey's projects of one kind, one per line ("." is the
+// top of the repo), without those in folders git ignores.
+pub fn survey_paths(survey: &[u8], kind: &[u8], ignored: &[u8]) -> Vec<u8> {
+    let mut paths: Vec<u8> = Vec::new();
+    if survey.is_empty() {
+        return paths;
+    }
+    let Some(doc) = json::parse(survey) else {
+        return paths;
+    };
+    let Some(list) = doc.member(doc.root(), b"projects") else {
+        return paths;
+    };
+    for p in doc.each(list) {
+        let k = doc.as_string(doc.member(Some(p), b"kind"));
+        let at = doc.as_string(doc.member(Some(p), b"path"));
+        if let (Some(k), Some(at)) = (k, at) {
+            if k == kind && !in_ignored(ignored, at) {
+                paths.extend_from_slice(at);
+                paths.push(b'\n');
+            }
+        }
+    }
+    paths
 }
 
 // The virtualenvs of a survey's Python projects, one per line, in the

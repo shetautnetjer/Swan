@@ -362,6 +362,7 @@ folders are.
 | 2026-11-22T16:48Z | `swan map` carried to the end of TypeScript (src/pipeline.goose to line 1739): `plan_ts`, `same_file_set`, `dependents_of_changes`, the jobs' list (`Jobs`: `add_job`, `add_lang_job`), the plan (`TsPlan`), what the chunks share, the layers. Goose's sort carried as `rust/src/gsort.rs`: `scripts/port-sort.sh` 7,718 of 7,718 lists, `scripts/port-prove-sort.py` 30 of 30 (29 of 31 on its first run). `scripts/port-map.sh`: 317 of 317, 88 of them new. `scripts/port-prove-map.py` has 371 breaks, 115 new, all fitting the source, and has not run on this tree: the session was ended on the owner's word first. HANDOFF.md has it as the next thing. |
 | 2026-11-22T18:10Z | The map's prover run on the tree of `7fc1276`, all 371 breaks in six parts side by side, 66 minutes: the unbroken program 317 of 317 in every part, 370 of 371 breaks caught on the first run. The one let through was no break ("Found while porting") and is taken out: 370 of 370. The 88 cases for TypeScript's chunks and layers are shown to catch what they were made for. |
 | 2026-11-22T18:18Z | `swan map` carried to the end of Python (src/pipeline.goose to line 1920): `ensure_scip_python_patch` and `ensure_scip_python_site_patch` (`pypatch.rs`), `survey_python_envs` (`survey.rs`), `piece_target` (`pyplan.rs`) and, in `pipeline.rs`, the virtualenv kept aside for a repo that is not trusted, the stand-in interpreter, the two lists of packages, the src layout, each piece's key and which pieces are kept. `scripts/port-map.sh`: 395 of 395, 78 of them new (59 of 78 on the first run; the 19 were the judge's). The judge gives each home scip-python's two files as its own and compares how they are left. No breaks for this part in the prover yet: the owner is asked first whether it runs after every part or at the end of the stage. |
+| 2026-11-22T18:45Z | `swan map` carried to where its jobs are run (src/pipeline.goose to line 2187): the cargo projects, Java, C#, C and CUDA, what waits for trust, the servers' languages (`modules.rs`, begun: `lsp_server_present`, `lang_of_path`; `survey_paths`) and the syntax index, each planned; and the two ways a map ends when nothing is left to run, the first maps the Rust program makes to their end. `scripts/port-map.sh`: 440 of 440, 45 new, 32 of the 440 compared whole (their rows too). No breaks for these parts in the prover yet. |
 
 ## Found while porting
 
@@ -697,6 +698,22 @@ folders are.
   repo without a virtualenv to read takes Python's own list of packages
   (`python packages (importlib.metadata)`), which holds whatever the
   machine has installed.
+- Stage 4: a trusted map may write in the repo. cargo wrote a `Cargo.lock`
+  into a made-up repo while the Goose program mapped it trusted, and the
+  Rust program, run after, surveyed a repo that had a lock file. A judge
+  that runs one program after the other on one repo needs repos a trusted
+  run leaves as it found them: the made-up cargo projects carry their lock
+  file.
+- Stage 4: three fingerprints take in more than the repo. `lsp-index`'s
+  and the syntax index's take in the program that made the index (its
+  path and its size), so a new build of Swan maps those again, and the
+  Rust program never keeps what the Goose program made. scip-java's takes
+  in what it is to run, which names the map folder, so a copy of a map
+  never keeps its Java index. Neither is a fault; both limit what a second
+  map from a copy can show.
+- Stage 4: the Goose program's `map_held` (what waits for trust, kept for
+  `swan serve`) is a variable of the whole program, set in the middle of a
+  map. It is left for the server's stage.
 
 ## Next
 
@@ -768,10 +785,13 @@ trusted:
      trusted repo, run) for its packages and its Python; the pieces are
      planned and each keeps its index while its key and its files' users
      are unchanged. No breaks for it in the prover yet.
-   - Left, in order: Rust, Java, C#, C and CUDA, the language servers,
-     `syntax-index`, and "no language found"; running them, at most so
-     many at once; the flattener; `index` or `refresh`; the end of the
-     report, with the record of the indexes (`index-manifest.tsv`).
+   - Done 2026-11-22: every other job, planned and not yet run: the cargo
+     projects, Java, C#, C and CUDA, what waits for trust, the servers'
+     languages and the syntax index; and a map with nothing to run, made
+     to its end (an empty map, or "no language found").
+   - Left, in order: running the jobs, at most so many at once; the
+     flattener; `index` or `refresh`; the end of the report, with the
+     record of the indexes (`index-manifest.tsv`).
    - A map starts its own program again as `syntax-index` (carried) and
      `lsp-index` (stage 5). Until stage 5 the Rust map is compared on
      repos with no language a server indexes, or starts the Goose program

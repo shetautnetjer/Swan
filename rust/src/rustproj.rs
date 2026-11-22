@@ -22,7 +22,7 @@ use crate::walk::Walk;
 // How many cargo projects one map indexes. Each is a rust-analyzer run that
 // loads the standard library again, so a repo of hundreds of example crates
 // would take hours. The rest are named in the report.
-const RUST_PROJECT_LIMIT: usize = 12;
+pub const RUST_PROJECT_LIMIT: usize = 12;
 
 fn split_lines(s: &[u8]) -> impl Iterator<Item = &[u8]> {
     s.split(|&c| c == b'\n')
@@ -83,7 +83,7 @@ pub fn cargo_join(dir: &[u8], rel: &[u8]) -> Vec<u8> {
 }
 
 // Whether folder `d` lies inside folder `above`.
-fn cargo_inside(d: &[u8], above: &[u8]) -> bool {
+pub fn cargo_inside(d: &[u8], above: &[u8]) -> bool {
     if above == b"." {
         return d != b".";
     }
@@ -288,6 +288,21 @@ pub fn toolchain_home(name: &[u8], sub: &[u8]) -> Vec<u8> {
         return v;
     }
     [&sys::env(b"HOME")[..], b"/", sub].concat()
+}
+
+// Passes $VAR to a sealed child when this machine keeps that folder where
+// toolchain_home says: $VAR is set, or $HOME/<sub> is there. Otherwise the
+// variable is left alone. A machine with rustup installed for everyone has
+// no ~/.rustup: its `cargo` is a small script that sets RUSTUP_HOME itself
+// when nothing else did, and naming ~/.rustup made rustup try to create it
+// inside the seal ("could not create home directory ... Read-only file
+// system"), so every Rust map there failed (found 2026-11-17 in a clean
+// Ubuntu microVM).
+pub fn add_toolchain_env(renv: &mut Vec<Vec<u8>>, name: &[u8], sub: &[u8]) {
+    let p = toolchain_home(name, sub);
+    if !sys::env(name).is_empty() || sys::is_dir(&p) {
+        renv.push([name, b"=", &p[..]].concat());
+    }
 }
 
 // The channel a folder's rust-toolchain.toml or rust-toolchain pins

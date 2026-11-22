@@ -1,25 +1,31 @@
 // The map: what `swan map` runs, in what order, and what it keeps.
 //
 // Carried over from src/pipeline.goose so far: `swan trust`, and `swan map`
-// to the end of Python (what git ignores, what the repo holds, its survey,
-// an older or a clean map, the content stamps, TypeScript's chunks and
-// layers, Python's pieces), planned and not run. The walk at the head of
-// that file is in walk.rs. A map stops where the carrying has got to, with
-// what it would have said so far and exit 70.
+// to where its jobs are run: what git ignores, what the repo holds, its
+// survey, an older or a clean map, the content stamps, and every job
+// planned (TypeScript's chunks and layers, Python's pieces, the cargo
+// projects, Java, C#, C and CUDA, the language servers, the syntax index),
+// with what waits for trust. A repo with nothing to run is mapped to its
+// end. Any other map stops there, with what it would have said so far and
+// exit 70. The walk at the head of that file is in walk.rs.
 
 use std::collections::{HashMap, HashSet};
 
 use crate::change::{code_hash, cosmetic_lang, index_lines, line_of_path};
 use crate::db::Db;
+use crate::gradle::gradle_scip_tasks;
 use crate::gsort::goose_sort;
-use crate::index::SCHEMA_VERSION;
+use crate::index::{index_main_locked, SCHEMA_VERSION};
+use crate::json;
+use crate::modules::{lang_of_path, lsp_server_present};
 use crate::pypatch::{ensure_scip_python_patch, ensure_scip_python_site_patch, pypatch_count};
 use crate::pyplan::{piece_target, plan_python};
 use crate::query::meta_value;
 use crate::run::{run_step, swan_home};
-use crate::seal::{sealed_run, sealed_step};
+use crate::rustproj::{add_toolchain_env, cargo_inside, cargo_manifest_dirs, rust_analyzer_config, rust_projects, rust_std_source, rust_toolchain_dir, rust_toolchain_override, RUST_PROJECT_LIMIT};
+use crate::seal::{sandbox_on, sealed_run, sealed_step};
 use crate::stamp::prestamp;
-use crate::survey::{survey_ignored, survey_python_envs, survey_report, survey_run};
+use crate::survey::{survey_ignored, survey_paths, survey_python_envs, survey_report, survey_run};
 use crate::sys;
 use crate::treesitter;
 use crate::tspatch::ensure_scip_typescript_patch;
@@ -42,6 +48,8 @@ struct Langs {
     other: Vec<u8>, // languages with no indexer here, only search and live errors: "lua glsl ..."
     tsconfig: bool,
     cargo: bool,
+    maven: bool,
+    gradle: bool,
     venv: Vec<u8>, // a virtualenv inside the repo, if any
 }
 
@@ -78,6 +86,11 @@ fn detect(walk: &Walk, repo: &[u8]) -> Langs {
     let mut l = Langs {
         tsconfig: sys::file_exists(&[repo, b"/tsconfig.json"].concat()),
         cargo: sys::file_exists(&[repo, b"/Cargo.toml"].concat()),
+        maven: sys::file_exists(&[repo, b"/pom.xml"].concat()),
+        gradle: sys::file_exists(&[repo, b"/build.gradle"].concat())
+            || sys::file_exists(&[repo, b"/build.gradle.kts"].concat())
+            || sys::file_exists(&[repo, b"/settings.gradle"].concat())
+            || sys::file_exists(&[repo, b"/settings.gradle.kts"].concat()),
         ..Default::default()
     };
     for v in [&b".venv"[..], b"venv"] {
@@ -129,6 +142,97 @@ fn detect(walk: &Walk, repo: &[u8]) -> Langs {
         }
     });
     l
+}
+
+// The CUDA toolkit: $CUDA_PATH, /usr/local/cuda, or the headers-only one
+// scripts/fetch-tools.sh assembles in .tools/cuda-sdk from NVIDIA's pip
+// wheels (enough to index; nvcc itself is not needed).
+fn cuda_path(home: &[u8]) -> Vec<u8> {
+    let p = sys::env(b"CUDA_PATH");
+    if !p.is_empty() {
+        return p;
+    }
+    if sys::is_dir(b"/usr/local/cuda/include") {
+        return b"/usr/local/cuda".to_vec();
+    }
+    [home, b"/.tools/cuda-sdk"].concat()
+}
+
+// A compile_commands.json for repos without one, outside the repo: every C,
+// C++ and CUDA source, with the repo root on the include path. CUDA is
+// compiled host-side by clang's CUDA mode against cuda_path.
+fn write_compdb(walk: &Walk, repo: &[u8], home: &[u8], path: &[u8]) {
+    let cuda = cuda_path(home);
+    let mut j: Vec<u8> = vec![b'['];
+    let mut n = 0;
+    walk.each_file(repo, |full, name| {
+        let is_cu = ends_with(name, b".cu");
+        if is_cu || is_c_source(name) {
+            if n > 0 {
+                j.push(b',');
+            }
+            n += 1;
+            j.extend_from_slice(b"{\"directory\":");
+            json_string(&mut j, repo);
+            j.extend_from_slice(b",\"file\":");
+            json_string(&mut j, full);
+            j.extend_from_slice(b",\"arguments\":[");
+            if is_cu {
+                j.extend_from_slice(b"\"clang++\",\"-x\",\"cuda\",");
+                json_string(&mut j, &[&b"--cuda-path="[..], &cuda].concat());
+                j.extend_from_slice(b",\"--cuda-gpu-arch=sm_80\",\"--cuda-host-only\",\"-nocudalib\",\"-std=c++17\",");
+            } else if ends_with(name, b".c") {
+                j.extend_from_slice(b"\"clang\",\"-std=c11\",");
+            } else {
+                j.extend_from_slice(b"\"clang++\",\"-std=c++17\",");
+            }
+            json_string(&mut j, &[b"-I", repo].concat());
+            j.extend_from_slice(b",\"-c\",");
+            json_string(&mut j, full);
+            j.extend_from_slice(b"]}");
+        }
+    });
+    j.extend_from_slice(b"]\n");
+    sys::write_file(path, &j);
+}
+
+// The scip-java scripts/fetch-tools.sh installs, by version, so a new pin
+// is a new file and never an old binary kept. Keep the two in step.
+const SCIP_JAVA: &[u8] = b"v0.14.1";
+
+// Whether the repo's root holds a solution or project file for scip-dotnet.
+fn has_dotnet_project(repo: &[u8]) -> bool {
+    match sys::list_dir(repo) {
+        Some(names) => names.iter().any(|n| ends_with(n, b".sln") || ends_with(n, b".slnx") || ends_with(n, b".csproj")),
+        None => false,
+    }
+}
+
+// Swan's .NET SDK and its homes, so nothing lands in ~/.dotnet or ~/.nuget.
+fn dotnet_env(home: &[u8]) -> Vec<Vec<u8>> {
+    let t = [home, b"/.tools"].concat();
+    vec![
+        [&b"DOTNET_ROOT="[..], &t, b"/dotnet"].concat(),
+        [&b"DOTNET_CLI_HOME="[..], &t, b"/dotnet-home"].concat(),
+        [&b"NUGET_PACKAGES="[..], &t, b"/nuget"].concat(),
+        b"DOTNET_CLI_TELEMETRY_OPTOUT=1".to_vec(),
+        b"DOTNET_NOLOGO=1".to_vec(),
+    ]
+}
+
+// What a job is to run, as the Goose program holds it: each word and a NUL
+// after it. A fingerprint that takes in the words takes them in this way.
+fn packed(argv: &[Vec<u8>]) -> Vec<u8> {
+    let mut p: Vec<u8> = Vec::new();
+    for a in argv {
+        p.extend_from_slice(a);
+        p.push(0);
+    }
+    p
+}
+
+fn untrusted_note(skipped: &[u8], repo: &[u8]) -> Vec<u8> {
+    [&b"not run:"[..], skipped, b" (each runs the repo's own build files, which can run any code); if you trust this repo: swan trust ", repo].concat()
 }
 
 // A JDK for the indexers: $JAVA_HOME, else the one Swan fetched.
@@ -961,6 +1065,7 @@ pub fn map_main(repo_arg: &[u8], out_arg: &[u8], report: &mut Vec<u8>, clean: bo
 // The public wrapper holds the writer lock for every shared output: cached
 // indexer files, flattened rows, schema replacement and final database update.
 fn map_main_locked(repo: &[u8], out: &[u8], report: &mut Vec<u8>, clean: bool) -> bool {
+    let t_start = std::time::Instant::now();
     let home = swan_home();
     let bin = [&home[..], b"/tools/node_modules/.bin/"].concat();
     let trusted = build_trusted(repo);
@@ -1993,11 +2098,342 @@ fn map_main_locked(repo: &[u8], out: &[u8], report: &mut Vec<u8>, clean: bool) -
         }
     }
 
+    // The indexers that wait for `swan trust`. The report names them where
+    // the languages are done, still to be carried.
+    let mut skipped: Vec<u8> = Vec::new();
+
+    // Rust: one rust-analyzer run for each cargo project (src/rustproj.rs),
+    // the repo root's first. `rust_dirs` is every folder with a Cargo.toml.
+    let rust_dirs = cargo_manifest_dirs(&walk, repo);
+    let mut rust_over: Vec<u8> = Vec::new();
+    let rust_plan = rust_projects(repo, &rust_dirs, &mut rust_over);
+    let mut rust_indexed = false;
+    if !rust_plan.is_empty() && !trusted && !sandbox_on() {
+        skipped.extend_from_slice(b" rust-analyzer scip (Rust: cargo build scripts, proc macros)");
+        // This map drops them; after trust they are rebuilt, not reused.
+        if let Some(had) = sys::list_dir(out) {
+            for nm in had {
+                if starts_with(&nm, b"index-rust") && ends_with(&nm, b".scip") {
+                    sys::delete_file(&[out, b"/", &nm[..]].concat());
+                }
+            }
+        }
+    } else if !rust_plan.is_empty() {
+        rust_indexed = true;
+        // Any Rust file or cargo file anywhere in the repo: a project's index
+        // also holds what it resolved in the crates it depends on by path.
+        let rust_files = lang_fingerprint(&walk, repo, &[b".rs", b"Cargo.toml", b"Cargo.lock", b"rust-toolchain.toml", b"rust-toolchain"], &[], |f| stamps.stamp(f));
+        // What each folder with a rust-toolchain file means for the run, asked
+        // (and said on stderr) once: "folder \x01 library source \x01 toolchain".
+        let mut rust_toolchains: Vec<u8> = Vec::new();
+        for dir in rust_plan.split(|&c| c == b'\n') {
+            if dir.is_empty() {
+                continue;
+            }
+            let at_root = dir == b".";
+            let target = if at_root { [out, b"/index-rust.scip"].concat() } else { [out, b"/index-rust-", hash(dir).to_string().as_bytes(), b".scip"].concat() };
+            let label = if at_root { b"rust-analyzer scip".to_vec() } else { [b"rust project ", dir].concat() };
+            let base: &[u8] = if at_root { b"" } else { dir };
+            let mut a: Vec<Vec<u8>> = vec![[&home[..], b"/.tools/rust-analyzer/rust-analyzer"].concat(), b"scip".to_vec(), dir.to_vec(), b"--output".to_vec(), target.clone()];
+            // The settings, in a file named by what they say: projects that
+            // agree share it.
+            let tc_dir = rust_toolchain_dir(repo, dir);
+            let mut std_src: Vec<u8> = Vec::new();
+            let mut tc: Vec<u8> = Vec::new();
+            let mut asked = false;
+            for line in rust_toolchains.split(|&c| c == b'\n') {
+                let f = split(line, 1);
+                if f.len() == 3 && f[0] == &tc_dir[..] {
+                    asked = true;
+                    std_src.extend_from_slice(f[1]);
+                    tc.extend_from_slice(f[2]);
+                }
+            }
+            if !asked {
+                std_src.extend_from_slice(&rust_std_source(&tc_dir));
+                tc.extend_from_slice(&rust_toolchain_override(&tc_dir));
+                rust_toolchains.extend_from_slice(&tc_dir);
+                rust_toolchains.push(1);
+                rust_toolchains.extend_from_slice(&std_src);
+                rust_toolchains.push(1);
+                rust_toolchains.extend_from_slice(&tc);
+                rust_toolchains.push(b'\n');
+            }
+            let settings = rust_analyzer_config(&std_src);
+            let cfg = [out, b"/rust-analyzer-", hash(&settings).to_string().as_bytes(), b".json"].concat();
+            sys::write_file(&cfg, &settings);
+            a.push(b"--config-path".to_vec());
+            a.push(cfg);
+            // Build scripts and proc macros run inside the seal. Untrusted repos
+            // run offline against the crates already cached in Cargo's home;
+            // a missing crate leaves those uses unresolved, never unsealed.
+            let mut renv: Vec<Vec<u8>> = Vec::new();
+            renv.push([&b"CARGO_TARGET_DIR="[..], out, b"/cargo-target"].concat());
+            add_toolchain_env(&mut renv, b"RUSTUP_HOME", b".rustup");
+            add_toolchain_env(&mut renv, b"CARGO_HOME", b".cargo");
+            if !trusted {
+                renv.push(b"CARGO_NET_OFFLINE=true".to_vec());
+            }
+            // A run that fails then ends on its reason (cargo's own error),
+            // which the report quotes, not on forty lines of stack.
+            renv.push(b"RUST_BACKTRACE=0".to_vec());
+            if !tc.is_empty() {
+                renv.push([&b"RUSTUP_TOOLCHAIN="[..], &tc].concat());
+            }
+            // A project inside another one (a fuzz crate, an excluded tool) is
+            // one the map can do without; a project with none above it is the
+            // repo's own code, and its failure is the map's.
+            let mut inside = false;
+            for d in rust_dirs.split(|&c| c == b'\n') {
+                if !d.is_empty() && cargo_inside(dir, d) {
+                    inside = true;
+                }
+            }
+            let renv: Vec<&[u8]> = renv.iter().map(|e| &e[..]).collect();
+            jobs.add_lang(report, &label, &target, a, child_env(&l, &renv, b""), hash_combine(rust_files, hash(&settings)), false, base, inside);
+        }
+        if !rust_over.is_empty() {
+            report.extend_from_slice(b"rust: ");
+            push_int(report, count_lines(&rust_over));
+            report.extend_from_slice(b" more cargo projects not mapped (");
+            push_int(report, RUST_PROJECT_LIMIT as i64);
+            report.extend_from_slice(b" at most in one map), starting with ");
+            report.extend_from_slice(&rust_over[..find(&rust_over, b"\n") as usize]);
+            report.push(b'\n');
+        }
+    }
+
+    // scip-java indexes Java, and Kotlin built with Gradle (its compiler
+    // plugin follows the current Kotlin, 2.4 as of scip-java 0.14.1).
+    if (l.java || (l.kt && l.gradle)) && (l.maven || l.gradle) && !trusted {
+        skipped.extend_from_slice(if l.gradle { &b" scip-java (Gradle)"[..] } else { b" scip-java (Maven)" });
+        sys::delete_file(&[out, b"/index-java.scip"].concat());
+    } else if l.java || (l.kt && l.gradle) {
+        let target = [out, b"/index-java.scip"].concat();
+        let mut a: Vec<Vec<u8>> = vec![
+            [&home[..], b"/.tools/scip-java/", SCIP_JAVA, b"/scip-java"].concat(),
+            b"index".to_vec(),
+            [&b"--output="[..], &target].concat(),
+            [&b"--targetroot="[..], out, b"/java-targetroot"].concat(),
+        ];
+        if !l.maven && !l.gradle {
+            // No build tool: scip-java compiles the sources itself from a config
+            // of our own, outside the repo. Without one, dependencies are unknown.
+            let cfg = [out, b"/scip-java.json"].concat();
+            sys::write_file(&cfg, b"{\"dependencies\":[],\"jvm\":\"21\"}\n");
+            a.push([&b"--scip-config="[..], &cfg].concat());
+        }
+        let mut genv: Vec<Vec<u8>> = Vec::new();
+        if l.gradle {
+            // The build runs with Swan's Gradle home and, for Android, Swan's
+            // SDK. scip-java's init script cannot run with the configuration
+            // cache or isolated projects, which newer builds turn on. The
+            // tasks are gradle_scip_tasks's: on Android, the (unqualified)
+            // Kotlin compiles instead of scipPrintDependencies, which AGP 9
+            // breaks (so no package versions for callees there). Note the `clean`
+            // first: the repo's build/ output is rebuilt.
+            for w in [&b"--"[..], b"-Dorg.gradle.configuration-cache=false", b"-Dorg.gradle.isolated-projects=false", b"-Dorg.gradle.jvmargs=-Xmx3g", b"-Dkotlin.daemon.jvmargs=-Xmx3g"] {
+                a.push(w.to_vec());
+            }
+            for t in gradle_scip_tasks(&walk, repo).split(|&c| c == b'\n') {
+                if !t.is_empty() {
+                    a.push(t.to_vec());
+                }
+            }
+            genv.push([&b"GRADLE_USER_HOME="[..], &home, b"/.tools/gradle-home"].concat());
+            let sdk = [&home[..], b"/.tools/android-sdk"].concat();
+            if sys::file_exists(&[&sdk[..], b"/licenses/android-sdk-license"].concat()) {
+                genv.push([&b"ANDROID_HOME="[..], &sdk].concat());
+                genv.push([&b"ANDROID_SDK_ROOT="[..], &sdk].concat());
+            }
+        }
+        let genv: Vec<&[u8]> = genv.iter().map(|e| &e[..]).collect();
+        let java_files = lang_fingerprint(
+            &walk,
+            repo,
+            &[b".java", b".kt", b".kts", b".gradle"],
+            &[b"pom.xml", b"build.gradle", b"build.gradle.kts", b"settings.gradle", b"settings.gradle.kts", b"gradle/libs.versions.toml"],
+            |f| stamps.stamp(f),
+        );
+        let fp = hash_combine(java_files, hash(&packed(&a)));
+        jobs.add_lang(report, b"scip-java", &target, a, child_env(&l, &genv, b""), fp, false, b"", false);
+    }
+
+    // C# (Unity, Godot C#, .NET): scip-dotnet over the solution or project at
+    // the repo's root, with Swan's .NET SDK. It runs `dotnet restore`, which
+    // writes the repo's obj/ folders, as a build would.
+    let scip_dotnet = [&home[..], b"/.tools/dotnet-tools/scip-dotnet"].concat();
+    let cs_map = find(&l.other, b"csharp") >= 0 && sys::file_exists(&scip_dotnet) && has_dotnet_project(repo);
+    if cs_map && !trusted {
+        skipped.extend_from_slice(b" scip-dotnet (C#: MSBuild through dotnet restore)");
+        sys::delete_file(&[out, b"/index-csharp.scip"].concat());
+    } else if cs_map {
+        let target = [out, b"/index-csharp.scip"].concat();
+        let a: Vec<Vec<u8>> = vec![scip_dotnet.clone(), b"index".to_vec(), b"--working-directory".to_vec(), repo.to_vec(), b"--output".to_vec(), target.clone()];
+        let denv = dotnet_env(&home);
+        let denv: Vec<&[u8]> = denv.iter().map(|e| &e[..]).collect();
+        let fp = lang_fingerprint(&walk, repo, &[b".cs", b".csproj", b".sln", b".slnx", b".props", b".targets"], &[b"global.json", b"NuGet.config"], |f| stamps.stamp(f));
+        jobs.add_lang(report, b"scip-dotnet", &target, a, child_env(&l, &denv, b""), fp, false, b"", false);
+    }
+
+    if l.c || l.cuda {
+        let target = [out, b"/index-cxx.scip"].concat();
+        let compdb = if sys::file_exists(&[repo, b"/compile_commands.json"].concat()) {
+            [repo, b"/compile_commands.json"].concat()
+        } else if sys::file_exists(&[repo, b"/build/compile_commands.json"].concat()) {
+            [repo, b"/build/compile_commands.json"].concat()
+        } else {
+            let p = [out, b"/compile_commands.json"].concat();
+            write_compdb(&walk, repo, &home, &p);
+            p
+        };
+        let a: Vec<Vec<u8>> = vec![[&home[..], b"/.tools/scip-clang/scip-clang"].concat(), [&b"--compdb-path="[..], &compdb].concat(), [&b"--index-output-path="[..], &target].concat()];
+        let fp = lang_fingerprint(
+            &walk,
+            repo,
+            &[b".c", b".cc", b".cpp", b".cxx", b".h", b".hpp", b".hh", b".cu", b".cuh"],
+            &[b"compile_commands.json", b"build/compile_commands.json"],
+            |f| stamps.stamp(f),
+        );
+        jobs.add_lang(report, b"scip-clang", &target, a, child_env(&l, &[], b""), fp, false, b"", false);
+    }
+
+    if !skipped.is_empty() {
+        report.extend_from_slice(&untrusted_note(&skipped, repo));
+        report.push(b'\n');
+    }
+
+    // Languages with a language server and no SCIP indexer, when their entry
+    // in tools/modules.json says "map": "lsp": `swan lsp-index` (this binary)
+    // asks the server for every definition and its references. Left out when
+    // the server is not installed here.
+    let mut lsp_mapped: Vec<u8> = vec![b' ']; // " go goose ": the languages mapped this way in this run
+    let mut mods_text: Vec<u8> = Vec::new();
+    if !l.other.is_empty() && sys::read_file(&[&home[..], b"/tools/modules.json"].concat(), &mut mods_text) {
+        let swan_bin = [&home[..], b"/bin/swan"].concat();
+        // A file that cannot be read as JSON names no language.
+        if let Some(mods) = json::parse(&mods_text) {
+            for lang in l.other.split(|&c| c == b' ') {
+                let m = mods.member(mods.root(), lang);
+                if mods.as_string(mods.member(m, b"map")) != Some(&b"lsp"[..]) || !lsp_server_present(&mods, m, &home) {
+                    continue;
+                }
+                // Go modules below the top of the repo (from the survey):
+                // one run per module, the server started in the module's
+                // own folder, as an editor opens it. With a go.mod or a
+                // go.work at the top, or no survey, one run over the repo.
+                let mut folders: Vec<u8> = Vec::new();
+                if lang == b"go" {
+                    let mods_at = survey_paths(&survey, b"go", &survey_skip);
+                    if !mods_at.is_empty() && !contains_line(&mods_at, b".") && !sys::file_exists(&[repo, b"/go.work"].concat()) {
+                        folders.extend_from_slice(&mods_at);
+                    }
+                }
+                if folders.is_empty() {
+                    folders.extend_from_slice(b".\n");
+                }
+                let per_folder = folders != b".\n";
+                let mut covered: i64 = 0;
+                let mut all_files: i64 = 0;
+                for within in folders.split(|&c| c == b'\n') {
+                    if within.is_empty() {
+                        continue;
+                    }
+                    let whole = within == b".";
+                    let target = if whole {
+                        [out, b"/index-lsp-", lang, b".scip"].concat()
+                    } else {
+                        [out, b"/index-lsp-", lang, b"-", (hash(within) % 1000000).to_string().as_bytes(), b".scip"].concat()
+                    };
+                    let mut a: Vec<Vec<u8>> = vec![swan_bin.clone(), b"lsp-index".to_vec(), repo.to_vec(), out.to_vec(), lang.to_vec(), target.clone()];
+                    if !whole {
+                        a.push(b"--within".to_vec());
+                        a.push(within.to_vec());
+                    }
+                    let mut fp = hash(&[b"lsp-index-2\t", lang, b"\t", within, b"\t", &swan_bin[..], b"\t", sys::file_size(&swan_bin).to_string().as_bytes()].concat());
+                    let under = [repo, b"/", within, b"/"].concat();
+                    walk.each_file(repo, |full, name| {
+                        if lang_of_path(name) == lang && (whole || starts_with(full, &under)) {
+                            fp = hash_combine(fp, hash_combine(hash(full), stamps.stamp(full)));
+                            covered += 1;
+                        }
+                    });
+                    let label = if whole { [b"lsp-index ", lang].concat() } else { [b"lsp-index ", lang, b" ", within].concat() };
+                    jobs.add_lang(report, &label, &target, a, child_env(&l, &[], b""), fp, false, b"", false);
+                }
+                if per_folder {
+                    walk.each_file(repo, |_full, name| {
+                        if lang_of_path(name) == lang {
+                            all_files += 1;
+                        }
+                    });
+                    report.extend_from_slice(lang);
+                    report.extend_from_slice(b": ");
+                    push_int(report, count_lines(&folders));
+                    report.extend_from_slice(b" modules below the top of the repo, each mapped from its own folder");
+                    if all_files > covered {
+                        report.extend_from_slice(b"; ");
+                        push_int(report, all_files - covered);
+                        report.extend_from_slice(&[b" ", lang, b" files outside every module are not mapped"].concat());
+                    }
+                    report.push(b'\n');
+                }
+                lsp_mapped.extend_from_slice(lang);
+                lsp_mapped.push(b' ');
+            }
+        }
+    }
+    if l.syn {
+        // No compiler, no repo code run: a syntax-level map (definitions,
+        // bodies, references by name) for the languages above.
+        let target = [out, b"/index-syntax.scip"].concat();
+        // `swan syntax-index` (src/syntax.rs), this binary itself.
+        let swan_bin = [&home[..], b"/bin/swan"].concat();
+        let mut a: Vec<Vec<u8>> = vec![swan_bin.clone(), b"syntax-index".to_vec(), repo.to_vec(), target.clone()];
+        // Go mapped by its language server is left out here: its rows would
+        // only repeat, by name, what the server resolved.
+        let skip_go = find(&lsp_mapped, b" go ") >= 0;
+        if skip_go {
+            a.push(b"--skip".to_vec());
+            a.push(b"go".to_vec());
+        }
+        let skip_word: &[u8] = if skip_go { b"\tskip-go" } else { b"" };
+        let mut fp = hash(&[&b"syntax-goose-1\t"[..], &swan_bin, b"\t", sys::file_size(&swan_bin).to_string().as_bytes(), skip_word].concat());
+        walk.each_file(repo, |full, name| {
+            if syntax_file(full, name) && !(skip_go && ends_with(name, b".go")) {
+                fp = hash_combine(fp, hash_combine(hash(full), stamps.stamp(full)));
+            }
+        });
+        jobs.add_lang(report, b"syntax-index", &target, a, child_env(&l, &[], b""), fp, false, b"", false);
+    }
+    // (What waits for trust is also kept for `swan serve` to say, in the
+    // Goose program's `map_held`: that comes with the server.)
+    if jobs.list.is_empty() && (l.kt || !l.other.is_empty() || !skipped.is_empty()) {
+        // Nothing to index, but the code can still be searched by structure
+        // and checked live: an empty map records the repo for search_pattern
+        // and the rest.
+        for t in [&b"symbols.tsv"[..], b"extents.tsv", b"relationships.tsv", b"occurrences.tsv"] {
+            sys::write_file(&[out, b"/", t].concat(), b"");
+        }
+        index_main_locked(out, &[out, b"/swan.db"].concat(), repo, false, report);
+        if l.kt || !l.other.is_empty() {
+            report.extend_from_slice(&[&b"\n"[..], if l.kt { &b"kotlin "[..] } else { b"" }, &l.other, b": no SCIP indexer ran for these; search_pattern and rewrite_pattern work on them, and live diagnostics where their server is set up"].concat());
+        }
+        report.extend_from_slice(b"\nswan map: ");
+        push_int(report, t_start.elapsed().as_millis() as i64);
+        report.extend_from_slice(b" ms in all");
+        return true;
+    }
+    if jobs.list.is_empty() {
+        report.extend_from_slice(&[b"no language found to index in ", repo].concat());
+        return false;
+    }
+
     // Carried this far (docs/rust-port.md, "Next"): what was said so far is
     // printed, and the jobs, the indexers and the rows they give are not run.
     // Read where the jobs are run and the map's records written, still to
     // be carried.
-    let _ = (&jobs.list, &jobs.index_manifest, jobs.reused_all);
+    let _ = (&jobs.list, &jobs.index_manifest, jobs.reused_all, rust_indexed);
     print(report);
     crate::not_carried(b"map", 4);
 }

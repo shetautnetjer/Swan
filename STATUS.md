@@ -2433,3 +2433,73 @@ Limits:
   The Goose program's kept answers go stale when those change: remove
   `build/port-map/` then.
 - The suite was not run for this piece: no Goose source changed.
+
+## 2026-11-22T18:45Z: stage 4: every job of a map planned in Rust, and a repo with nothing to run mapped to its end
+
+The Rust map is carried to where its jobs are run (src/pipeline.goose line
+2187). After Python's pieces: the cargo projects (one rust-analyzer run
+each, twelve at most, with the toolchain a folder pins), Java (scip-java,
+with its own config when there is no build tool), C# (scip-dotnet), C and
+CUDA (scip-clang, with a list of compile commands written when the repo has
+none), what waits for `swan trust` and its line in the report, the
+languages a server maps (`lsp-index`, a run for each Go module below the
+top), and the syntax index. A repo with nothing to run is now mapped to its
+end by the Rust program: an empty map, or "no language found to index".
+
+| Judge | Result |
+|---|---|
+| `port-map.sh` | 440 of 440 the same: the 395 of before, and 45 new |
+| Of the 440 | 32 end as the Goose program ends (a map made, or a map refused) and are compared whole; 408 stop with exit 70 where the jobs would run |
+| The new cases, first runs | Rust's 10: 9 the same, the tenth a fault of the made-up repo (below). Java, C#, C and CUDA's 26: all the same. The servers' languages and the endings' 9: all the same |
+| `port-prove-map.py` | No breaks for these parts. 370 of 370 of the earlier ones fit the source (`--fit`) |
+| Others | `cargo test` 9 and 2 passed, `port-plan.sh` 443 of 443 |
+
+The 45 new cases: a cargo project at the top, trusted, not sealed, both;
+one with a second project inside it, mapped again and with a source
+changed; fourteen projects side by side; a pinned toolchain that is not
+installed and one that is, older than the default (10). Java alone, mapped
+again, and with each file that names a build tool; Kotlin with Gradle and
+with Maven; C# with each kind of project file and with none at the top; C,
+C++ and CUDA, mapped again, with `$CUDA_PATH` set, and with the repo's own
+compile commands in each place; everything that waits for trust in one
+repo, sealed and not (26). Go modules below the top with a file outside
+them, with a go.work, with the top among the modules, with one module, with
+no survey; a repo of Kotlin alone mapped clean, again, and again clean; a
+repo of nothing mapped clean (9).
+
+What the judge learned:
+- Where both programs end the same way, the map itself is compared by its
+  rows: every table as text, each program's own folder and the two times a
+  map notes of itself apart. (Before, such an ending never left a map.)
+- rust-analyzer's settings file is compared wherever either program writes
+  one, and scip-java's config and the list of compile commands always.
+- A trusted map may write in the repo: cargo wrote a `Cargo.lock` into a
+  made-up repo during the Goose program's run, and the Rust program then
+  surveyed a repo that had changed. The made-up cargo projects now carry
+  the lock file cargo would write.
+- A made-up Cargo.toml held a line end as two characters, so the project
+  inside another never loaded and "rust project fuzz: reused" was never
+  said. Found by reading what the Goose program had said of the case.
+
+What differs, and is meant to: the index `lsp-index` writes and the syntax
+index are kept while a fingerprint holds that takes in the program that
+made them (its path and size). The Rust program therefore never keeps one
+the Goose program made, and the two lines that say such an index is kept
+are left out of what the judge compares.
+
+Limits:
+- A map with anything to run is still not made by the Rust program.
+- The prover has no breaks for Python's pieces or for these parts: 123
+  cases are not yet shown to catch what they were made for (AGENTS.md rule
+  4). The owner has been asked how the prover should be used from here.
+- Trusted Java and C# are not judged: the Goose program would run Maven,
+  Gradle or `dotnet restore` from the network on the made-up repos. So the
+  Gradle tasks and what a Gradle run is given to run with are carried and
+  not compared.
+- scip-java's index is never shown kept: its fingerprint takes in the map
+  folder's path, and the judge's second maps start from a copy made
+  elsewhere. That it is *not* kept there is compared.
+- What each job is to run is worked out and not judged until the jobs run.
+- The Goose program keeps what waits for trust for `swan serve` to say
+  (`map_held`); that comes with the server.
+- The suite was not run for this piece: no Goose source changed.

@@ -17,6 +17,7 @@ mod gradle;
 mod graph;
 mod index;
 mod json;
+mod modules;
 mod pipeline;
 mod pypatch;
 mod pyplan;
