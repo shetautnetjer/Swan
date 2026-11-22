@@ -278,6 +278,11 @@ def prove(here, cargo, work):
     # break, so only the one crate is compiled each time.
     copy = os.path.join(work, "rust")
     shutil.copytree(os.path.join(here, "rust"), copy, ignore=shutil.ignore_patterns("target"))
+    # rust/build.rs finds goose-treesitter's C through the import line of
+    # src/swan.goose beside rust/, in the Goose build's cache.
+    os.makedirs(os.path.join(work, "src"), exist_ok=True)
+    shutil.copy(os.path.join(here, "src", "swan.goose"), os.path.join(work, "src", "swan.goose"))
+    os.environ.setdefault("GOOSE_HOME", os.path.join(here, ".tools", "goose-home"))
     # The unbroken program first: a judge that does not pass it would "catch"
     # every break by failing for some other reason (review on #75).
     made = subprocess.run([cargo, "build", "--release", "--manifest-path", os.path.join(copy, "Cargo.toml")],

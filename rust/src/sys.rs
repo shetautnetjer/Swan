@@ -72,6 +72,66 @@ pub fn read_file(p: &[u8], out: &mut Vec<u8>) -> bool {
     ok
 }
 
+/// Writes the whole file, replacing what was there; false when it cannot be
+/// written (Goose's write_file).
+pub fn write_file(p: &[u8], data: &[u8]) -> bool {
+    fs::write(path(p), data).is_ok()
+}
+
+/// Makes one folder; true if one is there afterwards (Goose's make_dir).
+pub fn make_dir(p: &[u8]) -> bool {
+    let _ = fs::create_dir(path(p));
+    is_dir(p)
+}
+
+/// How many processors are online (native/swan_sys.c, swan_cpu_count).
+pub fn cpu_count() -> i64 {
+    let n = unsafe { libc::sysconf(libc::_SC_NPROCESSORS_ONLN) };
+    if n > 0 {
+        n as i64
+    } else {
+        1
+    }
+}
+
+/// How many threads to work on: what this process may run on at once.
+pub fn hardware_threads() -> i64 {
+    std::thread::available_parallelism().map(|n| n.get() as i64).unwrap_or(1)
+}
+
+/// The absolute path of the running program (native/swan_sys.c, swan_exe_path).
+pub fn exe_path() -> Option<Vec<u8>> {
+    fs::read_link("/proc/self/exe").ok().map(|p| p.into_os_string().into_vec())
+}
+
+/// Starts argv in `cwd` with this process's environment, nothing to read
+/// and its output and errors going to `log` (native/swan_sys.c, swan_spawn).
+/// None when it could not be started.
+pub fn spawn_logged(argv: &[&[u8]], cwd: &[u8], log: &[u8]) -> Option<std::process::Child> {
+    use std::process::{Command, Stdio};
+    let mut c = Command::new(OsStr::from_bytes(argv[0]));
+    c.args(argv[1..].iter().map(|a| OsStr::from_bytes(a))).stdin(Stdio::null());
+    if !cwd.is_empty() {
+        c.current_dir(path(cwd));
+    }
+    if let Ok(f) = fs::File::create(path(log)) {
+        if let Ok(g) = f.try_clone() {
+            c.stdout(f).stderr(g);
+        }
+    }
+    c.spawn().ok()
+}
+
+/// Waits for a program started by spawn_logged: its exit code, 128 + the
+/// signal that ended it, or -1 (native/swan_sys.c, swan_wait_any).
+pub fn wait_code(mut child: std::process::Child) -> i32 {
+    use std::os::unix::process::ExitStatusExt;
+    match child.wait() {
+        Ok(s) => s.code().or_else(|| s.signal().map(|g| 128 + g)).unwrap_or(-1),
+        Err(_) => -1,
+    }
+}
+
 pub fn delete_file(p: &[u8]) -> bool {
     fs::remove_file(path(p)).is_ok()
 }

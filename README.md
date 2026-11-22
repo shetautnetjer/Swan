@@ -15,17 +15,18 @@ The program that ships, builds and installs today is still written in
 [Goose](https://aardappel.github.io/goose/) (`src/*.goose`). It is being
 carried over to Rust, a complete overhaul done one stage at a time, in
 `rust/`. The owner's reason: Rust has a more developed ecosystem
-([DECISIONS.md](DECISIONS.md)). Done and merged on 2026-11-20, three of the
-nine stages: stage 0
-(commands, usage text, exit codes), stage 1 (the store: `index`, `refresh`
-and 13 of the 14 `query` kinds) and stage 2 (planning that runs nothing:
-`cargo-projects`, `gradle-tasks` and `plan-python`), each checked against
-the Goose program answer by answer (the numbers are in
-[STATUS.md](STATUS.md)). Not on main: stages 3 to 8 (syntax and pattern
-search, the map, language servers, checking and editing, the server, the
-switch); stage 3 is under way on a branch. Nothing of the Rust program is
-built by `scripts/build.sh`, installed or shipped yet, and the rest of this
-page describes the Goose program. The bar, the stages and the log are in
+([DECISIONS.md](DECISIONS.md)). Done: stages 0 to 3, four of the nine.
+Stage 0 (commands, usage text, exit codes), stage 1 (the store: `index`,
+`refresh` and `query`) and stage 2 (planning that runs nothing:
+`cargo-projects`, `gradle-tasks` and `plan-python`) were merged on
+2026-11-20. Stage 3 (syntax: structural search behind `query <db> pattern`,
+the syntax-level index behind `syntax-index`, and the stamps behind
+`stamp-bench` and `stamp-worker`) was finished on 2026-11-22. Each was
+checked against the Goose program answer by answer (the numbers are in
+[STATUS.md](STATUS.md)). Not done: stages 4 to 8 (the map, language
+servers, checking and editing, the server, the switch). Nothing of the Rust
+program is built by `scripts/build.sh`, installed or shipped yet, and the
+rest of this page describes the Goose program. The bar, the stages and the log are in
 [docs/rust-port.md](docs/rust-port.md); the work in progress is in
 [HANDOFF.md](HANDOFF.md).
 
@@ -612,13 +613,20 @@ tools/              modules.json, external npm tool manifest (the Node indexers 
 tests/               MCP smoke test, refresh-vs-fresh check, latency bench
 fixtures/tiny-ts/    a small repo with the tricky cases (re-export, rename, same-name method and function)
 skills/swan-code-check/  the agent skill for using Swan (single source; copies follow it, see its PROVENANCE.md)
-rust/                the port to Rust in progress (docs/rust-port.md); the Goose program above is what ships. So far the store: main.rs (commands), index.rs, scip.rs, fresh.rs, walk.rs, query.rs, graph.rs, diag.rs, db.rs, sys.rs and util.rs, each carried from the Goose file of its name; and from stage 2, rustproj.rs (`cargo-projects`), gradle.rs (`gradle-tasks`) and pyplan.rs (`plan-python`)
+rust/                the port to Rust in progress (docs/rust-port.md); the Goose program above is what ships. So far the store: main.rs (commands), index.rs, scip.rs, fresh.rs, walk.rs, query.rs, graph.rs, diag.rs, db.rs, sys.rs and util.rs, each carried from the Goose file of its name; and from stage 2, rustproj.rs (`cargo-projects`), gradle.rs (`gradle-tasks`) and pyplan.rs (`plan-python`); from stage 3, treesitter.rs (tree-sitter through goose-treesitter's own C, which build.rs builds from the Goose build's copy, and the structural matcher), structural.rs (`swan query <db> pattern`), syntax.rs (`swan syntax-index`), change.rs (the stamp of a file's code; the rest of src/change.goose comes with editing, at stage 6), stamp.rs (`swan stamp-bench` and `stamp-worker`) and bin/port-trees.rs
 scripts/port-compare.sh  one swan command run by the Goose program and by the Rust port: output, error text and exit code compared
 scripts/port-store.sh    the store's comparison: the same map (table hashes), the same refusals, the same staleness, the same answers
 scripts/port-tables.sh   a map's schema and tables as row counts and hashes
 scripts/port-prove.py    the store's comparison seen failing: nine copies of the Rust program, each broken in one place on purpose, each to be caught
 scripts/port-plan.sh     stage 2's comparison: the planning commands on the fixtures, made-up repos and any repos given (cargo-projects under three rustup homes)
 scripts/port-prove-plan.py  stage 2's comparison seen failing: copies of the Rust program broken on purpose, each to be caught
+scripts/port-trees.sh    stage 3's first comparison: every file with a grammar parsed by both programs (scripts/port-trees.goose, rust/src/bin/port-trees.rs), the trees compared by bytes
+scripts/port-pattern.sh  stage 3's comparison for structural search: patterns asked of a made-up repo in all 17 languages and of any maps given
+scripts/port-prove-pattern.py  that comparison seen failing: copies of the Rust program broken on purpose, each to be caught
+scripts/port-syntax.sh   stage 3's comparison for the syntax-level index: `syntax-index` on a made-up repo in its five languages, on the fixtures, this repository and any repos given; the two index files compared by bytes
+scripts/port-prove-syntax.py  that comparison seen failing: copies of the Rust program broken on purpose, each to be caught
+scripts/port-stamp.sh    stage 3's comparison for the stamps: `stamp-bench` and `stamp-worker` with one process, worker processes and threads; the stamp lines and the kept texts compared
+scripts/port-prove-stamp.py  that comparison seen failing: copies of the Rust program broken on purpose, each to be caught
 ```
 
 ## License

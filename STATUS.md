@@ -1726,6 +1726,45 @@ Limits: the cloud container, as for the commands before: not the trial
 repos, not the microVM suite. Stage 2 is on the session's branch with the
 rest of today's work; main needs the owner's word.
 
+## 2026-11-20T21:10Z: stage 3 of the port begun: tree-sitter in Rust, the same trees
+
+What was missing: the Rust program could not parse a file. Stage 3
+(syntax-index, query pattern, stamps) reads tree-sitter trees, and they
+must be the Goose program's to the byte.
+
+Changed: `rust/build.rs` builds goose-treesitter's own C, its `ts_shim.c`,
+tree-sitter 0.25.10 and the 17 grammars, from the copy the Goose build
+fetches, at the commit `src/swan.goose` imports and with the file and
+include lists of that package's `treesitter.build`. `rust/src/treesitter.rs`
+calls the shim (`parse`) and carries `language_of_path`. Two dumpers print
+a file's tree as its eight numbers a node: `scripts/port-trees.goose`
+(the Goose program's) and `rust/src/bin/port-trees.rs` (the Rust
+program's). `scripts/port-trees.sh` compares them. `cc` 1.11.2 (already
+in the lock file) is the one new build dependency. Nothing ships.
+
+Checked:
+- `scripts/port-trees.sh` on the fixtures, Swan's own wings/, native/ and
+  lsp/, and 25 public repos (shallow clones, read only; among them wgpu,
+  godot-demo-projects, laravel, cuda-samples, redis, shadcn-ui, django,
+  nowinandroid): 25,300 of 25,300 files the same tree, about 46 million
+  nodes; every grammar, from 86 Lua files to 7,142 Rust files.
+- Seen failing: two broken copies of the Rust dumper: `.h` files taken
+  for C++ (caught on the first header), and a changed shim that puts every
+  column one too far (caught on the first file).
+- `cargo test` 5 of 5, `--wrong-calls` 47 of 47.
+
+Cost: the build compiles the grammars once (about 20 s here); the dumper
+is 32 MB with every grammar in it.
+
+Limits:
+- The Rust build now needs the goose-treesitter copy the Goose build
+  fetches; how it gets these sources once Goose is gone is stage 8's
+  question (docs/rust-port.md, "Found while porting").
+- Only the trees: `query pattern`, `syntax-index` and the stamps are not
+  carried yet. The matcher, goose-treesitter's `treesitter.goose`, is Goose
+  to carry too.
+- Run in a cloud session; not the trial repos, not the microVM suite.
+
 ## 2026-11-20T21:13Z: a convention plugin's id counts only where a plugin is applied
 
 What was wrong (review of the change above, Macroscope): a convention
@@ -1791,6 +1830,49 @@ carries Goose as it is; the fix (`sizes.len / 2 < k`, the same answer for
 every k that does not overflow) is a change to both programs, waiting for
 the owner.
 
+## 2026-11-20T23:53Z: stage 3 of the port: structural search (`swan query <db> pattern`) in Rust, the same bytes
+
+What changed (branch `rust-stage-3`):
+- `rust/src/treesitter.rs` carries goose-treesitter's matcher
+  (`treesitter.goose` at `59313e9da0b9`, the commit `src/swan.goose`
+  imports). That covers renaming `$X` and `$$$X`, and leaving alone strings,
+  comments, raw and verbatim strings, triple quotes, Lua long brackets and
+  PHP heredocs. It covers the ten contexts a pattern is tried in and the
+  matching rules: repeated names, `_`, punctuation the pattern leaves out,
+  the comma beside an empty `$$$`. The search runs on up to 16 threads.
+- `rust/src/structural.rs` carries `search_pattern` from
+  `src/structural.goose`: the 17 languages, `in_symbol`, `stale`,
+  `truncated`, and why a language was skipped.
+- `scripts/port-pattern.sh` is the judge. It writes a made-up repo with
+  code in all 17 languages, maps it with the Goose program, edits one file
+  after so its matches are stale, and asks 35 patterns under 5 paths, 6
+  multi-line patterns and `$X`.
+- `scripts/port-prove-pattern.py` is its prover: 33 breaks.
+
+Checked:
+- The made-up repo: 182 of 182 the same.
+- With eight maps (swan-rust, django, laravel, godot-demo-projects, wgpu,
+  ripgrep, shadcn-ui, and flask mapped by scip-python): 1630 of 1630 the same, in 171 s.
+- The prover: the unbroken program passes (182 of 182), then 33 of 33
+  breaks caught. The first judge caught 23 of 34. Its strings held `$`
+  only where the plain string rule already kept it, so five string and
+  comment rules, the GDScript indent, the Rust and C function context and
+  three punctuation rules changed nothing it asked. Ten new cases close
+  ten of the eleven holes (docs/rust-port.md, "Found while porting").
+- Time, best of three on 4 cores, Goose then Rust: `$F($$$)` on django
+  (203,612 matches) 1,483 and 1,334 ms; `$X.unwrap()` on wgpu (2,108)
+  544 and 567 ms.
+- The eleventh cannot be seen. A GDScript pattern's further lines are
+  indented into a function, but the grammar reads the same statements at
+  the top of a file, so the rule is never reached. 22 texts parsed both
+  ways and 10 patterns on godot-demo-projects gave the same bytes without
+  it. It is carried as it is, with no break.
+
+Limits: `fill_template`, the rewrite half of the matcher, is not carried.
+It goes with `rewrite_pattern` in the server's stage. Six of the eight
+maps were built with empty symbol rows, so `in_symbol` is judged only on
+the made-up repo, swan-rust and flask.
+
 ## 2026-11-22T05:38Z: the README said stage 2 of the port was on a branch
 
 What was wrong: the note at the top of `README.md` still read "Done on a
@@ -1810,3 +1892,113 @@ in `docs/rust-port.md`. Words only: no code, no build and no suite run.
 Limits: the note will be stale again when stage 3 merges; that pull
 request has to update it. The page below the note still describes the
 Goose program, as the note says.
+
+## 2026-11-22T06:15Z: stage 3 of the port done: `syntax-index` and the stamps in Rust, the same bytes
+
+What was missing: the Rust program answered `swan syntax-index`,
+`stamp-bench` and `stamp-worker` with exit 70, "not carried over yet".
+
+Changed:
+- `rust/src/syntax.rs` carries src/syntax.goose: the walk, the line
+  patterns of Go, shell, Make, Ruby and Lua, where a body ends, uses found
+  by name (same file, then folder, then repo, at most three), and the SCIP
+  file. `swan syntax-index <repo> <out.scip> [--skip go]`.
+- `rust/src/change.rs` carries the code stamp of src/change.goose
+  (`cosmetic_lang`, `code_hash`, the comments that count) and
+  `line_of_path`; the rest of that file is stage 6.
+- `rust/src/stamp.rs` carries src/stamp.goose: a stamp line, the workers as
+  processes and as threads, `stamp-bench` and `stamp-worker`.
+- `sys.rs`: writing a file, making a folder, the processor count, starting
+  a worker with its output in a log, and waiting for it. `util.rs`:
+  Goose's hash of a whole number.
+- Judges: `scripts/port-syntax.sh` and `scripts/port-stamp.sh`, each with
+  its prover (`port-prove-syntax.py`, `port-prove-stamp.py`).
+  `scripts/port-compare.sh` takes the time off `stamp-bench`'s last line.
+
+Checked, Goose program built from this commit against the Rust program:
+
+| Judge | Result |
+|---|---|
+| `port-syntax.sh` | 57 of 57 the same: a made-up repo (62 files, asked 15 ways), 20 fixtures and this repository, each with and without `--skip go` |
+| `port-syntax.sh` with 8 repos | 73 of 73. The largest: 1,572 files, 3,592 definitions, 91,170 occurrences, an index of 8,402,085 bytes, the same bytes |
+| `port-prove-syntax.py` | 107 of 107 breaks caught. The first run caught 105 of 107 |
+| `port-stamp.sh` | 82 of 82 the same: a made-up repo (340 files to stamp) with one process, 3 to 64 worker processes, 2 and 3 threads, and each way the two commands fail; 20 fixtures and this repository |
+| `port-stamp.sh` with 6 repos | 94 of 94. rea, 7,784 files: the same bytes from one process and from 32 workers; the same lines, in another order, from 4 threads |
+| `port-prove-stamp.py` | 59 of 59 breaks caught |
+| Earlier judges | wrong calls 47 of 47; `port-pattern.sh` 182 of 182; `cargo test` 7 passed; no warnings |
+
+The two breaks the first judge missed: a file one byte over the largest
+size read where one of exactly that size was meant, and a carriage return
+that changed nothing the made-up lines showed. Both have a case now.
+
+Cost, the median of 7 or 9 runs on 32 cores:
+
+| | Goose | Rust |
+|---|---|---|
+| `syntax-index`, 1,572 shell and Lua files | 54.0 ms | 52.6 ms |
+| `stamp-bench`, rea, one process | 6,282 ms | 6,241 ms |
+| `stamp-bench`, rea, 32 worker processes | 459 ms | 468 ms |
+| `stamp-bench`, rea, 4 threads | 1,674 ms | 1,668 ms |
+
+The first Rust `syntax-index` took 63 ms: each word was looked up through
+Rust's standard hash with a key made for the lookup. It now uses the hash
+the rest of the port uses.
+
+Limits:
+- The check suites judge the Goose program, whose sources this branch does
+  not change; the Rust program cannot run them before stage 8.
+- `stamp_known` and `line_of_path` are carried but nothing here reaches
+  them: `stamp-bench` starts from no stamps. They are judged with the map,
+  at stage 4.
+- On threads the two programs can report another thread count when more
+  are asked for than one runtime allows; the judge asks for 2 and 3.
+- A file that cannot be read is left out by both, which only shows when
+  the judge does not run as root.
+- Four rules of `syntax-index` and three of the stamps cannot be shown by
+  either command and have no break; the provers list them.
+- The pull request for stage 3 is not opened, and the note at the top of
+  README.md is changed here and in #77: whichever merges second keeps this
+  branch's note with #77's sentence on the owner's reason.
+
+## 2026-11-22T06:22Z: the full suite in the microVM on stage 3's commit
+
+`scripts/space-test.sh` on `2a75e1c` (branch `rust-stage-3`), in a fork of
+the checkpoint `swan-test-v4`, about five minutes: 58 checks passed, 0
+failed (mcp and maps); the cosmetic, layer and piece checks passed; 56
+Python tests OK; 322 checks passed, 0 failed (rust, split, agnostic, diag,
+kotlin, game, live, trust, edit, lang, structural, pypatch). Exit 0, and
+the fork was deleted.
+
+What it judges: the Goose program. Outside `rust/`, the `scripts/port-*`
+judges and the records, this commit is main's (`049fd7c`), so this is also
+the first full run on those sources since #74 and #76 went in.
+
+Seen and not explained: after the count the run's last line was
+`typescript test: exit 127 after 0 ms`. It is not among the checks, and I
+did not find what prints it.
+
+Limit: this entry is one commit after the tree that was tested; that
+commit changes STATUS.md and HANDOFF.md only.
+
+## 2026-11-22T06:38Z: #77 merged, main merged in, the suite again, and the pull request for stage 3 (#78)
+
+On the owner's word ("merge, open pr and continue"): #77 was merged into
+main (`15e2687`), main was merged into `rust-stage-3` (`4b22745`), and the
+pull request for stage 3 was opened, #78. It is not merged: his word
+covered #77.
+
+The merge: README.md's note keeps this branch's stages with #77's sentence
+on the owner's reason; STATUS.md and DECISIONS.md keep both sets of
+entries, in time order. No other file differed.
+
+Checked on `4b22745`:
+- `scripts/space-test.sh` in the microVM: 58 checks passed, 0 failed; the
+  cosmetic, layer and piece checks passed; 56 Python tests OK; 322 checks
+  passed, 0 failed. Exit 0.
+- `port-syntax.sh` 57 of 57, `port-stamp.sh` 82 of 82, wrong calls 47 of
+  47.
+- Not run again: the three provers. The Rust sources are those of
+  `2a75e1c`, where they caught 33 of 33, 107 of 107 and 59 of 59.
+
+Limit: this entry is one commit after the tree that was tested; that
+commit changes STATUS.md and HANDOFF.md only.

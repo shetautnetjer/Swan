@@ -22,7 +22,8 @@
 #   - the Goose runtime's wrapper around an error: "goose runtime error: "
 #     before the message and " (src/x.goose:N)" after it. The message itself
 #     is compared.
-#   - the time a command says it took: " in N ms" at the end of a line
+#   - the time a command says it took: " in N ms" at the end of a line, and
+#     the line "stamp-bench: N ms"
 #   - with PORT_EACH_IN, the name of each program's own folder
 #
 # Exit 0: the same. 1: different (a diff is printed). 3: the Rust program says
@@ -57,9 +58,9 @@ tidy() {
     if [ -n "$2" ]; then
         local folder
         folder=$(printf '%s' "$2" | sed 's/[][\.*^$|+?(){}]/\\&/g')
-        sed -E -e 's/ in [0-9]+ ms$//' -e "s|$folder|<its folder>|g" "$1"
+        sed -E -e 's/ in [0-9]+ ms$//' -e 's/^stamp-bench: [0-9]+ ms$/stamp-bench:/' -e "s|$folder|<its folder>|g" "$1"
     else
-        sed -E -e 's/ in [0-9]+ ms$//' "$1"
+        sed -E -e 's/ in [0-9]+ ms$//' -e 's/^stamp-bench: [0-9]+ ms$/stamp-bench:/' "$1"
     fi
 }
 

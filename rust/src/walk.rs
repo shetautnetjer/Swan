@@ -61,7 +61,7 @@ impl Walk {
     }
 
     // Whether a walk leaves this folder out.
-    fn skips(&self, full: &[u8]) -> bool {
+    pub fn skips(&self, full: &[u8]) -> bool {
         let r = &self.repo[..];
         if !(!self.ignored.is_empty() && full.len() > r.len() + 1 && starts_with(full, r) && full[r.len()] == b'/') {
             return false;
