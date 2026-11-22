@@ -613,7 +613,7 @@ tools/              modules.json, external npm tool manifest (the Node indexers 
 tests/               MCP smoke test, refresh-vs-fresh check, latency bench
 fixtures/tiny-ts/    a small repo with the tricky cases (re-export, rename, same-name method and function)
 skills/swan-code-check/  the agent skill for using Swan (single source; copies follow it, see its PROVENANCE.md)
-rust/                the port to Rust in progress (docs/rust-port.md); the Goose program above is what ships. So far the store: main.rs (commands), index.rs, scip.rs, fresh.rs, walk.rs, query.rs, graph.rs, diag.rs, db.rs, sys.rs and util.rs, each carried from the Goose file of its name; and from stage 2, rustproj.rs (`cargo-projects`), gradle.rs (`gradle-tasks`) and pyplan.rs (`plan-python`); from stage 3, treesitter.rs (tree-sitter through goose-treesitter's own C, which build.rs builds from the Goose build's copy, and the structural matcher), structural.rs (`swan query <db> pattern`), syntax.rs (`swan syntax-index`), change.rs (the stamp of a file's code; the rest of src/change.goose comes with editing, at stage 6), stamp.rs (`swan stamp-bench` and `stamp-worker`) and bin/port-trees.rs
+rust/                the port to Rust in progress (docs/rust-port.md); the Goose program above is what ships. So far the store: main.rs (commands), index.rs, scip.rs, fresh.rs, walk.rs, query.rs, graph.rs, diag.rs, db.rs, sys.rs and util.rs, each carried from the Goose file of its name; and from stage 2, rustproj.rs (`cargo-projects`), gradle.rs (`gradle-tasks`) and pyplan.rs (`plan-python`); from stage 3, treesitter.rs (tree-sitter through goose-treesitter's own C, which build.rs builds from the Goose build's copy, and the structural matcher), structural.rs (`swan query <db> pattern`), syntax.rs (`swan syntax-index`), change.rs (the stamp of a file's code; the rest of src/change.goose comes with editing, at stage 6), stamp.rs (`swan stamp-bench` and `stamp-worker`) and bin/port-trees.rs; from stage 4 so far, pypatch.rs and tspatch.rs (`swan scip-python-patch` and `scip-typescript-patch`)
 scripts/port-compare.sh  one swan command run by the Goose program and by the Rust port: output, error text and exit code compared
 scripts/port-store.sh    the store's comparison: the same map (table hashes), the same refusals, the same staleness, the same answers
 scripts/port-tables.sh   a map's schema and tables as row counts and hashes
@@ -627,6 +627,8 @@ scripts/port-syntax.sh   stage 3's comparison for the syntax-level index: `synta
 scripts/port-prove-syntax.py  that comparison seen failing: copies of the Rust program broken on purpose, each to be caught
 scripts/port-stamp.sh    stage 3's comparison for the stamps: `stamp-bench` and `stamp-worker` with one process, worker processes and threads; the stamp lines and the kept texts compared
 scripts/port-prove-stamp.py  that comparison seen failing: copies of the Rust program broken on purpose, each to be caught
+scripts/port-patch.sh    stage 4's comparison for the indexer patches: `scip-python-patch` and `scip-typescript-patch` on the three files they patch and on files they must refuse; the file left compared by bytes and permissions
+scripts/port-prove-patch.py  that comparison seen failing: copies of the Rust program broken on purpose, each to be caught
 ```
 
 ## License

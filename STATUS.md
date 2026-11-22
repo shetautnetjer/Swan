@@ -2002,3 +2002,44 @@ Checked on `4b22745`:
 
 Limit: this entry is one commit after the tree that was tested; that
 commit changes STATUS.md and HANDOFF.md only.
+
+## 2026-11-22T06:39Z: stage 4 of the port begun: the two indexer patches in Rust, the same bytes
+
+What was missing: the Rust program answered `swan scip-python-patch` and
+`swan scip-typescript-patch` with exit 70, "not carried over yet".
+
+Changed (branch `rust-stage-4`, on `rust-stage-3`):
+- `rust/src/pypatch.rs` carries the sites of src/pypatch.goose (the
+  reachability memo for pyright-internal.js, the package and Python-version
+  fix for scip-python.js) and how a file is patched: every site exactly
+  once or nothing, the whole file replaced by rename.
+- `rust/src/tspatch.rs` carries the sites of src/tspatch.goose (stable
+  names in FileIndexer.js).
+- The sites, 26 strings, were copied from the Goose sources by a script,
+  not by hand.
+- `sys.rs`: `write_file_atomic`, Goose's: a new file beside the old,
+  flushed, renamed over it.
+- Not carried yet: the three functions that make sure of a patch before a
+  map runs an indexer. They come with the map.
+
+Checked, Goose program built from this branch against the Rust program:
+
+| Judge | Result |
+|---|---|
+| `port-patch.sh` | 105 of 105 the same: each of the three files with and without its patch, patched and reverted; every site twice, one site twice, half a file, an empty one, one that holds only the mark; a file that is not there, a folder, a link, a name with a space, a folder that cannot be written; each text under the others' names |
+| What is compared | what is printed, the exit code, the file's bytes, its permissions, and that nothing is left beside it |
+| `port-prove-patch.py` | 29 of 29 breaks caught, on the first run |
+| Permissions | the replaced file takes the same permissions in both under four umasks (000, 002, 027, 077), whatever the old file had |
+
+Also found: the line the suite ends on, `typescript test: exit 127 after 0
+ms`, is the account `run_step` (src/run.goose) writes for a step that
+could not be started: a step labelled `typescript test` whose program was
+not found. Which check starts it was not looked into.
+
+Limits:
+- Three things have no break because neither command can show them; the
+  prover lists them. A folder that cannot be written only shows when the
+  judge does not run as root.
+- The judge needs the indexers' files in tools/node_modules
+  (`scripts/fetch-tools.sh`); without them it stops with exit 2.
+- The suite was not run for this piece: no Goose source changed.

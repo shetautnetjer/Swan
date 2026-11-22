@@ -15,6 +15,7 @@ mod fresh;
 mod gradle;
 mod graph;
 mod index;
+mod pypatch;
 mod pyplan;
 mod query;
 mod rustproj;
@@ -24,6 +25,7 @@ mod structural;
 mod syntax;
 mod sys;
 mod treesitter;
+mod tspatch;
 mod util;
 mod walk;
 
@@ -191,9 +193,21 @@ fn main() {
         }
         write_stdout(&pyplan::plan_python(&walk::Walk::default(), &abs_path(&a[2]), k));
     } else if cmd == b"scip-python-patch" && (n == 3 || (n == 4 && is(3, "--revert"))) {
-        not_carried(cmd, 4);
+        // Applies (or undoes) Swan's fixes on one file of scip-python: the
+        // reachability memo on pyright-internal.js, the package names and
+        // Python version on scip-python.js.
+        let r = if util::ends_with(&a[2], b"scip-python.js") { pypatch::pysite_file(&a[2], n == 4) } else { pypatch::pypatch_file(&a[2], n == 4) };
+        print(r);
+        if r == b"no match" {
+            exit(1);
+        }
     } else if cmd == b"scip-typescript-patch" && (n == 3 || (n == 4 && is(3, "--revert"))) {
-        not_carried(cmd, 4);
+        // Applies (or undoes) the stable names on one scip-typescript FileIndexer.js.
+        let r = tspatch::tspatch_file(&a[2], n == 4);
+        print(r);
+        if r == b"no match" {
+            exit(1);
+        }
     } else if cmd == b"stamp-bench" && n == 4 {
         if !stamp::stamp_bench_main(&a[2], &a[3]) {
             exit(1);

@@ -332,6 +332,7 @@ folders are.
 | 2026-11-22T06:15Z | `syntax-index` carried: `rust/src/syntax.rs` (src/syntax.goose). `scripts/port-syntax.sh`: 57 of 57 on a made-up repo of 62 files in the five languages (15 ways of asking), every fixture and this repository; 73 of 73 with eight repos given, one of 1,572 shell and Lua files (3,592 definitions, 91,170 occurrences, an index of 8.4 MB). `scripts/port-prove-syntax.py`: 107 of 107 breaks caught (105 of 107 at first; below). |
 | 2026-11-22T06:15Z | The stamps carried: `rust/src/change.rs` (the code stamp of src/change.goose) and `rust/src/stamp.rs` (src/stamp.goose), the workers as processes and as threads. `scripts/port-stamp.sh`: 82 of 82 on a made-up repo of 340 files to stamp, every fixture and this repository; 94 of 94 with six repos given (rea: 7,784 files, the same bytes from one process and from 32 workers, the same lines from 4 threads). `scripts/port-prove-stamp.py`: 59 of 59 breaks caught. |
 | 2026-11-22T06:15Z | Stage 3 done on branch `rust-stage-3`. Cost: `syntax-index` 52.6 ms against the Goose program's 54.0 on 1,572 files; `stamp-bench` on rea 6,241 ms against 6,282 in one process, 468 against 459 with 32 workers, 1,668 against 1,674 on 4 threads. |
+| 2026-11-22T06:39Z | Stage 4 begun (branch `rust-stage-4`, on `rust-stage-3`). The indexer patches carried: `rust/src/pypatch.rs` and `rust/src/tspatch.rs`, their sites copied from the Goose sources by a script, and `write_file_atomic` in `sys.rs`. `scripts/port-patch.sh`: 105 of 105 on the three files Swan patches (pyright-internal.js 1.4 MB, scip-python.js, FileIndexer.js), each with and without its patch, and on nine kinds of file a patch must refuse or leave. `scripts/port-prove-patch.py`: 29 of 29 breaks caught. |
 
 ## Found while porting
 
@@ -501,12 +502,23 @@ Stage 3 is done on branch `rust-stage-3`; its pull request is opened when
 the owner asks, after the full suite in the microVM on the commit that
 merges.
 
-Stage 4, the map, on its own branch from main: `seal`, `run`, `pipeline`,
-`pypatch`, `tspatch`, `scip`, `wings`, `tsproj` and `survey`, judged by
-`swan map` (table hashes, the report, "reused" on the second run). It is
-the first stage that starts other programs, so the first thing to settle
-is how the two programs are compared with every third-party repo still
-sealed in both. Carried in stage 3 and first used there, so judged there:
+Stage 4, the map, on branch `rust-stage-4` (from `rust-stage-3` until #78
+is merged, then moved onto main): `seal`, `run`, `pipeline`, `pypatch`,
+`tspatch`, `scip`, `wings`, `tsproj` and `survey`, judged by `swan map`
+(table hashes, the report, "reused" on the second run). In this order,
+each judged against the Goose program and seen failing before it is
+trusted:
+1. `pypatch` and `tspatch`, behind `scip-python-patch` and
+   `scip-typescript-patch`. Done 2026-11-22: `scripts/port-patch.sh`. What
+   makes sure of the patches before a map (the three `ensure_` functions)
+   comes with the map.
+2. `run` (Swan's home, running a step, the whole of `swan_run`), with the
+   two commands that need only it: `trust` and `doctor`.
+3. `survey`, `tsproj`, `wings` and `seal`, which no command prints alone,
+   with
+4. `pipeline`: `swan map`. It is the first that starts other programs, so
+   the first thing to settle is how the two programs are compared with
+   every third-party repo still sealed in both. Carried in stage 3 and first used there, so judged there:
 `stamp_known` and `line_of_path` (no stamp is known when `stamp-bench`
 starts), and `Walk::load` with the `git-ignored.txt` a map writes.
 Rebuild the Goose program first (`scripts/build.sh`), which also fetches

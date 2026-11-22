@@ -78,6 +78,27 @@ pub fn write_file(p: &[u8], data: &[u8]) -> bool {
     fs::write(path(p), data).is_ok()
 }
 
+/// Replaces the file with all of `data`, or leaves it as it was: the data
+/// goes to a new file beside it (its name, a tag of this write's own and
+/// ".tmp"), is flushed to disk and renamed over it (Goose's
+/// write_file_atomic). False, with the new file removed, when any step fails.
+pub fn write_file_atomic(p: &[u8], data: &[u8]) -> bool {
+    use std::io::Write;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static WRITES: AtomicU64 = AtomicU64::new(0);
+    let tag = format!(".{:x}-{:x}-{:x}.tmp", std::process::id(), time_ns() as u64, WRITES.fetch_add(1, Ordering::Relaxed));
+    let tmp = [p, tag.as_bytes()].concat();
+    let written = match fs::OpenOptions::new().write(true).create_new(true).open(path(&tmp)) {
+        Ok(mut f) => f.write_all(data).is_ok() && f.sync_all().is_ok(),
+        Err(_) => return false,
+    };
+    if written && fs::rename(path(&tmp), path(p)).is_ok() {
+        return true;
+    }
+    let _ = fs::remove_file(path(&tmp));
+    false
+}
+
 /// Makes one folder; true if one is there afterwards (Goose's make_dir).
 pub fn make_dir(p: &[u8]) -> bool {
     let _ = fs::create_dir(path(p));
