@@ -2143,3 +2143,48 @@ Limits:
   repos with `SWAN_TRUST_BUILD=1` in four cases, which loosens the seal
   for those repos alone. Nothing else is trusted.
 - The suite was not run for this piece: no Goose source changed.
+
+## 2026-11-22T07:49Z: stage 3 on main (#78); stage 4: the content stamps of `swan map` in Rust
+
+On the owner's word ("merge continue"): #78, stage 3, was merged into main
+(`245fb7e`), and main was merged into `rust-stage-4` (`7e0647a`). main's
+tree was the commit this branch stood on, so the branch's tree is as it
+was. A note of the review on #78 was taken up: the judges looked for a
+repo given by a relative path from the repository, not from where they
+were started.
+
+What was missing: the Rust map stopped at the mark of when it began.
+
+Changed: `rust/src/pipeline.rs` carries the map as far as line 1163 of
+src/pipeline.goose. The folder of kept texts; each file's stamp, from
+content-stamps.tsv when its size and time are as noted there, else from
+the workers' lines, else by reading it; which files changed only in
+comments or layout since they were indexed, and which must be indexed
+again because the text their rows came from is unknown or lost.
+`index_lines` is in `change.rs`. Then the Rust map stops, as before, with
+exit 70.
+
+Checked, Goose program built from this branch against the Rust program:
+
+| Judge | Result |
+|---|---|
+| `port-map.sh` | 98 of 98 the same in the part of a map that is carried |
+| The stamps' cases | 26: 300 files (4 workers by the usual floor; 3 asked for; one job; a second map of them, where none is stamped again), workers and threads on two files, a map again, a clean one, a comment changed, code changed, a file added, a comment changed with the time kept and with the size kept, the kept texts gone, the indexed text unknown, a record cut short, no record, a stamp that is no number, and four where Swan had moved the rows itself |
+| `port-prove-map.py` | 99 of 99 breaks caught, the first time it was run |
+| Earlier judges | `port-json.sh` 159 of 159, `port-run.sh` 53 of 53, `port-patch.sh` 105 of 105, `port-syntax.sh` 57 of 57, `port-stamp.sh` 82 of 82, `port-pattern.sh` 182 of 182, `port-plan.sh` 443 of 443, `port-trees.sh` 95 of 95 files, `cargo test` 9 and 2 passed. `port-store.sh` and `port-tables.sh` (stages 0 and 1, which take a flattened folder or a map) were not run again |
+
+Jev's judgement of the port's state, asked for by the owner (one call,
+1,927 tokens in, 234 out; docs/rust-port.md, "Found while porting", has
+every answer): the evidence that the carried commands behave the same,
+3.67 of 4; a byte comparison should not be replaced by a model, 0.11 that
+it should; go on with the map in order, 98%. Evidence, not decisions: it
+judged a summary the working agent wrote.
+
+Limits:
+- A map is still not made by the Rust program.
+- The lines for content-stamps.tsv are gathered and not yet written: that
+  file is written at the end of a map. The prover lists this and two more
+  things the carried part cannot show.
+- Two of the first 16 "differences" of this part were the judge's own
+  (its pattern, and a Python list it watched on repos that have Python).
+- The suite was not run for this piece: no Goose source changed.

@@ -8,12 +8,17 @@
 #     all of them and no others, and the start of standard error; when it
 #     ends another way, all that is said and the exit code;
 #   - the files of the map folder that the carried part writes or removes
-#     (WRITTEN below) are there or not in both, with the same bytes; when
-#     the Rust program ends as the Goose program does, the whole folder.
+#     (WRITTEN below) are there or not in both, with the same bytes, and the
+#     texts it keeps (texts/) are the Goose program's: the same for a new
+#     map; for a map over an older one, at least those, since the Goose
+#     program drops the ones no record names when it ends. When the Rust
+#     program ends as the Goose program does, the whole folder.
 # The repos are made up here to hold the corners of what is carried: what
 # git ignores, which languages a repo holds, a virtualenv, the survey (with
 # a made-up spread-wings that says what each case needs), an older map and
-# a clean one. Some fixtures are mapped too.
+# a clean one, the content stamps (enough files to start workers, a second
+# map, an edit of a comment only, a file whose indexed text is unknown).
+# Some fixtures are mapped too.
 #
 #   scripts/port-map.sh
 #
@@ -122,6 +127,21 @@ if [ ! -e "$r/ready" ]; then
     printf '{"name":"a","version":"1.0.0"}\n' | put "$r/node-two/a/package.json"; printf 'export const a = 1;\n' | put "$r/node-two/a/index.js"
     printf '{"name":"b","version":"1.0.0"}\n' | put "$r/node-two/b/package.json"; printf 'export const b = 1;\n' | put "$r/node-two/b/index.js"
     mkdir -p "$r/node-two/b/node_modules/dep"; printf '{"name":"dep","version":"1.0.0"}\n' >"$r/node-two/b/node_modules/dep/package.json"
+    # Enough Python files to start stamp workers by the usual floor of 256.
+    mkdir -p "$r/py-many/pkg"
+    for i in $(seq 1 300); do printf 'def f%s(x):\n    return x + %s\n' "$i" "$i" >"$r/py-many/pkg/m$i.py"; done
+    # One program four ways: as first mapped, with a comment changed, with
+    # its code changed, and with another file beside it.
+    printf '// first\nexport function add(a: number, b: number): number { return a + b; }\n' | put "$r/cos/a.ts"
+    printf '# first\ndef add(a, b):\n    return a + b\n' | put "$r/cos/b.py"
+    cp -r "$r/cos" "$r/cos-comment"; printf '// second, and longer\nexport function add(a: number, b: number): number { return a + b; }\n' >"$r/cos-comment/a.ts"
+    printf '# second, and longer\ndef add(a, b):\n    return a + b\n' >"$r/cos-comment/b.py"
+    cp -r "$r/cos" "$r/cos-code"; printf '// first\nexport function add(a: number, b: number): number { return a - b; }\n' >"$r/cos-code/a.ts"
+    cp -r "$r/cos" "$r/cos-more"; printf 'export const more = 1;\n' >"$r/cos-more/c.ts"
+    # A comment changed with the file's time kept, and one changed with its size kept.
+    cp -r "$r/cos" "$r/cos-same-time"; printf '// second, and longer\nexport function add(a: number, b: number): number { return a + b; }\n' >"$r/cos-same-time/a.ts"
+    touch -r "$r/cos/a.ts" "$r/cos-same-time/a.ts"
+    cp -r "$r/cos" "$r/cos-same-size"; printf '// other\nexport function add(a: number, b: number): number { return a + b; }\n' >"$r/cos-same-size/a.ts"
     # A made-up spread-wings for each thing a survey can say.
     sw() { put "$r/sw/$1"; chmod +x "$r/sw/$1"; }
     sw kinds <<'EOF'
@@ -217,16 +237,16 @@ EOF
 fi
 
 # ---- running a case ----
-# What the carried part of a map writes into the map folder. A case that
-# starts from a folder with files in it (PREP) also watches three it
-# removes or leaves, which no later part makes again for a repo with no
-# Python.
+# What the carried part of a map writes into the map folder. A case of the
+# plain repo that starts from a folder with files in it (WATCH) also watches
+# three it removes or leaves, which no later part makes again for a repo
+# with no Python.
 WRITTEN="git-ignored.txt git-ignored-all.txt survey.json scip-started"
 # The lines of the report the carried part writes: the Goose program's
 # report starts with these, and the Rust program's is these and no more.
 # The last is the made-up spread-wings' own complaint, which runs over
 # several lines inside "projects: not surveyed (...)".
-OPENING='^(languages:|not mapped, git ignores |projects: |node: dependencies are not installed |map schema |clean rebuild: cached |line [0-9]+ of what went wrong)'
+OPENING='^(languages:|not mapped, git ignores |projects: |node: dependencies are not installed |map schema |clean rebuild: cached |line [0-9]+ of what went wrong|stamps: |cosmetic edits: [0-9]+ file.s. changed only |reindexing [0-9]+ file.s. whose indexed text is unknown)'
 WATCHED="python-files.tsv python-pieces.tsv other.txt"
 total=0; bad=0
 tidy() { sed -E -e 's/ in [0-9]+ ms$//' -e 's/^(.*): [0-9]+ ms$/\1: N ms/' -e 's/^(.*): exit (-?[0-9]+) after [0-9]+ ms$/\1: exit \2 after N ms/' -e "s|$2|<its folder>|g" -e 's/^goose runtime error: //' -e '$s/ \([^()]*\.goose:[0-9]+\)$//' "$1"; }
@@ -275,12 +295,20 @@ case_of() {
     fi
     local n="$work/new/maps/$name" o="$base/old/maps/$name" f
     if [ -z "$why" ] && [ "$code" = 70 ]; then
-        for f in $WRITTEN ${PREP:+$WATCHED}; do
+        for f in $WRITTEN ${WATCH:+$WATCHED}; do
             if { [ -e "$n/$f" ] && [ ! -e "$o/$f" ]; } || { [ ! -e "$n/$f" ] && [ -e "$o/$f" ]; }; then
                 why="the map folder's $f is there for one program only"; break
             fi
             if [ -e "$n/$f" ] && ! cmp -s "$n/$f" "$o/$f"; then why="the map folder's $f differs"; break; fi
         done
+        # The kept texts: the Goose program's, and for a new map no others.
+        if [ -z "$why" ] && [ -d "$o/texts" ]; then
+            for f in "$o"/texts/*; do
+                [ -e "$f" ] || continue
+                cmp -s "$f" "$n/texts/${f##*/}" || { why="the kept text ${f##*/} is not the Goose program's, or is not there"; break; }
+            done
+            if [ -z "$why" ] && [ -z "${PREP:-}" ] && [ "$(ls "$o/texts" | wc -l)" != "$(ls "$n/texts" 2>/dev/null | wc -l)" ]; then why="more texts are kept than the Goose program keeps"; fi
+        fi
     elif [ -z "$why" ] && { [ -d "$n" ] || [ -d "$o" ]; }; then
         diff -r -x swan.db.lock "$n" "$o" >"$work/d" 2>&1 || why="the map folders differ: $(head -2 "$work/d" | tr '\n' ' ' | sed "s|$work/new|<Rust>|g; s|$base/old|<Goose>|g" | cut -c1-200)"
     fi
@@ -351,19 +379,66 @@ prep_caches() { cp -r "$base/plain-map" "$1"; for f in index-manifest.tsv tsc-fi
 prep_older_caches() { prep_caches "$1"; sqlite3 "$1/swan.db" "UPDATE meta SET value = '8' WHERE key = 'schema_version'"; }
 prep_file() { printf 'a file\n' >"$1"; }
 case_of clean-fresh "$r/plain" --clean
-PREP=prep_plain case_of again "$r/plain"
-PREP=prep_plain case_of clean-same-root "$r/plain" --clean
-PREP=prep_plain case_of clean-other-root "$r/order" --clean
-PREP=prep_no_root case_of clean-no-root "$r/plain" --clean
-PREP=prep_garbage case_of clean-garbage "$r/plain" --clean
-PREP=prep_garbage case_of garbage "$r/plain"
-PREP=prep_older case_of older "$r/plain"
-PREP=prep_older case_of clean-older "$r/plain" --clean
-PREP=prep_no_version case_of no-version "$r/plain"
-PREP=prep_caches case_of clean-caches "$r/plain" --clean
-PREP=prep_caches case_of caches-kept "$r/plain"
-PREP=prep_older_caches case_of older-caches "$r/plain"
-PREP=prep_file case_of out-is-a-file "$r/plain"
+WATCH=yes PREP=prep_plain case_of again "$r/plain"
+WATCH=yes PREP=prep_plain case_of clean-same-root "$r/plain" --clean
+WATCH=yes PREP=prep_plain case_of clean-other-root "$r/order" --clean
+WATCH=yes PREP=prep_no_root case_of clean-no-root "$r/plain" --clean
+WATCH=yes PREP=prep_garbage case_of clean-garbage "$r/plain" --clean
+WATCH=yes PREP=prep_garbage case_of garbage "$r/plain"
+WATCH=yes PREP=prep_older case_of older "$r/plain"
+WATCH=yes PREP=prep_older case_of clean-older "$r/plain" --clean
+WATCH=yes PREP=prep_no_version case_of no-version "$r/plain"
+WATCH=yes PREP=prep_caches case_of clean-caches "$r/plain" --clean
+WATCH=yes PREP=prep_caches case_of caches-kept "$r/plain"
+WATCH=yes PREP=prep_older_caches case_of older-caches "$r/plain"
+WATCH=yes PREP=prep_file case_of out-is-a-file "$r/plain"
+# ---- the content stamps ----
+case_of py-many "$r/py-many"
+case_of py-many-one-job "$r/py-many" SWAN_STAMP_JOBS=1
+case_of py-many-three-jobs "$r/py-many" SWAN_STAMP_JOBS=3
+case_of cos-workers "$r/cos" SWAN_STAMP_JOBS=2 SWAN_STAMP_MIN=1
+case_of cos-threads "$r/cos" SWAN_STAMP_JOBS=2 SWAN_STAMP_MIN=1 SWAN_STAMP_MODE=threads
+# A map of cos, made by the Goose program, to start from.
+if [ ! -e "$base/cos-map/swan.db" ]; then
+    rm -rf "${base:?}/cos-map"
+    (cd "$base/old" && home/bin/swan map "$r/cos" "$base/cos-map" >/dev/null 2>&1 </dev/null)
+    [ -e "$base/cos-map/indexed-texts.tsv" ] || { echo "port-map: the Goose program made no map of the cos repo"; exit 2; }
+fi
+mtime_ns() { stat -c '%.9Y' "$1" | tr -d .; }
+prep_cos() { cp -r "$base/cos-map" "$1"; }
+prep_cos_no_texts() { cp -r "$base/cos-map" "$1"; rm -f "$1"/texts/*; }
+prep_cos_unknown() { cp -r "$base/cos-map" "$1"; sed -i -E 's/^(a\.ts)\t[^\t]+\t/\1\t?\t/' "$1/indexed-texts.tsv"; }
+prep_cos_short_line() { cp -r "$base/cos-map" "$1"; sed -i -E 's/^(a\.ts\t[^\t]+)\t.*$/\1/' "$1/indexed-texts.tsv"; }
+prep_cos_no_record() { cp -r "$base/cos-map" "$1"; : >"$1/indexed-texts.tsv"; }
+prep_cos_bad_stamp() { cp -r "$base/cos-map" "$1"; sed -i -E 's/^(a\.ts\t[0-9]+\t[0-9]+)\t-?[0-9]+\t/\1\tnot-a-number\t/' "$1/content-stamps.tsv"; }
+# Rows Swan moved itself: the time it noted in the map, and the text they match now.
+prep_cos_moved() { cp -r "$base/cos-map" "$1"; sqlite3 "$1/swan.db" "UPDATE files SET edited_mtime = 123 WHERE file = 'a.ts'"; printf 'a.ts\t%s\t123\n' "$2" >"$1/row-basis.tsv"; }
+prep_cos_moved_known() { prep_cos_moved "$1" "$(cut -f2 "$base/cos-map/indexed-texts.tsv" | head -1)"; }
+prep_cos_moved_lost() { prep_cos_moved "$1" 4242; }
+prep_cos_moved_other_time() { prep_cos_moved_known "$1"; sed -i -E 's/\t123$/\t999/' "$1/row-basis.tsv"; }
+prep_py_many() { cp -r "$base/old/maps/py-many" "$1"; }
+prep_cos_moved_now() { cp -r "$base/cos-map" "$1"; sqlite3 "$1/swan.db" "UPDATE files SET edited_mtime = $(mtime_ns "$r/cos-comment/a.ts") WHERE file = 'a.ts'"; }
+PREP=prep_cos case_of cos-again "$r/cos"
+PREP=prep_cos case_of cos-clean "$r/cos" --clean
+PREP=prep_cos case_of cos-comment "$r/cos-comment"
+PREP=prep_cos case_of cos-code "$r/cos-code"
+PREP=prep_cos case_of cos-more "$r/cos-more"
+PREP=prep_cos_no_texts case_of cos-comment-no-texts "$r/cos-comment"
+PREP=prep_cos_no_texts case_of cos-again-no-texts "$r/cos"
+PREP=prep_cos_unknown case_of cos-unknown "$r/cos"
+PREP=prep_cos_unknown case_of cos-comment-unknown "$r/cos-comment"
+PREP=prep_cos_short_line case_of cos-comment-short-line "$r/cos-comment"
+PREP=prep_cos_no_record case_of cos-comment-no-record "$r/cos-comment"
+PREP=prep_cos_bad_stamp case_of cos-bad-stamp "$r/cos"
+PREP=prep_cos case_of cos-same-time "$r/cos-same-time"
+PREP=prep_cos case_of cos-same-size "$r/cos-same-size"
+PREP=prep_cos_unknown case_of cos-unknown-clean "$r/cos" --clean
+PREP=prep_cos_unknown case_of cos-code-unknown "$r/cos-code"
+PREP=prep_py_many case_of py-many-again "$r/py-many"
+PREP=prep_cos_moved_known case_of cos-comment-moved-known "$r/cos-comment"
+PREP=prep_cos_moved_lost case_of cos-comment-moved-lost "$r/cos-comment"
+PREP=prep_cos_moved_other_time case_of cos-comment-moved-other-time "$r/cos-comment"
+PREP=prep_cos_moved_now case_of cos-comment-moved-now "$r/cos-comment"
 # ---- fixtures ----
 for f in tiny-ts tiny-py tiny-go tiny-rs tiny-java tiny-lua tiny-game go-modules; do
     [ -d "fixtures/$f" ] && case_of "fixture-$f" "$here/fixtures/$f"

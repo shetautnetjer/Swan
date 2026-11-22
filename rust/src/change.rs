@@ -20,9 +20,10 @@
 // a save that changes no byte is skipped.
 //
 // Carried over from src/change.goose so far: the code stamp (cosmetic_lang,
-// code_hash) and line_of_path, which the stamps of stage 3 use. Moving a
-// cosmetically edited file's rows to where its tokens sit now
-// (shift_cosmetic) comes with editing, at stage 6.
+// code_hash), and index_lines and line_of_path, by which the stamps and
+// the map find a file's line in a list. Moving a cosmetically edited file's
+// rows to where its tokens sit now (shift_cosmetic) comes with the end of
+// the map, which calls it.
 
 use std::collections::HashMap;
 
@@ -114,8 +115,22 @@ pub fn code_hash(lang: &[u8], text: &[u8]) -> (u64, bool) {
     (h, ok)
 }
 
-// The line of `text` for `path`, or "". `at` holds where each "path\t..."
-// line starts, by the hash of its path (the map's index_lines, stage 4).
+// Indexes "path\t..." lines by the hash of their path: at[hash] is where
+// the line starts.
+pub fn index_lines(text: &[u8], at: &mut HashMap<u64, usize>) {
+    let mut i = 0;
+    while i < text.len() {
+        let nl = find(&text[i..], b"\n");
+        let e = if nl >= 0 { i + nl as usize } else { text.len() };
+        let t = find(&text[i..e], b"\t");
+        if t > 0 {
+            at.insert(hash(&text[i..i + t as usize]), i);
+        }
+        i = e + 1;
+    }
+}
+
+// The line of `text` (indexed by index_lines) for `path`, or "".
 pub fn line_of_path<'a>(text: &'a [u8], at: &HashMap<u64, usize>, path: &[u8]) -> &'a [u8] {
     let i = match at.get(&hash(path)) {
         Some(&i) => i,

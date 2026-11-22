@@ -17,7 +17,7 @@ purpose are in [docs/rust-port.md](docs/rust-port.md). Read it first.
 | Stage 1, the store | Done: `index`, `refresh` and 13 of the 14 `query` kinds. The same tables, refusals, staleness and answers as the Goose build `fb8df2a4c199` on four trial repos (STATUS.md has the counts) |
 | Stage 2, planning | Done and on main (#76, merged 2026-11-20 on the owner's word): `cargo-projects`, `gradle-tasks`, `plan-python`. STATUS.md has the counts |
 | Stage 3, syntax | Done and on main (#78, merged 2026-11-22 on the owner's word): the trees, `query pattern`, `syntax-index`, `stamp-bench` and `stamp-worker`. STATUS.md has the counts |
-| Stage 4, the map | Under way on branch `rust-stage-4` (from main, pushed): `scip-python-patch`, `scip-typescript-patch`, `trust` and `doctor` carried, with what runs a step and reads JSON; of `swan map`, its opening. The Rust map then stops with exit 70. Left: the rest of the map |
+| Stage 4, the map | Under way on branch `rust-stage-4` (from main, pushed): `scip-python-patch`, `scip-typescript-patch`, `trust` and `doctor` carried, with what runs a step and reads JSON; of `swan map`, its opening and its content stamps. The Rust map then stops with exit 70. Left: the rest of the map |
 | Stages 5 to 8 | Not started. Every command of theirs exits 70 and names its stage |
 
 ## What passed, and how to see it again
@@ -43,8 +43,8 @@ SWAN_OLD=bin/swan scripts/port-run.sh                                # stage 4: 
 SWAN_OLD=$PWD/bin/swan scripts/port-prove-run.py                     # stage 4: 39 of 39 breaks caught
 scripts/port-json.sh                                                 # stage 4: 159 of 159 texts
 scripts/port-prove-json.py                                           # stage 4: 23 of 23 breaks caught
-SWAN_OLD=bin/swan scripts/port-map.sh                                # stage 4: 72 of 72 in the carried part; a minute the first time, 5 s after
-SWAN_OLD=$PWD/bin/swan scripts/port-prove-map.py                     # stage 4: 74 of 74 breaks caught (about 16 min; halves can run side by side)
+SWAN_OLD=bin/swan scripts/port-map.sh                                # stage 4: 98 of 98 in the carried part; a minute and a half the first time, 8 s after
+SWAN_OLD=$PWD/bin/swan scripts/port-prove-map.py                     # stage 4: 99 of 99 breaks caught (about 22 min; thirds can run side by side)
 ```
 `$TRIES` is the folder of trial repo copies the swan-change-loop skill
 names, with the Goose program's maps of them under `maps/`. `port-store.sh`
@@ -61,14 +61,18 @@ has main merged in since (`7e0647a`): main's tree was the tip it stood on,
 so the merge keeps this branch's tree as it was.
 
 Done in stage 4 (docs/rust-port.md, "Next", has the order): the two indexer
-patches; running a step, with `trust` and `doctor`; reading JSON; and the
-opening of a map, up to the mark of when it began (`scip-started`,
-src/pipeline.goose line 959). `rust/src/pipeline.rs` ends there with what
-the map has said so far and exit 70.
+patches; running a step, with `trust` and `doctor`; reading JSON; and a
+map as far as its content stamps (src/pipeline.goose line 1163: the
+opening, the stamps, cosmetic edits found, files to index again).
+`rust/src/pipeline.rs` ends there with what the map has said so far and
+exit 70.
 
 How the map is carried and judged, a part at a time:
 - Carry the next part of `map_main_locked` (src/pipeline.goose, from line
-  961: the jobs), move the place the Rust map stops, and add to
+  1268: TypeScript's jobs; the closures defined from line 961 to 1266 that
+  the later parts call are `add_job`, `add_lang_job`, `note_indexed`,
+  `kept_texts` and `finish_cosmetic`, none carried yet), move the place the
+  Rust map stops, and add to
   `scripts/port-map.sh` the lines of the report that part writes
   (`OPENING`) and the files it writes (`WRITTEN`). The judge wants exactly
   those lines, so a part that says nothing more needs no change there.
@@ -81,16 +85,20 @@ How the map is carried and judged, a part at a time:
   Made-up repos and homes must stay there and not in /tmp: the seal gives
   a step its own /tmp.
 
-Next in the map's own order: "no language found to index" (exit 1 from the
-Goose program; the Rust map stops just before it); the content stamps and
-cosmetic edits (`stamp_known`, `line_of_path` and `index_lines` are first
-used here); the jobs of each language; running them; the flattener;
-`index` or `refresh`; the end of the report. Settle before the jobs:
+Next in the map's own order: the jobs of each language, and "no language
+found to index" after them (exit 1 from the Goose program); running them;
+the flattener; `index` or `refresh`; the end of the report, where
+content-stamps.tsv is written and `finish_cosmetic` moves rows
+(`shift_cosmetic` of src/change.goose and `mark_edited` of src/edit.goose
+are needed there, though the stage table has them at stage 6). Settle
+before the jobs:
 - **The children.** A map starts its own program again as `syntax-index`
   (carried) and `lsp-index` (stage 5, not carried: Go, Goose and the other
   languages a server indexes). Until stage 5 the Rust map can be compared
   only on repos with none of those languages, or it has to start the Goose
-  program for that one child. Say which in docs/rust-port.md before
+  program for that one child. The agent proposed the second to the owner
+  on 2026-11-22 and he said "continue" without choosing; Jev leaned the
+  same way, weakly (59 to 40). Say which in docs/rust-port.md before
   building on it.
 - **The patches.** The three `ensure_` functions of pypatch and tspatch
   patch Swan's own copy of an indexer before a map. The Rust program's
@@ -103,6 +111,16 @@ used here); the jobs of each language; running them; the flattener;
   (tsconfig, Maven and Gradle files at the top of the repo).
 - **What trust adds to the seal** (the network, folders to write in) is
   first shown by an indexer that builds; nothing carried so far shows it.
+
+## Jev's judgement, 2026-11-22 (evidence, not decisions)
+Asked on the owner's word, one call, of a summary the working agent wrote:
+the carried commands behave the same, 3.67 of 4; the judge should stay a
+byte comparison (0.11 that it should be a model); the way a partly carried
+map is judged is sound enough to build on, 0.74; keep the mix of server
+clients while carrying and decide after, 100%; go on with the map in
+order, 98%; for stage 5's child, start the original 59%, compare only on
+repos without those languages 40%. docs/rust-port.md, "Found while
+porting", has the call.
 
 ## Decisions waiting on the owner
 - SolidLSP for every language a server maps, not Go alone? The owner asked

@@ -341,6 +341,7 @@ folders are.
 | 2026-11-22T06:49Z | Running a step carried: `sys::run` (native/swan_sys.c's `swan_run`: its own variables, the PATH it will have, a group of its own, both streams, the deadline), `rust/src/run.rs` (src/run.goose) and, with it, `swan trust` (`rust/src/pipeline.rs`, begun) and `swan doctor`. `scripts/port-run.sh`: 53 of 53 the same, each program in a made-up home, with a made-up `mkdir` and `doctor.py`; the ten-second deadline is waited for three times in each program, timed, and nothing a step started may be left running. `scripts/port-prove-run.py`: 39 of 39 breaks caught. |
 | 2026-11-22T07:26Z | Reading JSON carried: `rust/src/json.rs`, from Goose's `stdlib/json.goose`. `scripts/port-json.sh`: 159 of 159 texts read the same by both (150 made up, of which 67 are JSON; 9 files of the repo). `scripts/port-prove-json.py`: 23 of 23 breaks caught. |
 | 2026-11-22T07:26Z | The opening of `swan map` carried: `rust/src/seal.rs`, `wings.rs` (where spread-wings is), `survey.rs` (running it, and the report's lines), `Walk::refresh` (what git ignores) and, in `pipeline.rs`, the languages a repo holds, trust, an older map and a clean one. The Rust map then stops with exit 70. `scripts/port-map.sh`: 72 of 72 the same in the carried part, each program in a made-up home. `scripts/port-prove-map.py`: 74 of 74 breaks caught. |
+| 2026-11-22T07:49Z | The content stamps of `swan map` carried (src/pipeline.goose to line 1163): `Stamps` in `pipeline.rs`, with `index_lines` in `change.rs`; `stamp_known` and `line_of_path`, carried at stage 3, are reached now. `scripts/port-map.sh`: 98 of 98 in the carried part, 26 of them for the stamps. `scripts/port-prove-map.py`: 99 of 99 breaks caught, the first time it was run. #78 (stage 3) merged into main on the owner's word; main merged into `rust-stage-4`. |
 
 ## Found while porting
 
@@ -552,6 +553,21 @@ folders are.
 - Stage 4: with nothing to index the Goose program says "no language found
   to index" and exits 1. The Rust map stops just before that, so it is the
   next thing to carry.
+- Stage 4: the map judge's pattern for a part's lines goes to awk as a
+  variable, where `\(` loses its backslash: "file(s)" was read as a group
+  and 16 of 93 cases came out different with the two programs saying the
+  same. The pattern has no parentheses now.
+- Stage 4: Jev (TypeSafe's typed decision model, asked through Composio)
+  was given the port's state on the owner's word, 2026-11-22: 1,927 tokens
+  in, 234 out, one call, six questions. That the carried commands behave
+  the same: 3.67 on a scale of 0 to 4 (68% "near conclusive", 32%
+  "strong"). That a judge of bytes should be a model instead: 0.11. Whether
+  the way a partly carried map is judged is sound enough to build on: 0.74.
+  The server client at stage 5: keep the mix while carrying and decide
+  after, 100%. Next: go on with the map in order, 98%. The child of stage
+  5: start the original for it 59%, compare only on repos without those
+  languages 40%. It judged a summary written by the agent doing the work,
+  so its answers are evidence, not decisions.
 - Stage 4: left out of the carried opening until the part that reads them:
   the virtualenv of a repo that is not trusted (the Goose program keeps it
   aside as `venv_read` for the Python step), and four of the things
@@ -588,9 +604,14 @@ trusted:
      (`wings_bin`), the survey and what the report says of it (`survey`),
      the folders git ignores, the languages a repo holds, a virtualenv and
      trust, an older map and a clean one, the mark of when the map began.
-   - Left, in order: "no language found"; the content stamps and cosmetic
-     edits; the jobs of each language (TypeScript with `tsproj`, Python's
-     pieces, Rust, Java, C#, the language servers, `syntax-index`);
+   - Done 2026-11-22: the content stamps. What each file holds is stamped (by
+     workers when there are enough files), the texts stamped by their code
+     are kept, and a second map says which files changed only in comments
+     or layout and which must be indexed again because their indexed text
+     is unknown.
+   - Left, in order: the jobs of each language (TypeScript with `tsproj`,
+     Python's pieces, Rust, Java, C#, the language servers, `syntax-index`)
+     and "no language found";
      running them, at most so many at once; the flattener; `index` or
      `refresh`; the end of the report. The three `ensure_` functions of
      the patches come with TypeScript's and Python's jobs.
