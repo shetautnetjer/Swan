@@ -765,3 +765,64 @@ the Goose build's C, so the answers stay the same bytes. docs/rust-port.md
 names crates the port could use for the language-server client at stage 5
 and holds better designs for after the port; each is a change of its own,
 measured.
+
+## 2026-11-23T13:36Z — The port stops being line by line; the prover is retired; an IDE, the suite and the Goose program's rows judge it
+
+**Decision (the owner's):** "ok lets do that", to five points put to him
+the same hour:
+
+1. The Rust written so far is kept (12,635 lines in `rust/src`, about 60%
+   of Swan by lines, each part matching the Goose program).
+2. What is left is no longer copied from the Goose sources line by line.
+   The rest of `swan map` is finished the short way; the language-server
+   client and the MCP server are built on Rust libraries.
+3. The port is judged the way Swan was judged when it was made: against a
+   JetBrains IDE on the trial repos and by Swan's own suite, with "the same
+   rows as the Goose program" as the floor.
+4. The provers (`scripts/port-prove*.py`) are no longer run or extended.
+5. Sealing stays exact: what keeps a repo's build code from running unasked
+   is still carried to the letter and compared.
+
+**Why (his words, spelling corrected):** "we are writing python script
+instead of making the code turn to rust and getting rid of swan working as
+a goose program"; and "swan took me days to make in goose and we basically
+took serena and jetbrains and turned it into goose with sql to make better
+queries. i dont think it's that deep, and the holes were goose not having
+the libraries or compilers that work with the languages while rust already
+does".
+
+**What was checked before he was answered:**
+- Swan's first commit is 2026-10-25, and 62 of the 187 commits on main are
+  from its first four days. The port had taken four days to reach about
+  60%.
+- The port's checking scripts were 8,477 lines beside 12,635 lines of Rust,
+  3,657 of them the provers. One run of the map's prover took 66 minutes,
+  and nothing else could be judged meanwhile. The 20 differences the map's
+  judge showed on 2026-11-22 were all faults of the judge or of its made-up
+  repos, none of the Rust.
+- Matching the Goose program byte for byte shows the Rust program is no
+  worse, its faults included. It cannot show it better. What Swan was
+  measured against when it was built is an IDE.
+- What cuts the other way: the outside indexers (scip-python,
+  scip-typescript, rust-analyzer, scip-java) are run by a Rust Swan as the
+  Goose one runs them (80 to 98% of a map, the entry of 2026-11-15), and
+  what Swan learned about them is in the parts already carried. So nothing
+  is started again.
+
+**What this replaces:** for what is left to carry, "the code carried line
+by line and not redesigned, each stage held to the same output as the Goose
+build" (2026-11-19); and for the port, the proof by a prover that
+docs/rust-port.md asked of each judge ("a judge is trusted once it has been
+seen to fail"). AGENTS.md rule 4 stands as it is for every change to the
+program that ships.
+
+**What is given up, said plainly:** the wording of a report, the files a
+map keeps beside its rows and the order of its steps are no longer held to
+the Goose program's bytes where a judge does not hold them already. A
+difference there is looked at, and mended or written down. The 123 cases
+added to `scripts/port-map.sh` on 2026-11-22 stay without breaks.
+
+**Settled with it, a choice of the port and not the owner's:** until the
+language-server client is in Rust, the Rust `swan map` may be given the
+Goose program to start for the one child it cannot run itself
+(`swan lsp-index`). docs/rust-port.md says how.

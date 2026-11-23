@@ -55,8 +55,13 @@ A stage that does not meet its own comparison is not built on.
 
 ## Rules for the port
 
-- Carried over line by line, not redesigned. A better design is a separate
-  change after the port passes, with its own measurement.
+- Until 2026-11-23: carried over line by line, not redesigned. From
+  2026-11-23, on the owner's word (DECISIONS.md): the Rust already written
+  is kept; what is left is written in Rust with the Goose source as its
+  reference and not copied line by line, and the language-server client and
+  the MCP server are built on Rust libraries. Sealing is the exception and
+  is still carried to the letter. A better design of what Swan does is
+  still a separate change after the port passes, with its own measurement.
 - Text is bytes (`&[u8]`), as in Spread-Wings: a source file need not be
   UTF-8.
 - SQL and fixed text keep the comment that stood above them in the Goose
@@ -120,6 +125,27 @@ A judge is trusted once it has been seen to fail.
 Rust program, each broken in one place on purpose (the list is at its
 head), runs `port-store.sh` against each and says which step caught it. A
 step added to the judge gets a break added there.
+
+### From 2026-11-23
+
+The owner's decision of that day (DECISIONS.md) changes what judges the
+port. In order of weight:
+
+1. A JetBrains IDE through its MCP server on the trial repos, as in the
+   comparisons STATUS.md records from when Swan was built: the measure of a
+   right answer.
+2. Swan's own suite in the microVM, with the Rust program in `bin/`.
+3. The Goose program's rows as the floor: a map the Rust program makes has
+   the rows the Goose program's map of the same repo has
+   (`scripts/port-tables.sh`), on the made-up repos of
+   `scripts/port-map.sh` and on the trial repos. A difference is explained
+   or mended; fewer uses resolved by a compiler is never accepted.
+
+The byte comparisons of stages 0 to 4 stay and are run as they are. No new
+case is owed for the wording of a report line. The provers
+(`scripts/port-prove*.py`) stay in the repository and are no longer run or
+extended: the 123 cases added to `port-map.sh` on 2026-11-22 have no
+breaks. Sealing is judged as before, byte for byte.
 
 ## What differs, and is meant to
 
