@@ -153,6 +153,31 @@ pub fn wait_code(mut child: std::process::Child) -> i32 {
     }
 }
 
+/// Where argv[0] may be: itself when it names a folder, else each folder of
+/// the PATH the program will have (an entry of `env`, else this process's),
+/// in order, as swan_run and swan_spawn try them.
+fn places_of(first: &[u8], env: &[&[u8]]) -> Vec<Vec<u8>> {
+    if first.contains(&b'/') {
+        return vec![first.to_vec()];
+    }
+    let ours = env.iter().find(|e| e.starts_with(b"PATH=")).map(|e| e[5..].to_vec());
+    let dirs = ours.or_else(|| std::env::var_os("PATH").map(|v| v.into_vec())).unwrap_or_default();
+    if dirs.is_empty() {
+        return Vec::new();
+    }
+    dirs.split(|&b| b == b':').filter(|dir| dir.len() + first.len() + 2 < 4096).map(|dir| [dir, b"/", first].concat()).collect()
+}
+
+/// Sets "K=V" entries over the environment a program is started with.
+pub fn set_env<E: AsRef<[u8]>>(c: &mut std::process::Command, env: &[E]) {
+    for e in env {
+        let e = e.as_ref();
+        if let Some(eq) = e.iter().position(|&b| b == b'=') {
+            c.env(OsStr::from_bytes(&e[..eq]), OsStr::from_bytes(&e[eq + 1..]));
+        }
+    }
+}
+
 /// Starts argv in `cwd`, with `env` ("K=V" entries) set over this
 /// process's environment, nothing to read, and its output and errors going
 /// to `log` (native/swan_sys.c, swan_spawn). Ok is its pid, to be waited
@@ -168,20 +193,7 @@ pub fn spawn_job(argv: &[&[u8]], cwd: &[u8], env: &[&[u8]], log: &[u8]) -> Resul
     };
     // Where argv[0] may be: itself when it names a folder, else each folder
     // of the PATH the program will have, tried in order (as in `run`).
-    let mut places: Vec<Vec<u8>> = Vec::new();
-    if first.contains(&b'/') {
-        places.push(first.to_vec());
-    } else {
-        let ours = env.iter().find(|e| e.starts_with(b"PATH=")).map(|e| e[5..].to_vec());
-        let dirs = ours.or_else(|| std::env::var_os("PATH").map(|v| v.into_vec())).unwrap_or_default();
-        if !dirs.is_empty() {
-            for dir in dirs.split(|&b| b == b':') {
-                if dir.len() + first.len() + 2 < 4096 {
-                    places.push([dir, b"/", first].concat());
-                }
-            }
-        }
-    }
+    let places = places_of(first, env);
     let logf = fs::File::create(path(log)).ok();
     let mut why = libc::ENOENT;
     for place in &places {
@@ -195,11 +207,7 @@ pub fn spawn_job(argv: &[&[u8]], cwd: &[u8], env: &[&[u8]], log: &[u8]) -> Resul
         if !cwd.is_empty() {
             c.current_dir(path(cwd));
         }
-        for e in env {
-            if let Some(eq) = e.iter().position(|&b| b == b'=') {
-                c.env(OsStr::from_bytes(&e[..eq]), OsStr::from_bytes(&e[eq + 1..]));
-            }
-        }
+        set_env(&mut c, env);
         match c.spawn() {
             // The handle is let go: wait_any takes the pid's end.
             Ok(started) => return Ok(started.id() as i64),
@@ -461,20 +469,7 @@ pub fn run(argv: &[&[u8]], cwd: &[u8], env: &[&[u8]], timeout_ms: i64, out: &mut
     // Where argv[0] may be: itself when it names a folder, else each folder
     // of the PATH the program will have (an entry of `env`, else this
     // process's), tried in order until one starts, as swan_run does.
-    let mut places: Vec<Vec<u8>> = Vec::new();
-    if first.contains(&b'/') {
-        places.push(first.to_vec());
-    } else {
-        let ours = env.iter().find(|e| e.starts_with(b"PATH=")).map(|e| e[5..].to_vec());
-        let dirs = ours.or_else(|| std::env::var_os("PATH").map(|v| v.into_vec())).unwrap_or_default();
-        if !dirs.is_empty() {
-            for dir in dirs.split(|&b| b == b':') {
-                if dir.len() + first.len() + 2 < 4096 {
-                    places.push([dir, b"/", first].concat());
-                }
-            }
-        }
-    }
+    let places = places_of(first, env);
     let mut child = None;
     let mut why = libc::ENOENT;
     for place in &places {
@@ -484,11 +479,7 @@ pub fn run(argv: &[&[u8]], cwd: &[u8], env: &[&[u8]], timeout_ms: i64, out: &mut
         if !cwd.is_empty() {
             c.current_dir(path(cwd));
         }
-        for e in env {
-            if let Some(eq) = e.iter().position(|&b| b == b'=') {
-                c.env(OsStr::from_bytes(&e[..eq]), OsStr::from_bytes(&e[eq + 1..]));
-            }
-        }
+        set_env(&mut c, env);
         match c.spawn() {
             Ok(started) => {
                 child = Some(started);

@@ -125,8 +125,8 @@ fn code_tokens(lang: &[u8], text: &[u8], toks: &mut Vec<i64>) -> bool {
     }
     each_code_node(lang, text, &nodes, |i, _kids, leaf| {
         if leaf {
-            toks.push(start(&nodes, i) as i64);
-            toks.push(end(&nodes, i) as i64);
+            toks.push(start(&nodes, i));
+            toks.push(end(&nodes, i));
         }
     })
 }

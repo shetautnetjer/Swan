@@ -2571,3 +2571,74 @@ Limits:
 - The suite in the microVM was not run: no Goose source changed, and the
   Rust program cannot stand in `bin/` before its server is built.
 - No pull request, nothing merged, nothing installed.
+
+## 2026-11-23T15:00Z: `swan lsp-index` in Rust, on a language-server client built on Rust libraries; the Rust program maps Go and Goose files itself
+
+Asked by the owner the same morning: open RustRover and use its MCP to help
+build the Rust; look at serena-rs and at what exists on the net; SolidLSP as
+the stable way to run a language server.
+
+What is now true: the Rust program maps a repo's Go files (through SolidLSP
+behind `tools/solidlsp/bridge.py`) and Goose files (through `goose lsp`)
+with no help from the Goose program. `SWAN_PORT_GOOSE`, added three hours
+earlier, is gone.
+
+| | Goose program | Rust program |
+|---|---|---|
+| cobra (Go, 37 files), sealed, not trusted | 798 symbols, 6,732 uses, 3 relationships; 7.1 s | the same rows (every table's hash but `meta`); 4.7 s |
+| relate (Rust with three Go folders, 2,249 files) | 59,489 symbols, 741,781 uses, 33.6 s; a second run 59,488 and 741,775 | 59,488 symbols, 741,782 uses, 33 s; before today its Go folders were not mapped by it |
+| The 440 made-up cases of `scripts/port-map.sh` | | 440 of 440 the same, the Go and Goose ones now through the Rust `lsp-index` |
+
+relate's one-symbol gap is scip-clang's: two runs of the Goose program
+differ from each other by the same kind of row (`cxx . . $ size_t#`), as
+seen on the C fixtures earlier today.
+
+What was built:
+- `rust/src/lsp.rs` (new): a synchronous client. A server is started in a
+  process group of its own, sealed when its entry says so and this process
+  is not inside the seal already (the condition and the call are those of
+  `src/live.goose`); every question has a time limit; the server's own
+  requests are answered while waiting; the whole group is killed when the
+  client goes. Failures are one of four kinds: could not start, timed out,
+  the server said no, the server went away.
+- `rust/src/lspindex.rs` (new): the files of the language, each one's
+  symbols, each definition's references, what implements each interface;
+  written as SCIP with the `scip` crate, named as before so maps made
+  earlier still line up.
+- `rust/src/modules.rs`: a language's server read from
+  `tools/modules.json`: which entry applies, its placeholders, and that an
+  entry which runs the repo's code is used for a trusted repo only.
+- New libraries, all permissive: `lsp-server` 0.10 and `lsp-types` 0.97
+  (the messages), `serde` and `serde_json`, `scip` 0.10.
+- Why it is faster: the old client waits 2 s after its first question for
+  news of indexing that neither server sends (the worker's reading of
+  `lsp/golsp.goose`; the other 0.4 s on cobra is not accounted for).
+
+How it was built: a research agent surveyed the crates and serena-rs
+(docs/rust-port.md, "What exists in Rust to build on"); a worker agent wrote
+the client with RustRover open on `rust/` and asked through its MCP server
+(`get_file_problems`, `lint_files`, `get_symbol_info`); the sealing was
+then read against the Goose source and every number here rerun by the lead.
+RustRover's inspections also found code written twice in `sys.rs` and two
+needless casts from earlier in the day; both mended.
+
+Checked on this tree: build with no warnings; `cargo test` 16 and 2 (7
+new: a server that never answers, one that answers once and stops, one
+that exits, each ending inside its limit with no process left; three were
+broken on purpose and seen to fail); RustRover finds no errors in the
+seven changed files; `port-map.sh` 440 of 440; cobra and relate above; no
+gopls or bridge process left after any run.
+
+Limits:
+- A silent server is given 120 s before the job fails. That is the old
+  client's limit, kept; a map with such a server waits that long once.
+- Not judged against GoLand yet: GoLand has no trusted folder for the
+  trial repos, and adding one is the owner's to do.
+- `swan lsp-ask` and the live answers are not in Rust. `{java_source_paths}`
+  is not filled in for a server's settings (no language mapped this way
+  needs it).
+- The index file `lsp-index` writes has other bytes than the Goose
+  program's (another writer); its rows once flattened are the same.
+- The Rust program now carries Apache-2.0 libraries; what a shipped binary
+  must say of them (NOTICE) is for when it ships.
+- The suite in the microVM was not run: no Goose source changed.

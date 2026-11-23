@@ -1005,12 +1005,12 @@ cut_tails() {
 }
 # The record of the indexes, each program's own folder taken out. Three
 # fingerprints take in a path that is each program's own, and are left out:
-# the syntax index's (the program that made it, and its size), scip-java's
+# the syntax index's and `lsp-index`'s (the program that made it, and its size), scip-java's
 # (what it is run with names Swan's home and the map folder) and, with
 # Swan's own config for TypeScript in the map folder, scip-typescript's.
 manifest_text() {
     sed -e "s|$2|<its folder>|g" -e "s|$base/old|<its folder>|g" "$1/index-manifest.tsv" |
-        awk -F'\t' -v own="$([ -e "$1/tsproject/tsconfig.json" ] && echo 1)" 'BEGIN { OFS = "\t" } $1 ~ /^(syntax-index|scip-java)/ || (own && $1 ~ /^scip-typescript/) { $2 = "(its own)" } { print }'
+        awk -F'\t' -v own="$([ -e "$1/tsproject/tsconfig.json" ] && echo 1)" 'BEGIN { OFS = "\t" } $1 ~ /^(syntax-index|scip-java|lsp-index)/ || (own && $1 ~ /^scip-typescript/) { $2 = "(its own)" } { print }'
 }
 # A map folder as text: each file's name, then what it holds with each
 # program's own folder taken out; an index and a kept text by their hash.
@@ -1024,6 +1024,9 @@ folder_text() {
         printf '== %s\n' "$f"
         case "$f" in
             ./index-cxx.scip) echo "(scip-clang's: not the same twice from one program)" ;;
+            # The Rust program writes this index with the scip crate, the Goose
+            # program by hand: other bytes, the same rows once flattened.
+            ./index-lsp-*.scip) echo "(each program's own writer)" ;;
             ./index-java.scip) if [ "${3:-}" = loose ]; then echo "(scip-java's: its files in another order)"; else sha256sum <"$f"; fi ;;
             *.scip | ./texts/*) sha256sum <"$f" ;;
             ./symbols.tsv | ./extents.tsv | ./relationships.tsv | ./occurrences.tsv | ./documents.tsv)
@@ -1067,7 +1070,7 @@ case_of() {
         [ -n "${HOME_PREP:-}" ] && $HOME_PREP "$w/home"
         [ -n "${PREP:-}" ] && "$PREP" "$n"
         if [ -n "${LISTED:-}" ]; then mkdir -p "$w/home/data"; printf '%s\n' "$LISTED" >"$w/home/data/trusted-repos"; fi
-        (cd "$w" && env "${UNSET[@]}" SWAN_PORT_GOOSE="$base/old/home/bin/swan" "$@" home/bin/swan map "$repo" "maps/$name" "${clean[@]}" >"$w/out" 2>"$w/err" </dev/null); code=$?
+        (cd "$w" && env "${UNSET[@]}" "$@" home/bin/swan map "$repo" "maps/$name" "${clean[@]}" >"$w/out" 2>"$w/err" </dev/null); code=$?
         rm -rf "${w:?}/home/data"
         old_code=$(cat "$kept/code")
         tidy "$kept/out" "$base/old" | cut_tails >"$w/old.out"; tidy "$kept/err" "$base/old" >"$w/old.err"

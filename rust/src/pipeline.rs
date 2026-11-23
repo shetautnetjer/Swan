@@ -37,7 +37,7 @@ use crate::walk::Walk;
 
 // What a repo holds, found by walking it.
 #[derive(Default)]
-struct Langs {
+pub(crate) struct Langs {
     ts: bool,
     js: bool,
     py: bool,
@@ -52,7 +52,7 @@ struct Langs {
     cargo: bool,
     maven: bool,
     gradle: bool,
-    venv: Vec<u8>, // a virtualenv inside the repo, if any
+    pub(crate) venv: Vec<u8>, // a virtualenv inside the repo, if any
 }
 
 // Files `swan syntax-index` (src/syntax.rs) covers: Go, shell, Make, Ruby and Lua by name,
@@ -84,7 +84,7 @@ fn other_add(other: &mut Vec<u8>, lang: &[u8], room: usize) {
     }
 }
 
-fn detect(walk: &Walk, repo: &[u8]) -> Langs {
+pub(crate) fn detect(walk: &Walk, repo: &[u8]) -> Langs {
     let mut l = Langs {
         tsconfig: sys::file_exists(&[repo, b"/tsconfig.json"].concat()),
         cargo: sys::file_exists(&[repo, b"/Cargo.toml"].concat()),
@@ -233,7 +233,7 @@ fn packed(argv: &[Vec<u8>]) -> Vec<u8> {
     p
 }
 
-fn untrusted_note(skipped: &[u8], repo: &[u8]) -> Vec<u8> {
+pub(crate) fn untrusted_note(skipped: &[u8], repo: &[u8]) -> Vec<u8> {
     [&b"not run:"[..], skipped, b" (each runs the repo's own build files, which can run any code); if you trust this repo: swan trust ", repo].concat()
 }
 
@@ -260,7 +260,7 @@ fn has_clang(path: &[u8]) -> bool {
 
 // The environment children get: a repo virtualenv first on PATH, and room
 // for scip-python and pyright on big repos.
-fn child_env(l: &Langs, extra: &[&[u8]], first: &[u8]) -> Vec<Vec<u8>> {
+pub(crate) fn child_env(l: &Langs, extra: &[&[u8]], first: &[u8]) -> Vec<Vec<u8>> {
     let home = swan_home();
     let mut vars: Vec<Vec<u8>> = Vec::new();
     let mut path: Vec<u8> = Vec::new();
@@ -613,7 +613,7 @@ WHERE s.def_file = ?1 AND o.file != ?1 AND o.is_def = 0",
     dirty
 }
 
-fn python_of(l: &Langs) -> Vec<u8> {
+pub(crate) fn python_of(l: &Langs) -> Vec<u8> {
     if !l.venv.is_empty() {
         [&l.venv[..], b"/bin/python"].concat()
     } else {
@@ -900,7 +900,7 @@ fn trust_file() -> Vec<u8> {
     [&swan_home()[..], b"/data/trusted-repos"].concat()
 }
 
-fn build_trusted(repo: &[u8]) -> bool {
+pub(crate) fn build_trusted(repo: &[u8]) -> bool {
     if sys::env(b"SWAN_TRUST_BUILD") == b"1" {
         return true;
     }
@@ -2364,11 +2364,7 @@ fn map_main_locked(repo: &[u8], out: &[u8], report: &mut Vec<u8>, clean: bool) -
     let mut lsp_mapped: Vec<u8> = vec![b' ']; // " go goose ": the languages mapped this way in this run
     let mut mods_text: Vec<u8> = Vec::new();
     if !l.other.is_empty() && sys::read_file(&[&home[..], b"/tools/modules.json"].concat(), &mut mods_text) {
-        // Until the language-server client is in Rust, this program cannot
-        // run that child itself: SWAN_PORT_GOOSE names a Goose build of Swan
-        // to start for it (docs/rust-port.md).
-        let port_goose = sys::env(b"SWAN_PORT_GOOSE");
-        let swan_bin = if port_goose.is_empty() { [&home[..], b"/bin/swan"].concat() } else { port_goose };
+        let swan_bin = [&home[..], b"/bin/swan"].concat();
         // A file that cannot be read as JSON names no language.
         if let Some(mods) = json::parse(&mods_text) {
             for lang in l.other.split(|&c| c == b' ') {

@@ -1,6 +1,6 @@
 # Handoff: Swan in Rust (branch `rust-stage-4`)
 
-Written 2026-11-20T07:25Z; stage 2 part rewritten 2026-11-20T16:21Z, stage 3 part 2026-11-20T23:51Z and again 2026-11-22T06:15Z, when stage 3 was finished; stage 4 part 2026-11-22T06:50Z, 2026-11-22T07:26Z 2026-11-22T16:46Z, 2026-11-22T18:18Z and 2026-11-22T18:45Z, when the prover had run on TypeScript's chunks and every job of a map was planned in Rust. For the next session, any agent. **Start at "Next action".** The end of the map, and the owner's two changes of direction: 2026-11-23T14:15Z.
+Written 2026-11-20T07:25Z; stage 2 part rewritten 2026-11-20T16:21Z, stage 3 part 2026-11-20T23:51Z and again 2026-11-22T06:15Z, when stage 3 was finished; stage 4 part 2026-11-22T06:50Z, 2026-11-22T07:26Z 2026-11-22T16:46Z, 2026-11-22T18:18Z and 2026-11-22T18:45Z, when the prover had run on TypeScript's chunks and every job of a map was planned in Rust. For the next session, any agent. **Start at "Next action".** The end of the map, and the owner's two changes of direction: 2026-11-23T14:15Z. `lsp-index` in Rust: 2026-11-23T15:00Z.
 
 ## The task
 Swan in Rust, on the owner's word. Until 2026-11-23 it was carried over
@@ -24,7 +24,7 @@ The stages as they were drawn, what was judged and how are in
 | Stage 1, the store | Done: `index`, `refresh` and 13 of the 14 `query` kinds. The same tables, refusals, staleness and answers as the Goose build `fb8df2a4c199` on four trial repos (STATUS.md has the counts) |
 | Stage 2, planning | Done and on main (#76, merged 2026-11-20 on the owner's word): `cargo-projects`, `gradle-tasks`, `plan-python`. STATUS.md has the counts |
 | Stage 3, syntax | Done and on main (#78, merged 2026-11-22 on the owner's word): the trees, `query pattern`, `syntax-index`, `stamp-bench` and `stamp-worker`. STATUS.md has the counts |
-| Stage 4, the map | Done on branch `rust-stage-4` (from main, pushed; no pull request): `scip-python-patch`, `scip-typescript-patch`, `trust`, `doctor`, and the whole of `swan map`: it plans, starts and waits for the indexers, flattens, stores, moves rows after cosmetic edits and ends its report. `scripts/port-map.sh`: 440 of 440 whole maps the same as the Goose program's. Not in Rust: its `lsp-index` child (a repo's Go and Goose files; `SWAN_PORT_GOOSE` names a Goose build to start for it), `map_held`, and what `src/wings.goose` and `src/seal.goose` hold that a map does not use |
+| Stage 4, the map | Done on branch `rust-stage-4` (from main, pushed; no pull request): `scip-python-patch`, `scip-typescript-patch`, `trust`, `doctor`, and the whole of `swan map`: it plans, starts and waits for the indexers, flattens, stores, moves rows after cosmetic edits and ends its report. `scripts/port-map.sh`: 440 of 440 whole maps the same as the Goose program's. Its `lsp-index` child is in Rust too since 2026-11-23T15:00Z (below). Not in Rust: `map_held`, and what `src/wings.goose` and `src/seal.goose` hold that a map does not use |
 | What is left | The language servers (next, and through SolidLSP: "Next action"), checking and editing, the MCP server, the build and the suite. Every command of theirs exits 70 and names the stage it was drawn in |
 
 ## What passed, and how to see it again
@@ -64,7 +64,7 @@ still match the source? nothing is built) and break numbers (only those).
 The check suites judge the Goose program: the Rust program cannot run them
 before stage 8.
 
-## Next action: language servers through SolidLSP, in Rust (branch `rust-stage-4`, or a new one from it)
+## Next action: more of the language servers through SolidLSP, in Rust (branch `rust-stage-4`, or a new one from it)
 
 The owner, 2026-11-23: "i wouldn't try to match goose, i would try to
 create your own solutions using jetbrains and serena styles and what lsp
@@ -89,34 +89,49 @@ using solidlsp just like serena".
   `lsp/native/proc.c` and `glue.c`, `src/lspindex.goose` (388: a map made
   by asking a server for every definition and its references, written as
   SCIP) and `src/live.goose` (268: errors as the code stands).
-- The Rust map already plans the `lsp-index` jobs (`pipeline.rs`,
-  `modules.rs`) and starts them: `swan lsp-index <repo> <out> <lang>
-  <target> [--within dir]`. The Rust program has no such command yet (exit
-  70), so that job fails, is said, and the rest of the map is made.
+- In Rust since 2026-11-23T15:00Z (STATUS.md has the numbers): `rust/src/lsp.rs`, a
+  synchronous client on `lsp-server` and `lsp-types` (start, sealed as
+  `src/live.goose` seals; ask with a time limit; kill the server's whole
+  group when done); `rust/src/lspindex.rs`, `swan lsp-index <repo> <out>
+  <lang> <target> [--within dir]`, SCIP written with the `scip` crate;
+  `lsp_server` in `rust/src/modules.rs`, which reads a language's entry.
+  Go (through the bridge) and Goose (through `goose lsp`) are mapped by the
+  Rust program alone: cobra gives the Goose program's rows in 4.7 s
+  against 7.1 s.
+- RustRover helps while building: `cd <the jetbrains kit> && ./jb open
+  rustrover <this repo>/rust`, then `./jb call rustrover get_file_problems`
+  (or `lint_files`, `get_symbol_info`) with `projectPath` the `rust`
+  folder. Open `rust/` itself, never the repo's top: the fixtures hold
+  build files an IDE would import. Only its tools that read are used.
+- docs/rust-port.md, "What exists in Rust to build on": the crates surveyed
+  on 2026-11-23 and what none of them does.
 
 ### The work, in order
-1. A language-server client in Rust: start a server (the bridge, or a
-   server itself), `initialize`, ask `documentSymbol`, `references`,
-   `definition`, `implementation` and for diagnostics, shut it down, with
-   a time limit on every answer. Not copied from `golsp.goose`. serena-rs
-   names the crates it uses (`lsp-types`, `lsp-server`, `tokio`;
-   docs/rust-port.md, "Held for after the port"): read what they give
-   before choosing, since `serde_json` over a pipe may be all it takes.
-   The seal goes around the server as it does now (`seal_argv`).
-2. `swan lsp-index` in Rust on that client, writing SCIP the flattener
-   reads. Measure on cobra (`$TRIES/cobra`) and fixtures/tiny-go:
-   definitions, references and relationships beside the Goose program's map
-   and beside GoLand through its MCP server (the `jetbrains-reference`
-   skill). Then `SWAN_PORT_GOOSE` goes.
-3. More languages through the bridge, one at a time, each measured against
-   its JetBrains IDE before it is kept. Which first is the owner's to say
-   ("Decisions waiting"). A language with a SCIP indexer keeps it for the
-   map unless the measure says otherwise: an indexer gives a whole repo in
-   one run, a server answers file by file.
-4. Live answers (`src/live.goose`) on the same client.
+1. Go beside GoLand. cobra's Go rows are the Goose program's, and those
+   were never put to an IDE. `jetbrains-reference`: map the copy, open it
+   in GoLand, `compare/refs_vs_ide.py`. It waits on the owner: GoLand has
+   no trusted folder for the trial repos ("Decisions waiting").
+2. More languages through the bridge, one at a time, each measured against
+   its JetBrains IDE before it is kept. The order put to the owner on
+   2026-11-23 and answered "anyways sure": the languages with no SCIP
+   indexer that are only searched today (Ruby, PHP, Lua, shell), then live
+   answers for the languages that have an indexer. Each is an entry in
+   tools/modules.json and a pinned fetch in `scripts/fetch-tools.sh`
+   (SolidLSP knows about 80 languages; Helix's `languages.toml` and
+   mason-registry say how each server is started and fetched). A language
+   keeps its SCIP indexer for the map unless the measure says otherwise.
+3. Live answers on the same client: `swan lsp-ask`, and `src/live.goose`
+   (errors as the code stands, implementations). The client's `settle`
+   (how a server says it is done: pull, publish or check) belongs here; it
+   was left out of `ServerSpec` until something reads it.
+4. Checking and editing, and the MCP server on `rmcp`.
 
-Then checking and editing, and the MCP server, on Rust libraries where one
-fits (`rmcp` is the MCP crate serena-rs uses).
+Known and small, for whoever is next in these files: a silent server is
+given 120 s (the old client's limit) before `lsp-index` fails;
+`{java_source_paths}` is not filled in for a server's settings; the
+client's reader thread is not joined, which a long-lived `swan serve` will
+care about; the Rust program now carries Apache-2.0 libraries, and what a
+shipped binary must say of them is for when it ships.
 
 ### How it is judged now
 A JetBrains IDE on the trial repos, and Swan's own suite in the microVM
@@ -162,15 +177,11 @@ repos without those languages 40%. docs/rust-port.md, "Found while
 porting", has the call.
 
 ## Decisions waiting on the owner
-- Which languages go to SolidLSP first, and how far. The owner said on
-  2026-11-23 that SolidLSP is the stable way he wants, as Serena has it
-  (he had asked on 2026-11-21 why it was not used "for everything else").
-  Go is on it. Proposed order, to be said yes or no to: Go's `lsp-index`
-  in Rust first; then the languages that have no SCIP indexer and are
-  only searched today (Ruby, PHP, Lua, shell); then live answers for the
-  languages that have a SCIP indexer, in place of Swan's own client. A
-  language keeps its SCIP indexer for the map unless a measure against its
-  JetBrains IDE says SolidLSP does better.
+- GoLand, to judge the Go map: it has no trusted folder for the trial
+  repos, so opening one stops at "Trust project?". For the owner to run,
+  with GoLand closed: `./jb trust-location goland <the trial repos'
+  folder>` in the jetbrains kit. A first launch of GoLand may also stop at
+  a dialog only he can answer.
 - A pull request for stage 4 is opened when the owner asks, after the
   suite in the microVM on the commit that would merge.
 - The next experiment after the port's stage 3, proposed in

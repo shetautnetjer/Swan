@@ -15,6 +15,13 @@ pub fn sandbox_on() -> bool {
     sys::env(b"SWAN_SANDBOX") != b"0"
 }
 
+// Whether this process already runs inside eggshell's seal (it exports
+// EGG_REPO): what it starts is sealed with it, and sealing that again would
+// need namespaces the seal does not hand out (src/live.goose, inside_seal).
+pub fn inside_seal() -> bool {
+    !sys::env(b"EGG_REPO").is_empty()
+}
+
 // Wrap a child's argv so it runs sealed via <swan_home>/bin/eggshell:
 //   eggshell <repo> <out> [--allow-net --rw <dir>...] -- <inner argv...>
 // Every repo is sealed: no host writes except the map dir, no host sockets.

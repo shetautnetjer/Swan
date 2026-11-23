@@ -206,7 +206,7 @@ fn sx_walk(walk: &Walk, repo: &[u8], skip_go: bool, out: &mut Vec<u8>) {
 }
 
 // A SCIP descriptor name: as is when it is all [\w$+-], else in backticks.
-fn sx_ident(s: &[u8], out: &mut Vec<u8>) {
+pub(crate) fn sx_ident(s: &[u8], out: &mut Vec<u8>) {
     let mut plain = !s.is_empty();
     for &c in s {
         if !(sx_w(c) || c == b'$' || c == b'+' || c == b'-') {
@@ -227,7 +227,7 @@ fn sx_ident(s: &[u8], out: &mut Vec<u8>) {
     out.push(b'`');
 }
 
-fn sx_dirname(rel: &[u8]) -> &[u8] {
+pub(crate) fn sx_dirname(rel: &[u8]) -> &[u8] {
     let s = rfind(rel, b"/");
     if s < 0 {
         b"."
@@ -235,7 +235,7 @@ fn sx_dirname(rel: &[u8]) -> &[u8] {
         &rel[..s as usize]
     }
 }
-fn sx_basename(p: &[u8]) -> &[u8] {
+pub(crate) fn sx_basename(p: &[u8]) -> &[u8] {
     let mut e = p.len();
     while e > 1 && p[e - 1] == b'/' {
         e -= 1;
@@ -245,7 +245,7 @@ fn sx_basename(p: &[u8]) -> &[u8] {
 }
 
 // "a/b/" for folder a/b, "" for the repo's root.
-fn sx_ns(dir: &[u8], out: &mut Vec<u8>) {
+pub(crate) fn sx_ns(dir: &[u8], out: &mut Vec<u8>) {
     if !(!dir.is_empty() && dir != b".") {
         return;
     }
@@ -341,7 +341,7 @@ fn pb_range(out: &mut Vec<u8>, f: i64, l: usize, c: usize, el: usize, ec: usize)
 }
 
 // At most n bytes of s, not cutting a UTF-8 character.
-fn sx_cut(s: &[u8], n: usize) -> &[u8] {
+pub(crate) fn sx_cut(s: &[u8], n: usize) -> &[u8] {
     if s.len() <= n {
         return s;
     }

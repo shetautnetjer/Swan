@@ -8,4 +8,5 @@
 __pycache__/
 *.pyc
 /rust/target/
+/rust/.idea/
 /.idea/

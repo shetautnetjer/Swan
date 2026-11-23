@@ -18,6 +18,8 @@ mod gradle;
 mod graph;
 mod index;
 mod json;
+mod lsp;
+mod lspindex;
 mod modules;
 mod pipeline;
 mod pypatch;
@@ -254,7 +256,9 @@ fn main() {
     } else if cmd == b"broke" && n >= 4 {
         not_carried(cmd, 6);
     } else if cmd == b"lsp-index" && (n == 6 || (n == 8 && is(6, "--within"))) {
-        not_carried(cmd, 5);
+        if !lspindex::lsp_index_main(&abs_path(&a[2]), &abs_path(&a[3]), &a[4], &a[5], if n == 8 { &a[7] } else { b"" }) {
+            exit(1);
+        }
     } else if cmd == b"lsp-ask" && n >= 6 {
         not_carried(cmd, 5);
     } else if cmd == b"format" && n >= 5 {

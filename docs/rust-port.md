@@ -155,12 +155,9 @@ the indexers that exist, asked in milliseconds) and Serena (symbol tools
 answered by live language servers), with SolidLSP as the way a language
 server is started, configured and waited for.
 
-`SWAN_PORT_GOOSE=<a Goose build of swan>`: until the language-server
-client is in Rust, the Rust `swan map` starts that program for its
-`lsp-index` child, and takes its path and size into that index's
-fingerprint as the Goose program does. Without it the child is the Rust
-program, which ends with 70: the job is said to have failed and the rest
-of the map is made. `scripts/port-map.sh` sets it.
+For three hours that day `SWAN_PORT_GOOSE` let the Rust `swan map` start the
+Goose program for its `lsp-index` child. The Rust program has that command
+now (STATUS.md, 2026-11-23T15:00Z) and the variable is gone.
 
 ## What differs, and is meant to
 
@@ -405,6 +402,38 @@ folders are.
 | 2026-11-22T18:18Z | `swan map` carried to the end of Python (src/pipeline.goose to line 1920): `ensure_scip_python_patch` and `ensure_scip_python_site_patch` (`pypatch.rs`), `survey_python_envs` (`survey.rs`), `piece_target` (`pyplan.rs`) and, in `pipeline.rs`, the virtualenv kept aside for a repo that is not trusted, the stand-in interpreter, the two lists of packages, the src layout, each piece's key and which pieces are kept. `scripts/port-map.sh`: 395 of 395, 78 of them new (59 of 78 on the first run; the 19 were the judge's). The judge gives each home scip-python's two files as its own and compares how they are left. No breaks for this part in the prover yet: the owner is asked first whether it runs after every part or at the end of the stage. |
 | 2026-11-22T18:45Z | `swan map` carried to where its jobs are run (src/pipeline.goose to line 2187): the cargo projects, Java, C#, C and CUDA, what waits for trust, the servers' languages (`modules.rs`, begun: `lsp_server_present`, `lang_of_path`; `survey_paths`) and the syntax index, each planned; and the two ways a map ends when nothing is left to run, the first maps the Rust program makes to their end. `scripts/port-map.sh`: 440 of 440, 45 new, 32 of the 440 compared whole (their rows too). No breaks for these parts in the prover yet. |
 | 2026-11-23T14:15Z | `swan map` whole in Rust (src/pipeline.goose to its end): the jobs started and waited for (`spawn_job`, `wait_any`), what each took or how it failed, the records, the flattener, the store, rows moved after cosmetic edits (`shift_cosmetic`, `mark_edited`), the crates with no rows, the end of the report. `scripts/port-map.sh` compares whole maps: 440 of 440 the same, where 32 were made to their end before. Agent-Reach mapped sealed by both: every table's hash the same but `meta`. relate mapped by the Rust program in 38 s, its Go folder apart. A new map the Rust `index` left locked, found and mended (below). The same day, on the owner's word: no longer line by line, no provers, and then no more matching of the Goose program (DECISIONS.md). |
+| 2026-11-23T15:00Z | `swan lsp-index` in Rust: `lsp.rs` (a synchronous client on `lsp-server` and `lsp-types`), `lspindex.rs` (SCIP written with the `scip` crate), a language's server read from tools/modules.json in `modules.rs`. Not copied from `lsp/golsp.goose`. cobra: the same rows as the Goose program's map, 4.7 s against 7.1 s. relate mapped whole. `port-map.sh` 440 of 440 with no Goose program behind the Rust one; `SWAN_PORT_GOOSE` is gone. Built by a worker agent with RustRover's MCP server; the crates chosen from a survey of the same day. |
+
+## What exists in Rust to build on (surveyed 2026-11-23T14:33Z)
+
+Asked by the owner: "swan with rust dependencies should have the things
+exist somewhere on the net to help us fill our gaps". A research agent read
+each project's page and manifest that day; versions are as it fetched them
+and are checked again when a crate is added.
+
+| For | What | Licence | Verdict |
+|---|---|---|---|
+| Speaking to a language server | `lsp-server` 0.10 (its message reading and writing, synchronous) with `lsp-types` 0.97 | MIT / Apache-2.0 | depend |
+| The same, asynchronous | `async-lsp` 0.2 | MIT / Apache-2.0 | only if the client goes async |
+| Server side only | `tower-lsp`, `tower-lsp-server` | MIT / Apache-2.0 | no use to a client |
+| Editors' clients | Helix's `helix-lsp` (not published, MPL-2.0); Zed's `lsp` (not published, GPL-3.0-or-later) | | read Helix's; do not copy Zed's |
+| How to start each language's server | Helix's `languages.toml` (342 languages, 188 servers, MPL-2.0); mason-registry (608 packages with where to fetch them, Apache-2.0) | | usable as data |
+| Starting a server and knowing when it is ready | SolidLSP (Python, MIT; about 80 language classes); multilspy (12) | MIT | SolidLSP, behind the bridge Swan has |
+| serena-rs | Two codebases of that name: the repository (11 commits in one day, 12 servers written in, readiness by a short sleep) and the crate 0.1.7 (7 servers, its own JSON-RPC, 353 tests, 32 downloads). No LICENSE file in either | says MIT | read, not depended on |
+| Others that give agents language-server answers | lsproxy (Rust, MIT, 8 languages, quiet since 2025-08), its MCP fork, mcp-language-server (Go), cclsp (TypeScript) | | read |
+| SCIP | `scip` 0.10 (types, symbol parsing, writing; pins protobuf) | Apache-2.0 | depend |
+| SCIP into SQLite | the `scip` CLI's experimental convert (Go): documents, chunks, global_symbols, mentions | Apache-2.0 | its schema is worth reading beside Swan's |
+| Pattern search | `ast-grep-core` 0.51 | MIT | depend, when the matcher carried from Goose is next touched |
+| Symbols by name where no compiler-grade tool exists | `tree-sitter-tags` 0.27 | MIT | depend, for the same reason |
+| Name resolution without a compiler | stack-graphs | | archived 2025-09 |
+| The MCP server | `rmcp` 3.11, the official SDK (stdio, tools by macro) | Apache-2.0 | depend |
+| Watching files, walking by .gitignore | `notify` 9 with its debouncer; `ignore` 0.4 | CC0; Unlicense / MIT | depend, with the watcher |
+
+What nothing found fills, and so stays Swan's own: a language server's
+answers made into SCIP (`swan lsp-index`); SCIP made into rows in SQLite
+with questions over them, in Rust; starting every language's server and
+waiting until it is ready, in Rust (SolidLSP does it in Python, which is
+why the bridge stays); and sealing a repo so its code does not run unasked.
 
 ## Found while porting
 
