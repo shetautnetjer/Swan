@@ -2503,3 +2503,71 @@ Limits:
 - The Goose program keeps what waits for trust for `swan serve` to say
   (`map_held`); that comes with the server.
 - The suite was not run for this piece: no Goose source changed.
+
+## 2026-11-23T14:15Z: stage 4: `swan map` whole in Rust; a new map the Rust index left locked, mended; the Goose program is no longer matched
+
+On the owner's word the port changed its method twice today (DECISIONS.md,
+13:36Z and 14:15Z): what is left is not copied line by line, the provers
+are not run, and the Goose program is no longer the thing to match. What
+follows was done between the two.
+
+What is now true: the Rust program makes a whole map. It starts the
+indexers a map needs (as many at once as the Goose program, each sealed),
+waits for them, says what each took or how it failed, flattens, stores,
+moves the rows of files edited only in comments or layout, and ends its
+report (src/pipeline.goose to its end).
+
+| | before | now |
+|---|---|---|
+| Of the 440 made-up cases, maps the Rust program takes to their end | 32 | 440 |
+| Of those, the same as the Goose program's (report, files, rows) | 32 | 440 |
+| Agent-Reach (Python, 89 files), mapped sealed by both | not made by Rust | 3,768 symbols, 19,593 uses, 67 relationships in both; every table's hash the same but `meta` (its folder and times); 8 s each |
+| relate (Rust, 2,211 files), mapped sealed by the Rust program | not made by Rust | 58,564 symbols, 737,824 uses, 38 s; its one Go folder not mapped (Limits) |
+
+Found by running a map to its end, and mended: after writing a *new* map
+the Rust `index` left its connection open, and a new map is written under
+an exclusive lock, so nothing later in the same run could read it
+("database is locked"). The Rust took `syms` out of a struct and left the
+struct's two statements alive to the end of the function; a connection
+closed with a statement still open stays open. No comparison of stages 1
+to 4 saw it, since `swan index` ends right after. It showed as a line the
+Goose program does not say ("rust: no rows for these crates: ."), 12 cases
+of 440. `rust/src/index.rs` lets the two statements go, and
+`rust/src/db.rs` now stops the run when a close does not close. The fault
+is in the Rust on main since stage 1; that Rust is not built or shipped.
+
+In Rust for the map's end: `spawn_job` and `wait_any` in `sys.rs`; the
+rest of `change.rs` (`shift_cosmetic`); `edit.rs`, begun (`offset_of`,
+`col_of`, `mark_edited`); `rust_unmapped` in `rustproj.rs`; the end of
+`pipeline.rs`. Until the language-server client is in Rust,
+`SWAN_PORT_GOOSE=<a Goose build of swan>` makes the Rust map start that
+program for its `lsp-index` child.
+
+`scripts/port-map.sh` compares whole maps now: the report, the files of
+the map folder and every row of the map, each program's own folder taken
+out. What it takes out besides, each seen and explained
+(docs/rust-port.md, "Found while porting"): the time a map was refreshed;
+"up to N indexers at once", which follows the free memory; what a failed
+job said; three fingerprints that take in a path of each program's own and
+one that takes in the time; Go's build folder and the servers' logs; the
+rows scip-clang gives, which differ between two runs of the Goose program
+itself; and the order scip-java gives its files back in, for one fixture.
+
+Checked on this tree: `port-map.sh` 440 of 440; `cargo test` 9 and 2;
+`port-store.sh` on Agent-Reach, 1,806 questions answered the same;
+`port-compare.sh --wrong-calls` 47 of 47; `port-patch.sh` 105 of 105;
+`port-run.sh` (quick) 50 of 50.
+
+Limits:
+- A repo with Go or Goose files: the Rust program has no `lsp-index` yet,
+  so that job fails, is said, and the rest of the map is made (relate: 38
+  files fewer than the 2,249 of the Goose program's stored map).
+- C and CUDA rows are not compared, and one Java fixture is compared in
+  any order (above).
+- No prover was run and none will be, on the owner's word. The cases added
+  since 2026-11-22T18:10Z have never been seen to fail.
+- Trusted Java and C# are still run by neither program in the judge.
+- `map_held` (what waits for trust, kept for `swan serve`) is not in Rust.
+- The suite in the microVM was not run: no Goose source changed, and the
+  Rust program cannot stand in `bin/` before its server is built.
+- No pull request, nothing merged, nothing installed.

@@ -153,6 +153,89 @@ pub fn wait_code(mut child: std::process::Child) -> i32 {
     }
 }
 
+/// Starts argv in `cwd`, with `env` ("K=V" entries) set over this
+/// process's environment, nothing to read, and its output and errors going
+/// to `log` (native/swan_sys.c, swan_spawn). Ok is its pid, to be waited
+/// for with wait_any. A program that cannot be started is said in the log
+/// in the words swan_spawn's child says it, and Err is the exit code that
+/// child ends with.
+pub fn spawn_job(argv: &[&[u8]], cwd: &[u8], env: &[&[u8]], log: &[u8]) -> Result<i64, i32> {
+    use std::io::Write;
+    use std::os::unix::process::CommandExt;
+    use std::process::{Command, Stdio};
+    let Some((first, rest)) = argv.split_first() else {
+        return Err(-1);
+    };
+    // Where argv[0] may be: itself when it names a folder, else each folder
+    // of the PATH the program will have, tried in order (as in `run`).
+    let mut places: Vec<Vec<u8>> = Vec::new();
+    if first.contains(&b'/') {
+        places.push(first.to_vec());
+    } else {
+        let ours = env.iter().find(|e| e.starts_with(b"PATH=")).map(|e| e[5..].to_vec());
+        let dirs = ours.or_else(|| std::env::var_os("PATH").map(|v| v.into_vec())).unwrap_or_default();
+        if !dirs.is_empty() {
+            for dir in dirs.split(|&b| b == b':') {
+                if dir.len() + first.len() + 2 < 4096 {
+                    places.push([dir, b"/", first].concat());
+                }
+            }
+        }
+    }
+    let logf = fs::File::create(path(log)).ok();
+    let mut why = libc::ENOENT;
+    for place in &places {
+        let mut c = Command::new(OsStr::from_bytes(place));
+        c.arg0(OsStr::from_bytes(first)).args(rest.iter().map(|a| OsStr::from_bytes(a))).stdin(Stdio::null());
+        if let Some(f) = &logf {
+            if let (Ok(o), Ok(e)) = (f.try_clone(), f.try_clone()) {
+                c.stdout(o).stderr(e);
+            }
+        }
+        if !cwd.is_empty() {
+            c.current_dir(path(cwd));
+        }
+        for e in env {
+            if let Some(eq) = e.iter().position(|&b| b == b'=') {
+                c.env(OsStr::from_bytes(&e[..eq]), OsStr::from_bytes(&e[eq + 1..]));
+            }
+        }
+        match c.spawn() {
+            // The handle is let go: wait_any takes the pid's end.
+            Ok(started) => return Ok(started.id() as i64),
+            Err(e) => why = e.raw_os_error().unwrap_or(libc::ENOENT),
+        }
+    }
+    if let Some(mut f) = logf {
+        let _ = f.write_all(&[b"swan_spawn: cannot run ", &first[..], b": ", &strerror(why)[..], b"\n"].concat());
+    }
+    Err(127)
+}
+
+/// Waits for any program started by spawn_job: its pid and its exit code
+/// (128 + the signal that ended it), or None when none are left
+/// (native/swan_sys.c, swan_wait_any).
+pub fn wait_any() -> Option<(i64, i32)> {
+    let mut status: libc::c_int = 0;
+    loop {
+        let pid = unsafe { libc::waitpid(-1, &mut status, 0) };
+        if pid < 0 {
+            if errno() == libc::EINTR {
+                continue;
+            }
+            return None;
+        }
+        let code = if libc::WIFEXITED(status) {
+            libc::WEXITSTATUS(status)
+        } else if libc::WIFSIGNALED(status) {
+            128 + libc::WTERMSIG(status)
+        } else {
+            -1
+        };
+        return Some((pid as i64, code));
+    }
+}
+
 pub fn delete_file(p: &[u8]) -> bool {
     fs::remove_file(path(p)).is_ok()
 }

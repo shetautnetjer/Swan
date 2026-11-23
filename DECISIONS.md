@@ -826,3 +826,43 @@ added to `scripts/port-map.sh` on 2026-11-22 stay without breaks.
 language-server client is in Rust, the Rust `swan map` may be given the
 Goose program to start for the one child it cannot run itself
 (`swan lsp-index`). docs/rust-port.md says how.
+
+## 2026-11-23T14:15Z — Swan in Rust is built its own way; the Goose program is no longer matched; SolidLSP is the way to run a language server
+
+**Direction (the owner's, his words):** "i wouldn't try to match goose, i
+would try to create your own solutions using jetbrains and serena styles
+and what lsp scip exist this is why i also keep mentioning just having a
+stable way by using solidlsp just like serena".
+
+**What it changes in the entry of 13:36Z:** its third point kept "the same
+rows as the Goose program" as a floor. That floor is no longer a goal. No
+more work goes into matching the Goose program. The comparisons that exist
+stay as they are (`scripts/port-map.sh` takes a minute) and are not
+extended; a difference they show is a question to look at, not a fault to
+mend. The rest of that entry stands: the Rust written so far is kept, the
+provers are not run, sealing stays exact.
+
+**What was already true when he said it:** `swan map` had just been
+finished in Rust against the Goose program, 440 of 440 made-up maps the
+same (STATUS.md, the same hour). SolidLSP has been in Swan since
+2026-11-17, for Go alone, behind `tools/solidlsp/bridge.py`; he asked on
+2026-11-21 why it was not used "for everything else", and that question
+waited in HANDOFF.md for the language-server stage.
+
+**How it is read (the working agent's reading, to be corrected by him):**
+- JetBrains' style: a map built ahead by the indexers that exist (SCIP),
+  stored, and asked in milliseconds. That is the map Swan has, and it
+  stays.
+- Serena's style: symbol tools answered by live language servers, each
+  started, configured and waited for by SolidLSP.
+- So the language-server stage is not a copy of Swan's own client
+  (`lsp/golsp.goose`). The Rust program gets a small client that speaks to
+  the bridge, and languages move onto SolidLSP one at a time, each measured
+  against its JetBrains IDE before it is kept.
+- SolidLSP is Python: the Rust Swan keeps a Python helper and its
+  virtualenv, as Go has now. A language SolidLSP does not know (Goose, the
+  shader languages) is spoken to by the same Rust client directly.
+
+**Not decided:** which languages move first; whether a language with a SCIP
+indexer also gets SolidLSP for its live answers. Both are asked of him in
+HANDOFF.md.

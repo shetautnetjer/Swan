@@ -976,14 +976,63 @@ STEPS='^(mkdir|tsc --listFilesOnly|tsc --showConfig|python packages [(]read from
 WATCHED="other.txt"
 PAR=${PORT_MAP_JOBS:-8}
 total=0
-tidy() { sed -E -e 's/ in [0-9]+ ms$//' -e 's/^swan map: [0-9]+ ms in all/swan map: N ms in all/' -e 's/^(.*): [0-9]+ ms$/\1: N ms/' -e 's/^(.*): exit (-?[0-9]+) after [0-9]+ ms$/\1: exit \2 after N ms/' -e "s|$2|<its folder>|g" -e 's/^goose runtime error: //' -e '$s/ \([^()]*\.goose:[0-9]+\)$//' "$1"; }
+tidy() { sed -E -e 's/ in [0-9]+ ms$//' -e 's/^swan map: [0-9]+ ms in all/swan map: N ms in all/' -e 's/, up to [0-9]+ indexers at once$/, up to N indexers at once/' -e 's/^(.*): [0-9]+ ms$/\1: N ms/' -e 's/^(.*): [0-9]+ ms( not mapped, the map goes on without it)? \(exit /\1: N ms\2 (exit /' -e 's/^(.*): exit (-?[0-9]+) after [0-9]+ ms$/\1: exit \2 after N ms/' -e "s|$2|<its folder>|g" -e 's/^goose runtime error: //' -e '$s/ \([^()]*\.goose:[0-9]+\)$//' "$1"; }
 # The prep_ and home_ functions there are so far: the Goose program maps a
 # case again when one of them changes.
 # Every table of a map as text, its own folder and its two times apart.
-db_text() { sqlite3 -readonly "$1" .dump 2>&1 | sed -E -e "s|$2|<its folder>|g" -e "s/^(INSERT INTO meta VALUES\('(scip_time|built_at)',)[^)]*\);$/\1N);/"; }
+db_text() { sqlite3 -readonly "$1" .dump 2>&1 | sed -E -e "s|$2|<its folder>|g" -e "s|$base/old|<its folder>|g" -e "s/^(INSERT INTO meta VALUES\('(scip_time|built_at|refreshed_at)',)[^)]*\);$/\1N);/"; }
 # A copy of a map the Goose program made, with its records of where its
 # indexes are (index-manifest.tsv, python-pieces.tsv) moved with it, as if
 # made where it is.
+# The same record of the indexes. A chunk of TypeScript that a changed
+# file's users fall in has the time mixed into its fingerprint, so that it
+# is no kept one: where a map was there before, a chunk's fingerprint may
+# differ.
+manifest_same() {
+    cmp -s <(manifest_text "$1" "$2") <(manifest_text "$3" "$4") && return 0
+    [ -n "${PREP:-}" ] || return 1
+    cmp -s <(manifest_text "$1" "$2" | sed -E 's|^(scip-typescript [0-9]+/[0-9]+\t)[^\t]+|\1(may be of the time)|') <(manifest_text "$3" "$4" | sed -E 's|^(scip-typescript [0-9]+/[0-9]+\t)[^\t]+|\1(may be of the time)|')
+}
+# What a failed job said is the end of its log, 400 bytes of it: where that
+# starts moves with the length of each program's own folder, and an indexer
+# says times and addresses there. The line is kept as far as its exit code.
+cut_tails() {
+    awk '
+        skip && !/^[^ ].*: N ms( \(exit| not mapped|$)/ && !/^(flatten: |swan index: |swan map: |every indexer failed|clean rebuild failed|\(some indexers failed|rust: |cosmetic edits: |no code changed|nothing changed|flatten failed)/ { next }
+        { skip = 0 }
+        match($0, /: N ms( not mapped, the map goes on without it)? \(exit -?[0-9]+\) /) { $0 = substr($0, 1, RSTART + RLENGTH - 1) "<what it said>"; skip = 1 }
+        { print }'
+}
+# The record of the indexes, each program's own folder taken out. Three
+# fingerprints take in a path that is each program's own, and are left out:
+# the syntax index's (the program that made it, and its size), scip-java's
+# (what it is run with names Swan's home and the map folder) and, with
+# Swan's own config for TypeScript in the map folder, scip-typescript's.
+manifest_text() {
+    sed -e "s|$2|<its folder>|g" -e "s|$base/old|<its folder>|g" "$1/index-manifest.tsv" |
+        awk -F'\t' -v own="$([ -e "$1/tsproject/tsconfig.json" ] && echo 1)" 'BEGIN { OFS = "\t" } $1 ~ /^(syntax-index|scip-java)/ || (own && $1 ~ /^scip-typescript/) { $2 = "(its own)" } { print }'
+}
+# A map folder as text: each file's name, then what it holds with each
+# program's own folder taken out; an index and a kept text by their hash.
+# Left out: the map, its lock and the record of the indexes (compared
+# apart), what an indexer said while it ran, and the folders cargo and
+# scip-java build in. With Swan's own config for TypeScript, which is in the
+# map folder, the fingerprint of what the chunks share takes in that
+# folder's path, and each program has its own.
+folder_text() {
+    (cd "$1" 2>/dev/null && find . -type f ! -name swan.db ! -name swan.db.lock ! -name index-manifest.tsv ! -name 'log-*.txt' ! -path './cargo-target/*' ! -path './java-targetroot/*' ! -path './go/*' ! -name 'lsp-*.log' | LC_ALL=C sort | while IFS= read -r f; do
+        printf '== %s\n' "$f"
+        case "$f" in
+            ./index-cxx.scip) echo "(scip-clang's: not the same twice from one program)" ;;
+            ./index-java.scip) if [ "${3:-}" = loose ]; then echo "(scip-java's: its files in another order)"; else sha256sum <"$f"; fi ;;
+            *.scip | ./texts/*) sha256sum <"$f" ;;
+            ./symbols.tsv | ./extents.tsv | ./relationships.tsv | ./occurrences.tsv | ./documents.tsv)
+                if [ -e index-cxx.scip ]; then grep -v 'cxx \. \. \$ ' "$f" | LC_ALL=C sort; elif [ "${3:-}" = loose ]; then LC_ALL=C sort "$f"; else sed -e "s|$2|<its folder>|g" -e "s|$base/old|<its folder>|g" "$f"; fi ;;
+            ./typescript-shared.txt) if [ -e tsproject/tsconfig.json ]; then echo "(its own)"; else cat "$f"; fi ;;
+            *) tr '\0' '\n' <"$f" | sed -e "s|$2|<its folder>|g" -e "s|$base/old|<its folder>|g" ;;
+        esac
+    done)
+}
 prep_copy() { local f; cp -r "$1" "$2"; for f in index-manifest.tsv python-pieces.tsv; do [ ! -f "$2/$f" ] || sed -i "s|$1/|$2/|g" "$2/$f"; done; }
 preps() { declare -f $(compgen -A function | grep -E '^(prep_|home_|mtime_ns$)') | sha256sum | cut -c1-16; }
 # case_of <name> <repo> [--clean] [NAME=value...]: both programs map the
@@ -1018,11 +1067,11 @@ case_of() {
         [ -n "${HOME_PREP:-}" ] && $HOME_PREP "$w/home"
         [ -n "${PREP:-}" ] && "$PREP" "$n"
         if [ -n "${LISTED:-}" ]; then mkdir -p "$w/home/data"; printf '%s\n' "$LISTED" >"$w/home/data/trusted-repos"; fi
-        (cd "$w" && env "${UNSET[@]}" "$@" home/bin/swan map "$repo" "maps/$name" "${clean[@]}" >"$w/out" 2>"$w/err" </dev/null); code=$?
+        (cd "$w" && env "${UNSET[@]}" SWAN_PORT_GOOSE="$base/old/home/bin/swan" "$@" home/bin/swan map "$repo" "maps/$name" "${clean[@]}" >"$w/out" 2>"$w/err" </dev/null); code=$?
         rm -rf "${w:?}/home/data"
         old_code=$(cat "$kept/code")
-        tidy "$kept/out" "$base/old" >"$w/old.out"; tidy "$kept/err" "$base/old" >"$w/old.err"
-        tidy "$w/out" "$w" >"$w/new.out"; tidy "$w/err" "$w" >"$w/new.err"
+        tidy "$kept/out" "$base/old" | cut_tails >"$w/old.out"; tidy "$kept/err" "$base/old" >"$w/old.err"
+        tidy "$w/out" "$w" | cut_tails >"$w/new.out"; tidy "$w/err" "$w" >"$w/new.err"
         why=""
         if [ "$code" = 70 ]; then
             # The carried part: what it printed, less the line end print adds,
@@ -1079,15 +1128,25 @@ case_of() {
         elif [ -z "$why" ] && { [ -d "$n" ] || [ -d "$o" ]; }; then
             # The record of where the indexes are names the folder itself,
             # which is each program's own: it is compared with that apart.
-            diff -r -x swan.db.lock -x index-manifest.tsv -x swan.db "$n" "$o" >"$w/d" 2>&1 || why="the map folders differ: $(head -2 "$w/d" | tr '\n' ' ' | sed "s|$w|<Rust>|g; s|$base/old|<Goose>|g" | cut -c1-200)"
+            folder_text "$n" "$w" >"$w/f.new"; folder_text "$o" "$base/old" >"$w/f.old"
+            # scip-java gives its files back in an order that moves with the
+            # folder it writes in, the same files given it in the same order
+            # (seen 2026-11-23, fixtures/tiny-java): where that is all that
+            # differs, the rows are compared in any order and the map's own
+            # numbering is not compared.
+            loose=""
+            if ! cmp -s "$w/f.new" "$w/f.old"; then
+                if [ -e "$o/index-java.scip" ] && cmp -s <(folder_text "$n" "$w" loose) <(folder_text "$o" "$base/old" loose); then loose=1
+                else why="the map folders differ (< Goose, > Rust): $(diff "$w/f.old" "$w/f.new" | grep '^[<>]' | head -3 | cut -c1-160 | tr '\n' ' ')"; fi
+            fi
             # The map itself: the same bytes, or, where a map was made, the
             # same rows in every table, each program's own folder and the
             # two times a map notes of itself apart.
-            if [ -z "$why" ] && { [ -e "$n/swan.db" ] || [ -e "$o/swan.db" ]; } && ! cmp -s "$n/swan.db" "$o/swan.db"; then
+            if [ -z "$why" ] && [ -z "$loose" ] && [ ! -e "$o/index-cxx.scip" ] && { [ -e "$n/swan.db" ] || [ -e "$o/swan.db" ]; } && ! cmp -s "$n/swan.db" "$o/swan.db"; then
                 { [ -e "$n/swan.db" ] && [ -e "$o/swan.db" ] && db_text "$n/swan.db" "$w" >"$w/db.new" && db_text "$o/swan.db" "$base/old" >"$w/db.old" && cmp -s "$w/db.new" "$w/db.old"; } || why="the map's rows differ (swan.db): $(diff "$w/db.old" "$w/db.new" 2>&1 | grep '^[<>]' | head -2 | cut -c1-150 | tr '\n' ' ')"
             fi
             if [ -z "$why" ] && { [ -e "$n/index-manifest.tsv" ] || [ -e "$o/index-manifest.tsv" ]; }; then
-                { [ -e "$n/index-manifest.tsv" ] && [ -e "$o/index-manifest.tsv" ] && cmp -s <(sed "s|$w|<its folder>|g" "$n/index-manifest.tsv") <(sed "s|$base/old|<its folder>|g" "$o/index-manifest.tsv"); } || why="the map folder's index-manifest.tsv differs"
+                { [ -e "$n/index-manifest.tsv" ] && [ -e "$o/index-manifest.tsv" ] && manifest_same "$n" "$w" "$o" "$base/old"; } || why="the map folder's index-manifest.tsv differs"
             fi
         fi
         if [ -z "$why" ] && ! home_state "$w/home" | cmp -s - "$kept/home"; then

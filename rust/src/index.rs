@@ -515,7 +515,15 @@ VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6) RETURNING id
         rel_count += 1;
     }
     drop(ins_rel);
-    let Interner { syms, .. } = it; // its two statements are finalized here
+    // The interner's two statements are let go here. Taking `syms` alone
+    // out of it would leave them alive to the end of this function: a map
+    // closed with a statement still open stays open, and a new map is
+    // written under an exclusive lock, so nothing later in this process
+    // could read it (the end of `swan map` reads it for the crates with no
+    // rows).
+    let Interner { syms, find_sym, add_sym, .. } = it;
+    drop(find_sym);
+    drop(add_sym);
 
     // The definitions found in rewritten files, and their current signatures.
     let upd_sym = db.prepare_or_die(

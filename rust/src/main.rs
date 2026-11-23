@@ -11,6 +11,7 @@
 mod change;
 mod db;
 mod diag;
+mod edit;
 mod fresh;
 mod gsort;
 mod gradle;

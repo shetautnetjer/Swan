@@ -15,6 +15,7 @@
 // rust_unmapped (stage 4, with the map) names every crate that ended up with
 // no rows.
 
+use crate::db::Db;
 use crate::sys;
 use crate::util::{contains_line, find, json_string, parse_int, starts_with, trim};
 use crate::walk::Walk;
@@ -479,6 +480,76 @@ pub fn rust_std_source(repo: &[u8]) -> Vec<u8> {
         .concat(),
     );
     src
+}
+
+// The crates of the repo that the map has no rows for, as "dir, dir, ..."
+// (five at most, then a count): every folder whose Cargo.toml names a
+// package and which has Rust files of its own, none of them in the map's
+// `files`. Read from the
+// finished map, so it holds whatever the reason was: a project past the
+// limit, one whose run failed, or a crate that turned out to be in no
+// project that was run.
+pub fn rust_unmapped(walk: &Walk, repo: &[u8], db_path: &[u8], dirs: &[u8]) -> Vec<u8> {
+    let Ok(db) = Db::open_existing(db_path) else {
+        return Vec::new();
+    };
+    // The crate a file belongs to: the deepest folder with a Cargo.toml above it.
+    let crate_of = |file: &[u8]| -> Vec<u8> {
+        let mut best: &[u8] = b"";
+        for d in dirs.split(|&c| c == b'\n') {
+            let above = d == b"." || (file.len() > d.len() && starts_with(file, d) && file[d.len()] == b'/');
+            if !d.is_empty() && above && (best.is_empty() || best == b"." || (d != b"." && d.len() > best.len())) {
+                best = d;
+            }
+        }
+        best.to_vec()
+    };
+    let mut mapped: Vec<u8> = Vec::new(); // crates with a Rust file in the map
+    if let Ok(q) = db.prepare(b"SELECT file FROM files WHERE file LIKE '%.rs'") {
+        while q.step() == Ok(true) {
+            let c = crate_of(&q.col_text(0));
+            if !c.is_empty() && !contains_line(&mapped, &c) {
+                mapped.extend_from_slice(&c);
+                mapped.push(b'\n');
+            }
+        }
+    }
+    drop(db);
+    let mut holding: Vec<u8> = Vec::new(); // crates with a Rust file on disk
+    walk.each_file(repo, |full, name| {
+        if name.ends_with(b".rs") {
+            let c = crate_of(&full[repo.len() + 1..]);
+            if !c.is_empty() && !contains_line(&holding, &c) {
+                holding.extend_from_slice(&c);
+                holding.push(b'\n');
+            }
+        }
+    });
+    let mut list: Vec<u8> = Vec::new();
+    let mut n = 0;
+    for h in holding.split(|&c| c == b'\n') {
+        if h.is_empty() || contains_line(&mapped, h) {
+            continue;
+        }
+        // A Cargo.toml with no [package] is a workspace's list of members, not
+        // a crate: Rust files beside it (scripts, snippets in docs) belong to none.
+        let mut manifest: Vec<u8> = Vec::new();
+        sys::read_file(&[repo, b"/", h, b"/Cargo.toml"].concat(), &mut manifest);
+        if !(starts_with(&manifest, b"[package") || find(&manifest, b"\n[package") >= 0) {
+            continue;
+        }
+        if n < 5 {
+            if n > 0 {
+                list.extend_from_slice(b", ");
+            }
+            list.extend_from_slice(h);
+        }
+        n += 1;
+    }
+    if n > 5 {
+        list.extend_from_slice(format!(" and {} more", n - 5).as_bytes());
+    }
+    list
 }
 
 // `swan cargo-projects <repo>`: what swan map would do for Rust here, run

@@ -113,10 +113,14 @@ impl Db {
 impl Drop for Db {
     // Every statement is dropped before its database here, so the plain
     // close does what goose-sqlite's close_v2 does (the crate's bindings
-    // have no close_v2).
+    // have no close_v2). A statement that outlives its database leaves it
+    // open, with whatever lock it holds: that stops the run, since it was
+    // once passed over and a new map stayed locked for the whole process.
     fn drop(&mut self) {
         unsafe {
-            ffi::sqlite3_close(self.0);
+            if ffi::sqlite3_close(self.0) != ffi::SQLITE_OK {
+                die(b"swan: a map was closed with a statement still open");
+            }
         }
     }
 }

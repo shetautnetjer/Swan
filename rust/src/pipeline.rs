@@ -11,8 +11,10 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::change::{code_hash, cosmetic_lang, index_lines, line_of_path};
+use crate::change::{code_hash, cosmetic_lang, index_lines, line_of_path, shift_cosmetic};
 use crate::db::Db;
+use crate::edit::mark_edited;
+use crate::fresh::scip_time_of;
 use crate::gradle::gradle_scip_tasks;
 use crate::gsort::goose_sort;
 use crate::index::{index_main_locked, SCHEMA_VERSION};
@@ -22,15 +24,15 @@ use crate::pypatch::{ensure_scip_python_patch, ensure_scip_python_site_patch, py
 use crate::pyplan::{piece_target, plan_python};
 use crate::query::meta_value;
 use crate::run::{run_step, swan_home};
-use crate::rustproj::{add_toolchain_env, cargo_inside, cargo_manifest_dirs, rust_analyzer_config, rust_projects, rust_std_source, rust_toolchain_dir, rust_toolchain_override, RUST_PROJECT_LIMIT};
-use crate::seal::{sandbox_on, sealed_run, sealed_step};
+use crate::rustproj::{add_toolchain_env, cargo_inside, cargo_manifest_dirs, rust_analyzer_config, rust_projects, rust_std_source, rust_toolchain_dir, rust_toolchain_override, rust_unmapped, RUST_PROJECT_LIMIT};
+use crate::seal::{sandbox_on, seal_argv, sealed_run, sealed_step};
 use crate::stamp::prestamp;
 use crate::survey::{survey_ignored, survey_paths, survey_python_envs, survey_report, survey_run};
 use crate::sys;
 use crate::treesitter;
 use crate::tspatch::ensure_scip_typescript_patch;
 use crate::tsproj::ts_other_projects;
-use crate::util::{contains_line, die, ends_with, find, hash, hash_combine, json_string, parse_int, print, push_int, rfind, split, starts_with, trim, Dict};
+use crate::util::{contains_line, die, ends_with, find, hash, hash_combine, json_string, parse_int, push_int, rfind, split, starts_with, trim, Dict};
 use crate::walk::Walk;
 
 // What a repo holds, found by walking it.
@@ -1039,6 +1041,58 @@ impl Stamps {
     fn have_text(&self, raw: &[u8]) -> bool {
         !raw.is_empty() && raw != b"?" && sys::file_exists(&[&self.texts_dir[..], b"/t", raw, b".txt"].concat())
     }
+}
+
+// Clean publication must not treat a successful but malformed flattener as a
+// complete replacement. Match bin/swan-flatten's row contract before the
+// existing permissive native reader runs. Empty files/lines are valid, and the
+// historical five-column symbol row remains valid (the sixth is optional docs).
+fn clean_row_number(field: &[u8]) -> bool {
+    !field.is_empty() && field.iter().all(|c| c.is_ascii_digit()) && parse_int(field).is_some_and(|v| v >= 0)
+}
+
+fn clean_row_valid(name: &[u8], line: &[u8]) -> bool {
+    let f = split(line, b'\t');
+    if name == b"symbols.tsv" {
+        return (f.len() == 5 || f.len() == 6) && !f[0].is_empty() && clean_row_number(f[2]);
+    }
+    if name == b"relationships.tsv" {
+        if !(f.len() == 4 && f.iter().all(|x| !x.is_empty())) {
+            return false;
+        }
+        return split(f[3], b',').iter().all(|&flag| flag == b"impl" || flag == b"ref" || flag == b"type" || flag == b"def");
+    }
+    let expected = if name == b"extents.tsv" { 6 } else { 7 };
+    if !(f.len() == expected && !f[0].is_empty() && !f[1].is_empty()) {
+        return false;
+    }
+    if !(2..6).all(|i| clean_row_number(f[i])) {
+        return false;
+    }
+    let at = |i: usize| parse_int(f[i]).unwrap_or(0);
+    if !(at(4) > at(2) || (at(4) == at(2) && at(5) >= at(3))) {
+        return false;
+    }
+    name == b"extents.tsv" || f[6] == b"def" || f[6] == b"ref" || f[6] == b"imp" || f[6] == b"name"
+}
+
+fn clean_rows_valid(out: &[u8], report: &mut Vec<u8>) -> bool {
+    for name in [&b"symbols.tsv"[..], b"extents.tsv", b"relationships.tsv", b"occurrences.tsv"] {
+        let mut rows: Vec<u8> = Vec::new();
+        if !sys::read_file(&[out, b"/", name].concat(), &mut rows) {
+            report.extend_from_slice(&[b"clean rebuild cannot read flattened output: ", name, b"; previous database retained"].concat());
+            return false;
+        }
+        for (row, line) in rows.split(|&c| c == b'\n').enumerate() {
+            if !line.is_empty() && !clean_row_valid(name, line) {
+                report.extend_from_slice(&[b"clean rebuild malformed flattened output: ", name, b" row "].concat());
+                push_int(report, row as i64 + 1);
+                report.extend_from_slice(b"; previous database retained");
+                return false;
+            }
+        }
+    }
+    true
 }
 
 pub fn map_main(repo_arg: &[u8], out_arg: &[u8], report: &mut Vec<u8>, clean: bool) -> bool {
@@ -2310,7 +2364,11 @@ fn map_main_locked(repo: &[u8], out: &[u8], report: &mut Vec<u8>, clean: bool) -
     let mut lsp_mapped: Vec<u8> = vec![b' ']; // " go goose ": the languages mapped this way in this run
     let mut mods_text: Vec<u8> = Vec::new();
     if !l.other.is_empty() && sys::read_file(&[&home[..], b"/tools/modules.json"].concat(), &mut mods_text) {
-        let swan_bin = [&home[..], b"/bin/swan"].concat();
+        // Until the language-server client is in Rust, this program cannot
+        // run that child itself: SWAN_PORT_GOOSE names a Goose build of Swan
+        // to start for it (docs/rust-port.md).
+        let port_goose = sys::env(b"SWAN_PORT_GOOSE");
+        let swan_bin = if port_goose.is_empty() { [&home[..], b"/bin/swan"].concat() } else { port_goose };
         // A file that cannot be read as JSON names no language.
         if let Some(mods) = json::parse(&mods_text) {
             for lang in l.other.split(|&c| c == b' ') {
@@ -2429,11 +2487,503 @@ fn map_main_locked(repo: &[u8], out: &[u8], report: &mut Vec<u8>, clean: bool) -
         return false;
     }
 
-    // Carried this far (docs/rust-port.md, "Next"): what was said so far is
-    // printed, and the jobs, the indexers and the rows they give are not run.
-    // Read where the jobs are run and the map's records written, still to
-    // be carried.
-    let _ = (&jobs.list, &jobs.index_manifest, jobs.reused_all, rust_indexed);
-    print(report);
-    crate::not_carried(b"map", 4);
+    // Run them, at most jobs_limit() at a time.
+    let limit = jobs_limit();
+    let n_jobs = jobs.list.len();
+    let mut pids: Vec<i64> = vec![0; n_jobs];
+    let mut codes: Vec<i32> = vec![0; n_jobs];
+    let mut began: Vec<std::time::Instant> = vec![t_start; n_jobs];
+    let mut took: Vec<i64> = vec![0; n_jobs]; // ms
+    let mut running: i64 = 0;
+    fn wait_one(pids: &[i64], codes: &mut [i32], began: &[std::time::Instant], took: &mut [i64], running: &mut i64) {
+        let Some((pid, code)) = sys::wait_any() else {
+            *running = 0;
+            return;
+        };
+        for k in 0..pids.len() {
+            if pids[k] == pid && codes[k] == -999 {
+                codes[k] = code;
+                took[k] = began[k].elapsed().as_millis() as i64;
+                *running -= 1;
+            }
+        }
+    }
+    if clean {
+        // A successful indexer must produce this run's file, not leave an old
+        // target behind. Reuse metadata was invalidated before planning.
+        for job in &jobs.list {
+            if job.argv.is_empty() {
+                report.extend_from_slice(b"clean rebuild unexpectedly planned cached output");
+                return false;
+            }
+            if !(!sys::file_exists(&job.target) || sys::delete_file(&job.target)) {
+                report.extend_from_slice(&[b"cannot remove prior indexer output: ", &job.target[..]].concat());
+                return false;
+            }
+        }
+    }
+    // Start order: an indexer that runs once for its whole language
+    // (rust-analyzer, scip-java, scip-clang, ...) before the indexers split
+    // into many pieces. One long job queued behind dozens of short pieces
+    // would start only when they are nearly done and then be the whole
+    // wait (monty: rust-analyzer's 12 s began 11 s in). The report keeps
+    // the jobs' own order.
+    fn tool_of(label: &[u8]) -> &[u8] {
+        match label.iter().position(|&c| c == b' ') {
+            Some(sp) if sp > 0 => &label[..sp],
+            _ => label,
+        }
+    }
+    let mut order: Vec<usize> = Vec::new();
+    for pass in 0..2 {
+        for i in 0..n_jobs {
+            let same = jobs.list.iter().filter(|o| tool_of(&o.label) == tool_of(&jobs.list[i].label)).count();
+            if (same == 1) == (pass == 0) {
+                order.push(i);
+            }
+        }
+    }
+    for &idx in &order {
+        let job = &jobs.list[idx];
+        if job.argv.is_empty() {
+            continue; // reused from the last map: nothing to run
+        }
+        while running >= limit {
+            wait_one(&pids, &mut codes, &began, &mut took, &mut running);
+        }
+        let inner: Vec<&[u8]> = job.argv.iter().map(|a| &a[..]).collect();
+        let launch: Vec<Vec<u8>> = if sandbox_on() { seal_argv(&inner, repo, out, trusted) } else { job.argv.clone() };
+        let launch: Vec<&[u8]> = launch.iter().map(|a| &a[..]).collect();
+        let env: Vec<&[u8]> = job.env.iter().map(|e| &e[..]).collect();
+        let log = [out, b"/log-", idx.to_string().as_bytes(), b".txt"].concat();
+        codes[idx] = -999;
+        began[idx] = std::time::Instant::now();
+        match sys::spawn_job(&launch, repo, &env, &log) {
+            Ok(pid) => {
+                pids[idx] = pid;
+                running += 1;
+            }
+            // Not started: the code its child would have ended with.
+            Err(code) => codes[idx] = code,
+        }
+    }
+    while running > 0 {
+        wait_one(&pids, &mut codes, &began, &mut took, &mut running);
+    }
+
+    let mut scips: Vec<Vec<u8>> = Vec::new(); // the index files, for the flattener
+    let mut failed: Vec<u8> = Vec::new(); // their index files, one per line
+    let mut fresh_scips: Vec<u8> = Vec::new(); // the index files this map's indexers wrote, one per line
+    let mut ok = true;
+    for (idx, job) in jobs.list.iter().enumerate() {
+        let code = codes[idx];
+        if !job.label.is_empty() {
+            report.extend_from_slice(&job.label);
+            report.extend_from_slice(b": ");
+            push_int(report, took[idx]);
+            report.extend_from_slice(b" ms");
+        }
+        if code == 0 && sys::file_exists(&job.target) {
+            if !job.label.is_empty() {
+                fresh_scips.extend_from_slice(&job.target);
+                fresh_scips.push(b'\n');
+            }
+            if !job.base.is_empty() {
+                scips.push([&job.target[..], b"=", &job.base[..]].concat());
+            } else {
+                scips.push(job.target.clone());
+            }
+        } else {
+            if !job.optional {
+                ok = false;
+            }
+            failed.extend_from_slice(&job.target);
+            failed.push(b'\n');
+            let mut log: Vec<u8> = Vec::new();
+            sys::read_file(&[out, b"/log-", idx.to_string().as_bytes(), b".txt"].concat(), &mut log);
+            if job.optional {
+                report.extend_from_slice(b" not mapped, the map goes on without it");
+            }
+            report.extend_from_slice(b" (exit ");
+            push_int(report, code as i64);
+            report.extend_from_slice(b") ");
+            report.extend_from_slice(if log.len() > 400 { &log[log.len() - 400..] } else { &log[..] });
+        }
+        if !job.label.is_empty() {
+            report.push(b'\n');
+        }
+    }
+    if clean && !ok {
+        report.extend_from_slice(b"clean rebuild failed; previous database retained and reuse metadata invalidated");
+        return false;
+    }
+    // A Python piece whose run failed is not reusable: its old index file
+    // no longer matches the fingerprint recorded for it before the run. Nor
+    // are TypeScript layers on top of a chunk run that failed: forgetting
+    // the shared inputs' fingerprint makes the next map rerun the chunks.
+    if find(&failed, b"/index-typescript-") >= 0 {
+        sys::delete_file(&[out, b"/typescript-shared.txt"].concat());
+    }
+    if !failed.is_empty() {
+        let mut pieces_kept: Vec<u8> = Vec::new();
+        let mut prev_pieces: Vec<u8> = Vec::new();
+        sys::read_file(&[out, b"/python-pieces.tsv"].concat(), &mut prev_pieces);
+        for line in prev_pieces.split(|&c| c == b'\n') {
+            let f = split(line, b'\t');
+            if f.len() == 3 && !contains_line(&failed, f[2]) {
+                pieces_kept.extend_from_slice(line);
+                pieces_kept.push(b'\n');
+            }
+        }
+        if !prev_pieces.is_empty() {
+            sys::write_file(&[out, b"/python-pieces.tsv"].concat(), &pieces_kept);
+        }
+    }
+    if scips.is_empty() {
+        report.extend_from_slice(b"every indexer failed");
+        return false;
+    }
+    // Remember what each index was made from, failures excepted, and drop
+    // index files no job produced or reused.
+    let mut kept_index: Vec<u8> = Vec::new();
+    for line in jobs.index_manifest.split(|&c| c == b'\n') {
+        let f = split(line, b'\t');
+        if f.len() == 3 && find(&failed, f[2]) < 0 {
+            kept_index.extend_from_slice(line);
+            kept_index.push(b'\n');
+        }
+    }
+    cache.write(b"index-manifest.tsv", &kept_index);
+    if let Some(listing) = sys::list_dir(out) {
+        // Named by a job: anywhere in what it is, writes or is given.
+        let named = |p: &[u8]| -> bool {
+            jobs.list.iter().any(|j| {
+                find(&j.label, p) >= 0 || find(&j.target, p) >= 0 || find(&j.base, p) >= 0 || j.argv.iter().any(|a| find(a, p) >= 0) || j.env.iter().any(|e| find(e, p) >= 0)
+            })
+        };
+        for nm in &listing {
+            if starts_with(nm, b"index-") && ends_with(nm, b".scip") && !named(&[out, b"/", &nm[..]].concat()) {
+                sys::delete_file(&[out, b"/", &nm[..]].concat());
+            }
+        }
+    }
+    let db = [out, b"/swan.db"].concat();
+    // Said at the end of every map that indexed Rust: the crates the
+    // finished map has no rows for (src/rustproj.rs).
+    let rust_gaps = |report: &mut Vec<u8>| {
+        if !rust_indexed {
+            return;
+        }
+        let gaps = rust_unmapped(&walk, repo, &db, &rust_dirs);
+        if !gaps.is_empty() {
+            report.extend_from_slice(&[b"\nrust: no rows for these crates: ", &gaps[..], b" (in no cargo project that was mapped, or their project's run failed)"].concat());
+        }
+    };
+    // Which text each file's rows came from after this map, from the
+    // flattener's documents.tsv ("path\t1" when this map's indexers wrote
+    // its rows, "\t0" when they were kept from before).
+    let mut idx_new: Vec<u8> = Vec::new();
+    let note_indexed = |docs: &[u8], idx_new: &mut Vec<u8>| {
+        for line in docs.split(|&c| c == b'\n') {
+            let f = split(line, b'\t');
+            if f.len() != 2 {
+                continue;
+            }
+            let key = hash(f[0]);
+            if !stamps.code_memo.contains(&key) {
+                continue;
+            }
+            if f[1] == b"1" {
+                if let (Some(&then), Some(&s)) = (stamps.mtime_memo.get(&key), stamps.stamp_memo.get(&key)) {
+                    idx_new.extend_from_slice(f[0]);
+                    // Changed while the indexers ran: which text they read is unknown.
+                    if sys::mtime_ns(&[repo, b"/", f[0]].concat()) == then {
+                        idx_new.push(b'\t');
+                        idx_new.extend_from_slice(&stamps.raw_text_of(key));
+                        idx_new.push(b'\t');
+                    } else {
+                        idx_new.extend_from_slice(b"\t?\t");
+                    }
+                    push_int(idx_new, s as i64);
+                    idx_new.push(b'\n');
+                }
+            } else {
+                let p = line_of_path(&idx_prev, &idx_at, f[0]);
+                if !p.is_empty() {
+                    idx_new.extend_from_slice(p);
+                    idx_new.push(b'\n');
+                }
+            }
+        }
+    };
+    // For the flattener: the indexed text of each file whose rows may be kept
+    // from before and whose text has changed since ("path\ttext file").
+    let kept_texts = || -> Vec<u8> {
+        let mut t: Vec<u8> = Vec::new();
+        for line in idx_prev.split(|&c| c == b'\n') {
+            let f = split(line, b'\t');
+            if !(f.len() == 3 && stamps.have_text(f[1])) {
+                continue;
+            }
+            let key = hash(f[0]);
+            if !(stamps.code_memo.contains(&key) && stamps.raw_text_of(key) != f[1]) {
+                continue;
+            }
+            t.extend_from_slice(&[f[0], b"\t", &texts_dir[..], b"/t", f[1], b".txt\n"].concat());
+        }
+        t
+    };
+    // Once the map is written: moves the rows of each file edited only in
+    // comments or layout since its rows were made, to match its text, and
+    // saves the records above. `rewritten`: every row was just written from
+    // indexer output, so the rows match the indexed texts.
+    let finish_cosmetic = |rewritten: bool, idx_new: &[u8], report: &mut Vec<u8>| {
+        let Ok(h) = Db::open_existing(&db) else {
+            return;
+        };
+        let mut basis_new: Vec<u8> = Vec::new();
+        let mut unknown: HashSet<u64> = HashSet::new();
+        let mut moved = 0;
+        for line in idx_new.split(|&c| c == b'\n') {
+            let f = split(line, b'\t');
+            if f.len() != 3 {
+                continue;
+            }
+            let key = hash(f[0]);
+            if !stamps.code_memo.contains(&key) {
+                continue;
+            }
+            let full = [repo, b"/", f[0]].concat();
+            let raw = stamps.raw_text_of(key);
+            let basis: Vec<u8> = if rewritten { f[1].to_vec() } else { rows_basis(f[0], key, &full, f[1]) };
+            if basis.is_empty() || basis == raw {
+                continue; // the rows already match the text
+            }
+            let mut old: Vec<u8> = Vec::new();
+            let mut cur: Vec<u8> = Vec::new();
+            if !(sys::read_file(&full, &mut cur) && (hash(&cur) as i64).to_string().as_bytes() == &raw[..]) {
+                continue; // changed again since: stale for now
+            }
+            if basis != b"?" && sys::read_file(&[&texts_dir[..], b"/t", &basis[..], b".txt"].concat(), &mut old) && shift_cosmetic(&h, f[0], cosmetic_lang(f[0]), &old, &cur) {
+                mark_edited(&h, f[0], &full);
+                basis_new.extend_from_slice(&[f[0], b"\t", &raw[..], b"\t", sys::mtime_ns(&full).to_string().as_bytes(), b"\n"].concat());
+                moved += 1;
+            } else {
+                unknown.insert(key);
+            }
+        }
+        drop(h);
+        if moved > 0 {
+            report.extend_from_slice(b"\ncosmetic edits: rows moved to match ");
+            push_int(report, moved);
+            report.extend_from_slice(b" file(s), no indexer run");
+        }
+        if !unknown.is_empty() {
+            report.extend_from_slice(b"\ncosmetic edits: ");
+            push_int(report, unknown.len() as i64);
+            report.extend_from_slice(b" file(s) could not be matched; they are reindexed next map");
+        }
+        // A file whose rows could not be moved is marked unknown: the next map reindexes it.
+        let mut idx_out: Vec<u8> = Vec::new();
+        for line in idx_new.split(|&c| c == b'\n') {
+            let f = split(line, b'\t');
+            if f.len() != 3 {
+                continue;
+            }
+            if unknown.contains(&hash(f[0])) {
+                idx_out.extend_from_slice(&[f[0], b"\t?\t", f[2], b"\n"].concat());
+            } else {
+                idx_out.extend_from_slice(line);
+                idx_out.push(b'\n');
+            }
+        }
+        if !rewritten {
+            let mut updated: HashSet<u64> = HashSet::new();
+            for line in basis_new.split(|&c| c == b'\n') {
+                let t = find(line, b"\t");
+                if t > 0 {
+                    updated.insert(hash(&line[..t as usize]));
+                }
+            }
+            for line in basis_prev.split(|&c| c == b'\n') {
+                let t = find(line, b"\t");
+                if t > 0 && !updated.contains(&hash(&line[..t as usize])) && edited_at.contains_key(&hash(&line[..t as usize])) {
+                    basis_new.extend_from_slice(line);
+                    basis_new.push(b'\n');
+                }
+            }
+        }
+        sys::write_file(&[out, b"/indexed-texts.tsv"].concat(), &idx_out);
+        sys::write_file(&[out, b"/row-basis.tsv"].concat(), &basis_new);
+        // Kept texts no record names go.
+        let mut keep: HashSet<u64> = HashSet::new();
+        let mut keep_raw = |r: &[u8]| {
+            if !r.is_empty() && r != b"?" {
+                keep.insert(hash(&[b"t", r, b".txt"].concat()));
+            }
+        };
+        for line in idx_out.split(|&c| c == b'\n') {
+            let f = split(line, b'\t');
+            if f.len() == 3 {
+                keep_raw(f[1]);
+            }
+        }
+        for line in basis_new.split(|&c| c == b'\n') {
+            let f = split(line, b'\t');
+            if f.len() == 3 {
+                keep_raw(f[1]);
+            }
+        }
+        for &key in &stamps.code_memo {
+            keep_raw(&stamps.raw_text_of(key));
+        }
+        if let Some(names) = sys::list_dir(&texts_dir) {
+            for nm in &names {
+                if !nm.is_empty() && !keep.contains(&hash(nm)) {
+                    sys::delete_file(&[&texts_dir[..], b"/", &nm[..]].concat());
+                }
+            }
+        }
+    };
+    let said_in_all = |report: &mut Vec<u8>| {
+        report.extend_from_slice(b"\nswan map: ");
+        push_int(report, t_start.elapsed().as_millis() as i64);
+        report.extend_from_slice(b" ms in all");
+    };
+
+    sys::write_file(&[out, b"/content-stamps.tsv"].concat(), &stamps.lines);
+    let have_rows = sys::file_exists(&db) && sys::file_exists(&[out, b"/occurrences.tsv"].concat());
+    if !clean && jobs.reused_all && have_rows {
+        // No indexer ran, but files edited only in comments or layout still
+        // need their rows moved.
+        idx_new.extend_from_slice(&idx_prev);
+        finish_cosmetic(false, &idx_new, report);
+        // Every file's text is the text its rows were built from: the map is
+        // current as of this run, so its reference time moves up to it.
+        // Without this a file that was edited and put back (or just
+        // touched) stayed "stale" through every later refresh, and edits to
+        // it were refused with "refresh first" (found 2026-11-17).
+        if n_cosmetic == 0 {
+            if let Ok(h) = Db::open_existing(&db) {
+                if let Ok(up) = h.prepare(b"UPDATE meta SET value = ?1 WHERE key = 'scip_time'") {
+                    up.bind_text(1, scip_time_of(out).to_string().as_bytes());
+                    let _ = up.step();
+                }
+            }
+        }
+        report.extend_from_slice(if n_cosmetic > 0 { &b"\nno code changed since the last map"[..] } else { b"nothing changed since the last map" });
+        rust_gaps(report);
+        said_in_all(report);
+        return ok;
+    }
+    // Only failed indexers ran (rea's scip-java fails every map): the index
+    // files are the ones the map's rows were flattened from, so flattening
+    // them again would write the same rows. flattened-inputs.txt is written
+    // after the rows are in the database, and removed before a flatten.
+    let scips_packed = packed(&scips);
+    let flat_marker = [out, b"/flattened-inputs.txt"].concat();
+    let mut flat_prev: Vec<u8> = Vec::new();
+    if !clean && fresh_scips.is_empty() && have_rows && sys::read_file(&flat_marker, &mut flat_prev) && flat_prev == scips_packed {
+        idx_new.extend_from_slice(&idx_prev);
+        finish_cosmetic(false, &idx_new, report);
+        report.extend_from_slice(b"\nflatten: skipped (only failed indexers ran; rows as last flattened)");
+        rust_gaps(report);
+        said_in_all(report);
+        report.extend_from_slice(b", up to ");
+        push_int(report, limit);
+        report.extend_from_slice(b" indexers at once");
+        if !ok {
+            report.extend_from_slice(b"\n(some indexers failed; see above)");
+        }
+        return ok;
+    }
+    sys::delete_file(&flat_marker);
+
+    // The flattener reads some files' text itself (import statements, C
+    // bodies, Rust macros): for rows kept from before, the text they were
+    // indexed from.
+    sys::write_file(&[out, b"/fresh-indexes.txt"].concat(), &fresh_scips);
+    sys::write_file(&[out, b"/kept-texts.tsv"].concat(), &kept_texts());
+    sys::delete_file(&[out, b"/documents.tsv"].concat());
+    // bin/swan-flatten (native/swan-flatten, Rust) flattens the SCIP
+    // indexes into rows, a core per index file. It is the only flattener.
+    let native_flat = [&home[..], b"/bin/swan-flatten"].concat();
+    if !sys::file_exists(&native_flat) {
+        report.extend_from_slice(&[b"swan-flatten is missing at ", &native_flat[..], b": rebuild with scripts/build.sh (needs cargo) or reinstall Swan\n"].concat());
+        return false;
+    }
+    let mut fl: Vec<Vec<u8>> = vec![
+        native_flat,
+        b"--fresh".to_vec(),
+        [out, b"/fresh-indexes.txt"].concat(),
+        b"--texts".to_vec(),
+        [out, b"/kept-texts.tsv"].concat(),
+        b"--root".to_vec(),
+        repo.to_vec(),
+    ];
+    // Whatever an indexer found by itself in a folder git ignores is left out.
+    if sys::file_size(&[out, b"/git-ignored-all.txt"].concat()) > 0 {
+        fl.push(b"--ignored".to_vec());
+        fl.push([out, b"/git-ignored-all.txt"].concat());
+    }
+    fl.push(scips[0].clone());
+    fl.push(out.to_vec());
+    fl.extend(scips[1..].iter().cloned());
+    const ROWS: [&[u8]; 4] = [b"symbols.tsv", b"extents.tsv", b"relationships.tsv", b"occurrences.tsv"];
+    if clean {
+        for name in ROWS {
+            let path = [out, b"/", name].concat();
+            if !(!sys::file_exists(&path) || sys::delete_file(&path)) {
+                report.extend_from_slice(&[b"cannot remove prior flattened output: ", &path[..]].concat());
+                return false;
+            }
+        }
+    }
+    let t_flat = std::time::Instant::now();
+    {
+        let fl: Vec<&[u8]> = fl.iter().map(|a| &a[..]).collect();
+        let env = child_env(&l, &[], b"");
+        let env: Vec<&[u8]> = env.iter().map(|e| &e[..]).collect();
+        let mut o: Vec<u8> = Vec::new();
+        if run_step(b"flatten", &fl, &home, &env, 600000, &mut o) != 0 {
+            report.extend_from_slice(b"flatten failed");
+            return false;
+        }
+    }
+    report.extend_from_slice(b"flatten: ");
+    push_int(report, t_flat.elapsed().as_millis() as i64);
+    report.extend_from_slice(b" ms\n");
+    if clean {
+        for name in ROWS {
+            if !sys::file_exists(&[out, b"/", name].concat()) {
+                report.extend_from_slice(&[b"clean rebuild missing flattened output: ", name, b"; previous database retained"].concat());
+                return false;
+            }
+        }
+        if !clean_rows_valid(out, report) {
+            return false;
+        }
+    }
+    index_main_locked(out, &db, repo, !clean && sys::file_exists(&db), report);
+    sys::write_file(&flat_marker, &scips_packed);
+    let mut docs: Vec<u8> = Vec::new();
+    sys::read_file(&[out, b"/documents.tsv"].concat(), &mut docs);
+    note_indexed(&docs, &mut idx_new);
+    finish_cosmetic(true, &idx_new, report);
+    if clean {
+        for (name, contents) in &cache.pending {
+            if !sys::write_file(&[out, b"/", &name[..]].concat(), contents) {
+                report.extend_from_slice(&[b"\nwarning: fresh database published but cache could not be saved: ", &name[..]].concat());
+            }
+        }
+    }
+    rust_gaps(report);
+    said_in_all(report);
+    report.extend_from_slice(b", up to ");
+    push_int(report, limit);
+    report.extend_from_slice(b" indexers at once");
+    if !ok {
+        report.extend_from_slice(b"\n(some indexers failed; see above)");
+    }
+    ok
 }

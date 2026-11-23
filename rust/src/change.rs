@@ -21,12 +21,14 @@
 //
 // Carried over from src/change.goose so far: the code stamp (cosmetic_lang,
 // code_hash), and index_lines and line_of_path, by which the stamps and
-// the map find a file's line in a list. Moving a cosmetically edited file's
-// rows to where its tokens sit now (shift_cosmetic) comes with the end of
-// the map, which calls it.
+// the map find a file's line in a list; and shift_cosmetic, which moves a
+// cosmetically edited file's rows to where its tokens sit now, for the end
+// of the map.
 
 use std::collections::HashMap;
 
+use crate::db::Db;
+use crate::edit::{col_of, offset_of};
 use crate::treesitter::{self, end, first, flags, next, start, sym};
 use crate::util::{find, hash, hash_combine, hash_int, starts_with};
 
@@ -113,6 +115,238 @@ pub fn code_hash(lang: &[u8], text: &[u8]) -> (u64, bool) {
         }
     });
     (h, ok)
+}
+
+// The byte spans of the code's leaves, each start then end.
+fn code_tokens(lang: &[u8], text: &[u8], toks: &mut Vec<i64>) -> bool {
+    let mut nodes: Vec<i32> = Vec::new();
+    if !treesitter::parse(lang, text, &mut nodes) {
+        return false;
+    }
+    each_code_node(lang, text, &nodes, |i, _kids, leaf| {
+        if leaf {
+            toks.push(start(&nodes, i) as i64);
+            toks.push(end(&nodes, i) as i64);
+        }
+    })
+}
+
+fn line_starts(text: &[u8]) -> Vec<i64> {
+    let mut starts: Vec<i64> = vec![0];
+    for (i, &c) in text.iter().enumerate() {
+        if c == b'\n' {
+            starts.push(i as i64 + 1);
+        }
+    }
+    starts
+}
+
+// The line holding byte `off`.
+fn line_at(starts: &[i64], off: i64) -> i64 {
+    let mut lo: i64 = 0;
+    let mut hi: i64 = starts.len() as i64 - 1;
+    while lo < hi {
+        let mid = (lo + hi + 1) / 2;
+        if starts[mid as usize] <= off {
+            lo = mid;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    lo
+}
+
+// Where byte `off` of the old text is in the new one, the two holding the
+// same tokens (`old` and `new`, from code_tokens): at the same place in the
+// same token. A position between tokens goes to the next token's start, or,
+// for the end of a span (`at_end`), to the end of the token before. The end
+// of the old text is the end of the new one, unless it is also the end of
+// the last token: then a span ending there ends with that token.
+fn moved_offset(old: &[i64], new: &[i64], off: i64, at_end: bool, old_len: i64, new_len: i64) -> i64 {
+    let n = old.len() as i64 / 2;
+    let o = |i: i64| old[i as usize];
+    let w = |i: i64| new[i as usize];
+    if off >= old_len {
+        if at_end && n > 0 && o((n - 1) * 2 + 1) >= old_len {
+            return w((n - 1) * 2 + 1);
+        }
+        return new_len;
+    }
+    if n <= 0 {
+        return off.min(new_len);
+    }
+    let mut lo: i64 = 0;
+    let mut hi: i64 = n - 1;
+    let mut k: i64 = -1;
+    while lo <= hi {
+        let mid = (lo + hi) / 2;
+        if o(mid * 2) <= off {
+            k = mid;
+            lo = mid + 1;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    if k < 0 {
+        return w(0);
+    }
+    let s = o(k * 2);
+    let e = o(k * 2 + 1);
+    // The end of the token before, which this one starts right after.
+    if at_end && off == s && k > 0 && o((k - 1) * 2 + 1) == off {
+        return w((k - 1) * 2 + 1);
+    }
+    if off < e || (at_end && off == e) || off == s {
+        return w(k * 2) + (off - s);
+    }
+    if at_end {
+        return w(k * 2 + 1);
+    }
+    if k + 1 < n {
+        w((k + 1) * 2)
+    } else {
+        new_len
+    }
+}
+
+// Moves the map's rows for `rel` from where they sit in `old`, the text that
+// was indexed, to the same code in `new`, which differs from it only in
+// comments and layout. False, with nothing changed, when the two do not hold
+// the same tokens.
+pub fn shift_cosmetic(db: &Db, rel: &[u8], lang: &[u8], old: &[u8], new: &[u8]) -> bool {
+    let mut a: Vec<i64> = Vec::new();
+    let mut b: Vec<i64> = Vec::new();
+    if !(code_tokens(lang, old, &mut a) && code_tokens(lang, new, &mut b) && a.len() == b.len()) {
+        return false;
+    }
+    for k in 0..a.len() / 2 {
+        if old[a[k * 2] as usize..a[k * 2 + 1] as usize] != new[b[k * 2] as usize..b[k * 2 + 1] as usize] {
+            return false;
+        }
+    }
+    let ostarts = line_starts(old);
+    let nstarts = line_starts(new);
+    let moved = |line: i64, col: i64, at_end: bool| -> (i64, i64) {
+        let off = offset_of(old, &ostarts, line, col);
+        let to = moved_offset(&a, &b, off, at_end, old.len() as i64, new.len() as i64);
+        (line_at(&nstarts, to), col_of(new, to))
+    };
+    let mut occ: Vec<i64> = Vec::new(); // rowid, the four positions, is_def
+    {
+        let q = db.prepare_or_die(b"SELECT rowid, start_line, start_col, end_line, end_col, is_def FROM occurrences WHERE file = ?1");
+        q.bind_text(1, rel);
+        while q.step_checked() {
+            for k in 0..6 {
+                occ.push(q.col_int(k));
+            }
+        }
+    }
+    let mut defs: Vec<i64> = Vec::new(); // id, then def, body start and body end, -1 where unknown
+    {
+        let s = db.prepare_or_die(
+            b"
+        SELECT id, IFNULL(def_line, -1), IFNULL(def_col, -1), IFNULL(body_start, -1), IFNULL(body_start_col, -1),
+               IFNULL(body_end, -1), IFNULL(body_end_col, -1)
+        FROM symbols WHERE def_file = ?1
+        ",
+        );
+        s.bind_text(1, rel);
+        while s.step_checked() {
+            for k in 0..7 {
+                defs.push(s.col_int(k));
+            }
+        }
+    }
+    db.exec_or_die(b"BEGIN;");
+    // Where each definition's name went, for its symbol's def_line and def_col.
+    let mut def_at: HashMap<i64, i64> = HashMap::new();
+    const W: i64 = 16777216;
+    {
+        let uo = db.prepare_or_die(b"UPDATE occurrences SET start_line = ?2, start_col = ?3, end_line = ?4, end_col = ?5 WHERE rowid = ?1");
+        for r in 0..occ.len() / 6 {
+            let o = r * 6;
+            let (mut sl, mut sc, mut el, mut ec) = (0, 0, 0, 0);
+            if occ[o + 1] == occ[o + 3] && occ[o + 2] == occ[o + 4] {
+                // An empty span: the whole file's (a module's, at 0:0) stays where
+                // the file starts; any other moves as a point.
+                if occ[o + 1] != 0 || occ[o + 2] != 0 {
+                    let (x, y) = moved(occ[o + 1], occ[o + 2], false);
+                    sl = x;
+                    sc = y;
+                    el = x;
+                    ec = y;
+                }
+            } else {
+                let (x, y) = moved(occ[o + 1], occ[o + 2], false);
+                let (u, v) = moved(occ[o + 3], occ[o + 4], true);
+                sl = x;
+                sc = y;
+                el = u;
+                ec = v;
+            }
+            if occ[o + 5] == 1 {
+                def_at.insert(occ[o + 1] * W + occ[o + 2], sl * W + sc);
+            }
+            uo.bind_int(1, occ[o]);
+            uo.bind_int(2, sl);
+            uo.bind_int(3, sc);
+            uo.bind_int(4, el);
+            uo.bind_int(5, ec);
+            uo.step_done();
+        }
+    }
+    {
+        let us = db.prepare_or_die(
+            b"
+        UPDATE symbols SET def_line = CASE WHEN ?2 < 0 THEN NULL ELSE ?2 END, def_col = CASE WHEN ?2 < 0 THEN NULL ELSE ?3 END,
+                           body_start = CASE WHEN ?4 < 0 THEN NULL ELSE ?4 END, body_start_col = CASE WHEN ?4 < 0 THEN NULL ELSE ?5 END,
+                           body_end = CASE WHEN ?6 < 0 THEN NULL ELSE ?6 END, body_end_col = CASE WHEN ?6 < 0 THEN NULL ELSE ?7 END
+        WHERE id = ?1
+        ",
+        );
+        for r in 0..defs.len() / 7 {
+            let d = &defs[r * 7..r * 7 + 7];
+            let (mut dl, mut dc, mut bsl, mut bsc, mut bel, mut bec) = (-1, -1, -1, -1, -1, -1);
+            if d[1] >= 0 {
+                if let Some(&t) = def_at.get(&(d[1] * W + d[2])) {
+                    dl = t / W;
+                    dc = t % W;
+                } else {
+                    let (x, y) = moved(d[1], d[2], false);
+                    dl = x;
+                    dc = y;
+                }
+            }
+            if d[3] >= 0 {
+                let (x, y) = moved(d[3], d[4], false);
+                bsl = x;
+                bsc = y;
+            }
+            if d[5] >= 0 {
+                // The file's own symbol (defined at 0:0, a module) spans the whole
+                // file, comments after its last code included.
+                let whole = d[1] == 0 && d[2] == 0 && offset_of(old, &ostarts, d[5], d[6]) >= old.len() as i64;
+                if whole {
+                    bel = line_at(&nstarts, new.len() as i64);
+                    bec = col_of(new, new.len() as i64);
+                } else {
+                    let (x, y) = moved(d[5], d[6], true);
+                    bel = x;
+                    bec = y;
+                }
+            }
+            us.bind_int(1, d[0]);
+            us.bind_int(2, dl);
+            us.bind_int(3, dc);
+            us.bind_int(4, bsl);
+            us.bind_int(5, bsc);
+            us.bind_int(6, bel);
+            us.bind_int(7, bec);
+            us.step_done();
+        }
+    }
+    db.exec_or_die(b"COMMIT;");
+    true
 }
 
 // Indexes "path\t..." lines by the hash of their path: at[hash] is where

@@ -147,6 +147,21 @@ case is owed for the wording of a report line. The provers
 extended: the 123 cases added to `port-map.sh` on 2026-11-22 have no
 breaks. Sealing is judged as before, byte for byte.
 
+Later the same day (DECISIONS.md, 14:15Z) the owner dropped the third:
+the Goose program is no longer matched. The comparisons stay and are not
+extended; a difference one shows is a question to look at. What is built
+from here is Swan's own, in the styles of JetBrains (a map built ahead by
+the indexers that exist, asked in milliseconds) and Serena (symbol tools
+answered by live language servers), with SolidLSP as the way a language
+server is started, configured and waited for.
+
+`SWAN_PORT_GOOSE=<a Goose build of swan>`: until the language-server
+client is in Rust, the Rust `swan map` starts that program for its
+`lsp-index` child, and takes its path and size into that index's
+fingerprint as the Goose program does. Without it the child is the Rust
+program, which ends with 70: the job is said to have failed and the rest
+of the map is made. `scripts/port-map.sh` sets it.
+
 ## What differs, and is meant to
 
 - **The wrapper around an error.** Goose: `goose runtime error: <message>
@@ -389,6 +404,7 @@ folders are.
 | 2026-11-22T18:10Z | The map's prover run on the tree of `7fc1276`, all 371 breaks in six parts side by side, 66 minutes: the unbroken program 317 of 317 in every part, 370 of 371 breaks caught on the first run. The one let through was no break ("Found while porting") and is taken out: 370 of 370. The 88 cases for TypeScript's chunks and layers are shown to catch what they were made for. |
 | 2026-11-22T18:18Z | `swan map` carried to the end of Python (src/pipeline.goose to line 1920): `ensure_scip_python_patch` and `ensure_scip_python_site_patch` (`pypatch.rs`), `survey_python_envs` (`survey.rs`), `piece_target` (`pyplan.rs`) and, in `pipeline.rs`, the virtualenv kept aside for a repo that is not trusted, the stand-in interpreter, the two lists of packages, the src layout, each piece's key and which pieces are kept. `scripts/port-map.sh`: 395 of 395, 78 of them new (59 of 78 on the first run; the 19 were the judge's). The judge gives each home scip-python's two files as its own and compares how they are left. No breaks for this part in the prover yet: the owner is asked first whether it runs after every part or at the end of the stage. |
 | 2026-11-22T18:45Z | `swan map` carried to where its jobs are run (src/pipeline.goose to line 2187): the cargo projects, Java, C#, C and CUDA, what waits for trust, the servers' languages (`modules.rs`, begun: `lsp_server_present`, `lang_of_path`; `survey_paths`) and the syntax index, each planned; and the two ways a map ends when nothing is left to run, the first maps the Rust program makes to their end. `scripts/port-map.sh`: 440 of 440, 45 new, 32 of the 440 compared whole (their rows too). No breaks for these parts in the prover yet. |
+| 2026-11-23T14:15Z | `swan map` whole in Rust (src/pipeline.goose to its end): the jobs started and waited for (`spawn_job`, `wait_any`), what each took or how it failed, the records, the flattener, the store, rows moved after cosmetic edits (`shift_cosmetic`, `mark_edited`), the crates with no rows, the end of the report. `scripts/port-map.sh` compares whole maps: 440 of 440 the same, where 32 were made to their end before. Agent-Reach mapped sealed by both: every table's hash the same but `meta`. relate mapped by the Rust program in 38 s, its Go folder apart. A new map the Rust `index` left locked, found and mended (below). The same day, on the owner's word: no longer line by line, no provers, and then no more matching of the Goose program (DECISIONS.md). |
 
 ## Found while porting
 
@@ -740,8 +756,46 @@ folders are.
 - Stage 4: the Goose program's `map_held` (what waits for trust, kept for
   `swan serve`) is a variable of the whole program, set in the middle of a
   map. It is left for the server's stage.
+- Stage 4: the Rust `index` left a new map locked. `let Interner { syms,
+  .. } = it;` takes `syms` out and leaves the rest of `it` alive to the
+  end of the function, its two prepared statements with it; the comment
+  beside it said they were finalized there. A connection closed with a
+  statement still open stays open, and a new map is written with
+  `locking_mode = EXCLUSIVE`, so every later read in the same process got
+  "database is locked". `swan index` ends right after, so stages 1 to 4
+  compared equal; it showed when the map ran to its end and read its own
+  rows for `rust_unmapped`, which then named every crate. Mended, and
+  `Db`'s close now stops the run when it does not close.
+- Stage 4: what moves from run to run in a whole map, each seen before the
+  judge was made to take it out. How many indexers run at once follows
+  the free memory (`jobs_limit`, 3 GB a job). What a failed job said is
+  the last 400 bytes of its log, so it starts elsewhere when the folder's
+  path is longer. A TypeScript chunk that a changed file's users fall in
+  has the time mixed into its fingerprint. scip-java's fingerprint takes
+  in what it is run with, which names Swan's home and the map folder.
+  scip-clang's index is not the same twice from the Goose program alone
+  (c-plain: the same rows in another order; cu-plain: one symbol more in
+  one run). scip-java gives its files back in an order that moves with the
+  folder it writes in, the same files given it in the same order
+  (fixtures/tiny-java; the two programs give the same bytes when both map
+  into /tmp).
 
 ## Next
+
+**As of 2026-11-23T14:15Z.** Stage 4's `swan map` is whole in Rust. What
+follows in this section was written while it was carried and is kept as
+the record of that. What is next is not a stage of the table as it was
+drawn: the language servers, through SolidLSP (DECISIONS.md, 2026-11-23T14:15Z).
+1. A language-server client in Rust, not copied from `lsp/golsp.goose`,
+   that speaks to `tools/solidlsp/bridge.py` or to a server itself, sealed
+   as now.
+2. `swan lsp-index` on it, measured on cobra and fixtures/tiny-go beside
+   the Goose program's map and beside GoLand; then `SWAN_PORT_GOOSE` goes.
+3. More languages through the bridge, one at a time, each measured against
+   its JetBrains IDE before it is kept.
+4. Live answers on the same client; then checking and editing, and the
+   server, on Rust libraries where one fits.
+HANDOFF.md has it in full.
 
 Beside the stages, a mend to what is on main, on its own branch from main
 and with its own pull request: the statements of stages 1 to 3 that are
