@@ -1,6 +1,6 @@
-# Handoff: Swan in Rust (branch `rust-stage-4`)
+# Handoff: Swan in Rust (branch `rust-lsp-languages`, which sits on `rust-stage-4`)
 
-Written 2026-11-20T07:25Z; stage 2 part rewritten 2026-11-20T16:21Z, stage 3 part 2026-11-20T23:51Z and again 2026-11-22T06:15Z, when stage 3 was finished; stage 4 part 2026-11-22T06:50Z, 2026-11-22T07:26Z 2026-11-22T16:46Z, 2026-11-22T18:18Z and 2026-11-22T18:45Z, when the prover had run on TypeScript's chunks and every job of a map was planned in Rust. For the next session, any agent. **Start at "Next action".** The end of the map, and the owner's two changes of direction: 2026-11-23T14:15Z. `lsp-index` in Rust: 2026-11-23T15:00Z.
+Written 2026-11-20T07:25Z; stage 2 part rewritten 2026-11-20T16:21Z, stage 3 part 2026-11-20T23:51Z and again 2026-11-22T06:15Z, when stage 3 was finished; stage 4 part 2026-11-22T06:50Z, 2026-11-22T07:26Z 2026-11-22T16:46Z, 2026-11-22T18:18Z and 2026-11-22T18:45Z, when the prover had run on TypeScript's chunks and every job of a map was planned in Rust. For the next session, any agent. **Start at "Next action".** The end of the map, and the owner's two changes of direction: 2026-11-23T14:15Z. `lsp-index` in Rust: 2026-11-23T15:00Z. The languages mapped through their servers: 2026-11-25T09:04Z.
 
 ## The task
 Swan in Rust, on the owner's word. Until 2026-11-23 it was carried over
@@ -25,13 +25,14 @@ The stages as they were drawn, what was judged and how are in
 | Stage 2, planning | Done and on main (#76, merged 2026-11-20 on the owner's word): `cargo-projects`, `gradle-tasks`, `plan-python`. STATUS.md has the counts |
 | Stage 3, syntax | Done and on main (#78, merged 2026-11-22 on the owner's word): the trees, `query pattern`, `syntax-index`, `stamp-bench` and `stamp-worker`. STATUS.md has the counts |
 | Stage 4, the map | Done on branch `rust-stage-4` (from main, pushed; no pull request): `scip-python-patch`, `scip-typescript-patch`, `trust`, `doctor`, and the whole of `swan map`: it plans, starts and waits for the indexers, flattens, stores, moves rows after cosmetic edits and ends its report. `scripts/port-map.sh`: 440 of 440 whole maps the same as the Goose program's. Its `lsp-index` child is in Rust too since 2026-11-23T15:00Z (below). Not in Rust: `map_held`, and what `src/wings.goose` and `src/seal.goose` hold that a map does not use |
+| Languages through servers | Done on branch `rust-lsp-languages` (from `rust-stage-4`, pushed; no pull request): Lua and PHP are mapped by `swan lsp-index` through SolidLSP, each from a `"map_lsp"` entry in tools/modules.json that only the Rust program reads; shell and Ruby were measured and left with the syntax index. docs/languages-through-servers.md has each verdict; STATUS.md, 2026-11-25, the numbers |
 | What is left | The language servers (next, and through SolidLSP: "Next action"), checking and editing, the MCP server, the build and the suite. Every command of theirs exits 70 and names the stage it was drawn in |
 
 ## What passed, and how to see it again
 ```bash
 scripts/build.sh                                                     # the Goose program of this commit, the judge's other side
 CARGO_TARGET_DIR=$PWD/build/rust ~/.cargo/bin/cargo build --release --manifest-path rust/Cargo.toml
-CARGO_TARGET_DIR=$PWD/build/rust ~/.cargo/bin/cargo test --release --manifest-path rust/Cargo.toml   # 9 and 2 tests
+CARGO_TARGET_DIR=$PWD/build/rust ~/.cargo/bin/cargo test --release --manifest-path rust/Cargo.toml   # 24 tests; 5 of them map fixtures/lsp-lua and lsp-php, sealed
 SWAN_OLD=bin/swan scripts/port-compare.sh --wrong-calls              # 47 of 47
 scripts/port-store.sh $TRIES/maps/relate $TRIES/relate               # ends "the same: ..."
 scripts/port-prove.py $TRIES/maps/Agent-Reach $TRIES/Agent-Reach     # 9 of 9 breaks caught
@@ -64,80 +65,102 @@ still match the source? nothing is built) and break numbers (only those).
 The check suites judge the Goose program: the Rust program cannot run them
 before stage 8.
 
-## Next action: more of the language servers through SolidLSP, in Rust (branch `rust-stage-4`, or a new one from it)
+## Next action: the two IDE judges, then live answers (branch `rust-lsp-languages`, or a new one from it)
 
 The owner, 2026-11-23: "i wouldn't try to match goose, i would try to
 create your own solutions using jetbrains and serena styles and what lsp
 scip exist this is why i also keep mentioning just having a stable way by
-using solidlsp just like serena".
+using solidlsp just like serena". And on 2026-11-25: "ok keep going with
+the next languages".
 
 ### What is there to build on
-- SolidLSP has been in Swan since 2026-11-17, for Go alone.
-  `tools/solidlsp/bridge.py` (162 lines of Python) speaks LSP on stdin and
-  stdout and answers from SolidLSP, which starts, configures and waits for
-  the real server. `scripts/fetch-tools.sh` fetches it pinned
-  (src/solidlsp of oraios/serena at one commit, a uv virtualenv);
-  `tools/solidlsp/shim` stands in for the two helpers SolidLSP imports
-  from the GPL application (NOTICE). STATUS.md, 2026-11-17, has what was
-  measured.
-- `tools/modules.json` says, per language, how it is mapped and which
-  server answers live. Today: Go by `"map": "lsp"` through the bridge;
-  Goose by `"map": "lsp"` through `goose lsp` and Swan's own client;
-  eleven more languages have a server for live answers through Swan's own
-  client.
-- The Goose program's side: `lsp/golsp.goose` (889 lines, the client),
-  `lsp/native/proc.c` and `glue.c`, `src/lspindex.goose` (388: a map made
-  by asking a server for every definition and its references, written as
-  SCIP) and `src/live.goose` (268: errors as the code stands).
-- In Rust since 2026-11-23T15:00Z (STATUS.md has the numbers): `rust/src/lsp.rs`, a
-  synchronous client on `lsp-server` and `lsp-types` (start, sealed as
-  `src/live.goose` seals; ask with a time limit; kill the server's whole
-  group when done); `rust/src/lspindex.rs`, `swan lsp-index <repo> <out>
-  <lang> <target> [--within dir]`, SCIP written with the `scip` crate;
-  `lsp_server` in `rust/src/modules.rs`, which reads a language's entry.
-  Go (through the bridge) and Goose (through `goose lsp`) are mapped by the
-  Rust program alone: cobra gives the Goose program's rows in 4.7 s
-  against 7.1 s.
-- RustRover helps while building: `cd <the jetbrains kit> && ./jb open
-  rustrover <this repo>/rust`, then `./jb call rustrover get_file_problems`
-  (or `lint_files`, `get_symbol_info`) with `projectPath` the `rust`
-  folder. Open `rust/` itself, never the repo's top: the fixtures hold
-  build files an IDE would import. Only its tools that read are used.
-- docs/rust-port.md, "What exists in Rust to build on": the crates surveyed
-  on 2026-11-23 and what none of them does.
+- SolidLSP (src/solidlsp of oraios/serena, pinned in
+  `scripts/fetch-tools.sh`, a uv virtualenv) behind
+  `tools/solidlsp/bridge.py`: it starts, configures, waits for and stops the
+  real server; the bridge speaks LSP to Swan. Three settings reach it
+  through a server entry's `env`: `SWAN_SOLIDLSP_SETTINGS` (SolidLSP's own
+  per-language settings as JSON, so a server fetched ahead is named and
+  nothing is downloaded at map time), `SWAN_SOLIDLSP_HOLD_OPEN=1` (a file
+  stays open across questions: a map only) and `SWAN_SOLIDLSP_UNOPENED=1`
+  (each question goes to the server as asked, no file opened: PHPantom).
+- `tools/modules.json`: a language is mapped through its server by the
+  Rust program when its entry has `"map_lsp"` candidates (Lua, PHP) or says
+  `"map": "lsp"` (Go, Goose: the Goose program reads that one too). A
+  candidate's `"needs"` is the real server's path. Which files are a
+  language's is its `"match"` list.
+- In Rust: `rust/src/lsp.rs` (the client), `rust/src/lspindex.rs` (`swan
+  lsp-index`), `rust/src/modules.rs` (`Entry`: `holds`, `missing`,
+  `map_server`, the fingerprint's text), the planning in
+  `rust/src/pipeline.rs` (search `map_entries`: a job per language, the
+  syntax index's skip list, the second syntax run when a server fails),
+  `rust/tests/lsp_languages.rs` (maps fixtures/lsp-lua and lsp-php sealed
+  and asserts rows).
+- **A language is added with data:** a `"map_lsp"` entry, a pinned fetch, a
+  two-file fixture with a case a name match gets wrong, its rows asserted.
+  Then the measure on a real repo, sealed: is the server's answer better
+  than the name match, and what does it cost. docs/languages-through-servers.md
+  has the four that were measured, two of them not kept, and why.
+- One command maps a repo with two builds and prints the table:
+  `swan-map-table` in the owner's tools folder (`--ext lua,php <repo>
+  before=<home> after=<home>`; a home is a folder with `bin/swan`, `tools`
+  and `.tools` beside it, as the tests make one).
+- RustRover helps while building: `./jb open rustrover <this repo>/rust` in
+  the jetbrains kit, then `./jb call rustrover get_file_problems` (or
+  `lint_files`, `get_symbol_info`) with `projectPath` the `rust` folder.
+  Open `rust/` itself, never the repo's top. Only its tools that read.
 
 ### The work, in order
-1. Go beside GoLand. cobra's Go rows are the Goose program's, and those
-   were never put to an IDE. `jetbrains-reference`: map the copy, open it
-   in GoLand, `compare/refs_vs_ide.py`. It waits on the owner: GoLand has
-   no trusted folder for the trial repos ("Decisions waiting").
-2. More languages through the bridge, one at a time, each measured against
-   its JetBrains IDE before it is kept. The order put to the owner on
-   2026-11-23 and answered "anyways sure": the languages with no SCIP
-   indexer that are only searched today (Ruby, PHP, Lua, shell), then live
-   answers for the languages that have an indexer. Each is an entry in
-   tools/modules.json and a pinned fetch in `scripts/fetch-tools.sh`
-   (SolidLSP knows about 80 languages; Helix's `languages.toml` and
-   mason-registry say how each server is started and fetched). A language
-   keeps its SCIP indexer for the map unless the measure says otherwise.
-3. Live answers on the same client: `swan lsp-ask`, and `src/live.goose`
-   (errors as the code stands, implementations). The client's `settle`
-   (how a server says it is done: pull, publish or check) belongs here; it
-   was left out of `ServerSpec` until something reads it.
+1. **PHP beside PhpStorm, Go beside GoLand.** Neither language's map has
+   been put to an IDE, and the rule was that each is before it is kept
+   (DECISIONS.md, 2026-11-25, says so). Both wait on the owner ("Decisions
+   waiting"). Then: the `jetbrains-reference` skill; the clones are in the
+   trial repos' folder (Slim, cobra); map each with the Rust program,
+   sealed; `compare/refs_vs_ide.py`; read every difference that is not an
+   import line or a constructor; a fault becomes a fixture and a fix.
+2. **Live answers on the same client:** `swan lsp-ask`, and errors as the
+   code stands (`src/live.goose`). The client's `settle` (how a server says
+   it is done: pull, publish or check) belongs here. Two things this work
+   leaves for it: a live server must not set `SWAN_SOLIDLSP_HOLD_OPEN` (a
+   held file is not read from disk again), and PHPantom under
+   `SWAN_SOLIDLSP_UNOPENED` reads only what is on disk, which suits a Swan
+   that edits files on disk and then asks.
+3. **More languages, one at a time, by the measure.** Kotlin is the next
+   candidate: it has no indexer in the map (tree-sitter only), SolidLSP
+   knows a server for it, and IntelliJ IDEA can judge it; its server may run
+   Gradle, which is the repo's code, so the question is what it answers
+   sealed and not trusted. After it: GDScript, the shader languages, C#.
+   Ruby and shell are measured: Ruby has two ways on written in the doc,
+   shell's server is for live errors only.
 4. Checking and editing, and the MCP server on `rmcp`.
 
-Known and small, for whoever is next in these files: a silent server is
-given 120 s (the old client's limit) before `lsp-index` fails;
-`{java_source_paths}` is not filled in for a server's settings; the
-client's reader thread is not joined, which a long-lived `swan serve` will
-care about; the Rust program now carries Apache-2.0 libraries, and what a
-shipped binary must say of them is for when it ships.
+Known and small, for whoever is next in these files:
+- **`swan map` gives its sealed children its whole environment** (indexers
+  and language servers alike). Inside the seal there is no network, but a
+  child can write what it reads into the map folder, and a secret in the
+  shell's environment is something it reads. A sealed child wants a short
+  list of variables. Its own branch; the Goose program does the same.
+- One changed file of a language redoes that language's whole `lsp-index`
+  job (Penlight: 19 s).
+- Stopping `swan map` alone leaves its indexers running to their end: each
+  is in its own process group.
+- The report's first line still says "(syntax only)" of Go and Lua.
+- An install (`SWAN_RUNTIME_ONLY`) fetches neither lua-language-server nor
+  PHPantom: the Goose program maps through neither. Both fetches lose their
+  dev-checkout-only test in `scripts/fetch-tools.sh` when the Rust program
+  ships.
+- From before: a silent server is given 120 s before `lsp-index` fails;
+  `{java_source_paths}` is not filled in for a server's settings; the
+  client's reader thread is not joined, which a long-lived `swan serve` will
+  care about; the Rust program carries Apache-2.0 libraries, and what a
+  shipped binary must say of them is for when it ships.
 
 ### How it is judged now
 A JetBrains IDE on the trial repos, and Swan's own suite in the microVM
 once the Rust program can stand in `bin/`. The comparisons with the Goose
 program stay and cost a minute; they are not extended, and a difference one
-shows is a question to look at, not a fault to mend. No prover is run.
+shows is a question to look at, not a fault to mend. Since 2026-11-25
+`scripts/port-map.sh` says 14 of 440 differ, each in the report's text (an
+lsp-index line carries its counts; Lua and PHP are mapped): as meant. No prover is run.
 AGENTS.md's rules hold as they are for the program that ships.
 
 ### What a whole map taught the judge on 2026-11-23
@@ -177,11 +200,19 @@ repos without those languages 40%. docs/rust-port.md, "Found while
 porting", has the call.
 
 ## Decisions waiting on the owner
-- GoLand, to judge the Go map: it has no trusted folder for the trial
-  repos, so opening one stops at "Trust project?". For the owner to run,
-  with GoLand closed: `./jb trust-location goland <the trial repos'
-  folder>` in the jetbrains kit. A first launch of GoLand may also stop at
-  a dialog only he can answer.
+- PhpStorm and GoLand, to judge the PHP and the Go map: neither has the
+  trial repos' folder among its trusted locations, so opening a clone stops
+  at "Trust project?". For the owner to run in the jetbrains kit, each IDE
+  closed: `./jb trust-location phpstorm <the trial repos' folder>` and
+  `./jb trust-location goland <the trial repos' folder>`. A first launch of
+  either may also stop at a dialog only he can answer.
+- A pull request for `rust-lsp-languages`: it sits on `rust-stage-4`, which
+  has none. Both are opened when he asks, the lower first.
+- Ruby: left matched by name, on the measure. Leave it so, or build one of
+  the two ways on (the server's symbols with references still by name; or
+  Solargraph, by type, for a trusted repo only)?
+- The environment a sealed child is given ("Known and small"): cut it down
+  on its own branch now, in both programs, or when the Rust program ships?
 - A pull request for stage 4 is opened when the owner asks, after the
   suite in the microVM on the commit that would merge.
 - The next experiment after the port's stage 3, proposed in
@@ -255,3 +286,11 @@ library is used where one fits.
   Gradle import of every Gradle fixture: Gradle was downloaded, a daemon
   started and 99 files written into the fixtures. The fixtures hold build
   files made to be awkward; read them through Swan.
+- Turn `"map": "lsp"` on for another language in tools/modules.json: the
+  Goose program reads it. A language new to the Rust program's map gets
+  `"map_lsp"`.
+- Set `SWAN_SOLIDLSP_HOLD_OPEN` on a server that answers live: a held file
+  is answered from the copy opened before the edit.
+- Put a language server or its runtime on the machine's PATH to make a
+  measurement easier. An editor's own plugin then starts it unsealed on the
+  trial repos (ruby-lsp evaluates a repo's Gemfile).

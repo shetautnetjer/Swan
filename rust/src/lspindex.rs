@@ -1,6 +1,7 @@
 // swan lsp-index <repo> <out> <lang> <target.scip> [--within <folder>]: a
-// map for a language that has a language server and no SCIP indexer ("map":
-// "lsp" in tools/modules.json), made by asking the server. For every file
+// map for a language that has a language server and no SCIP indexer (its
+// "map_lsp" servers in tools/modules.json, or "map": "lsp"), made by asking
+// the server. Its files are those its entry's "match" names. For every file
 // of the language, its symbols (documentSymbol); then each definition's
 // references; then what implements each interface or class, and each of
 // their methods. What comes back is what the server's own compiler
@@ -16,8 +17,9 @@
 // The paths written stay relative to the repo.
 //
 // Limits: only what is defined in the repo is asked about, so uses of the
-// standard library and of packages are not in the map; symbols nested more
-// than four deep are left out.
+// standard library and of packages are not in the map; what is declared
+// inside a function's body, and symbols nested more than four deep, are left
+// out.
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -29,7 +31,7 @@ use scip::types::{Document, Index, Metadata, Occurrence, ProtocolVersion, Relati
 use serde_json::{json, Value};
 
 use crate::lsp::{Client, LspError};
-use crate::modules::{lang_of_path, lsp_server};
+use crate::modules::{map_entry, Entry};
 use crate::syntax::{sx_basename, sx_cut, sx_dirname, sx_ident, sx_ns};
 use crate::sys;
 use crate::util::{hash, trim};
@@ -72,6 +74,8 @@ struct Found {
     first: Vec<usize>,
     /// A definition by where its name is: (file, line, column).
     def_at: HashMap<(usize, u32, u32), usize>,
+    /// And by where it starts, its first there.
+    starts_at: HashMap<(usize, u32, u32), usize>,
     /// How many callables have had each path so far (overloads).
     overloads: HashMap<Vec<u8>, usize>,
     /// The uses in each file.
@@ -82,6 +86,8 @@ struct Found {
     no_symbols: usize,
     /// Other questions the server could not answer.
     unanswered: usize,
+    /// Symbols listed inside a function's body, left out.
+    in_bodies: usize,
 }
 
 pub fn lsp_index_main(repo: &[u8], out: &[u8], lang: &[u8], target: &[u8], within: &[u8]) -> bool {
@@ -89,7 +95,11 @@ pub fn lsp_index_main(repo: &[u8], out: &[u8], lang: &[u8], target: &[u8], withi
     let mut walk = Walk::default();
     walk.load(repo, out);
     let within: &[u8] = if within == b"." { b"" } else { within };
-    let spec = match lsp_server(&walk, repo, out, lang) {
+    let entry = match map_entry(lang) {
+        Ok(e) => e,
+        Err(why) => return fail(&why),
+    };
+    let spec = match entry.map_server(&walk, repo, out, lang) {
         Ok(s) => s,
         Err(why) => return fail(&why),
     };
@@ -102,7 +112,7 @@ pub fn lsp_index_main(repo: &[u8], out: &[u8], lang: &[u8], target: &[u8], withi
         Ok(c) => c,
         Err(e) => return fail(format!("the {} language server did not start: {e}; see {}", String::from_utf8_lossy(lang), String::from_utf8_lossy(&log)).as_bytes()),
     };
-    let files = files_of(&walk, repo, lang, within);
+    let files = files_of(&walk, repo, &entry, within);
     let cut = if within.is_empty() { 0 } else { within.len() + 1 };
     let asked = ask_all(&mut client, &spec.language_id, repo, &files, cut);
     client.shutdown();
@@ -123,8 +133,9 @@ pub fn lsp_index_main(repo: &[u8], out: &[u8], lang: &[u8], target: &[u8], withi
     let refs: usize = found.refs.iter().map(Vec::len).sum();
     let impls: usize = found.implements.iter().map(Vec::len).sum();
     let unanswered = if found.unanswered > 0 { format!(", {} questions unanswered", found.unanswered) } else { String::new() };
+    let in_bodies = if found.in_bodies > 0 { format!(", {} symbols inside functions (locals, parameters) not mapped", found.in_bodies) } else { String::new() };
     let line = format!(
-        "lsp-index {}: {} files, {} definitions, {} references, {} implementations{unanswered}, {} ms\n",
+        "lsp-index {}: {} files, {} definitions, {} references, {} implementations{unanswered}{in_bodies}, {} ms\n",
         String::from_utf8_lossy(lang),
         files.len(),
         found.defs.len(),
@@ -143,10 +154,10 @@ fn fail(why: &[u8]) -> bool {
 
 // The language's files under within, repo-relative, in the order the repo
 // is walked.
-fn files_of(walk: &Walk, repo: &[u8], lang: &[u8], within: &[u8]) -> Vec<Vec<u8>> {
+fn files_of(walk: &Walk, repo: &[u8], entry: &Entry, within: &[u8]) -> Vec<Vec<u8>> {
     let mut files = Vec::new();
     walk.each_file(repo, |full, name| {
-        if lang_of_path(name) == lang && full.len() > repo.len() + 1 {
+        if entry.holds(name) && full.len() > repo.len() + 1 {
             let rel = &full[repo.len() + 1..];
             if within.is_empty() || (rel.len() > within.len() + 1 && rel.starts_with(within) && rel[within.len()] == b'/') {
                 files.push(rel.to_vec());
@@ -242,7 +253,9 @@ fn ask_all(client: &mut Client, language_id: &str, repo: &[u8], files: &[Vec<u8>
         };
         for (uri, line, col) in places {
             let Some(f2) = repo_path(&uri, repo).and_then(|p| by_path.get(&p[..]).copied()) else { continue };
-            if let Some(&d2) = found.def_at.get(&(f2, line, col)) {
+            // A place is a definition's name, or where all of it starts
+            // (PHPantom gives a class from its `class` keyword).
+            if let Some(&d2) = found.def_at.get(&(f2, line, col)).or_else(|| found.starts_at.get(&(f2, line, col))) {
                 if d2 != d {
                     found.implements[d2].push(d);
                 }
@@ -256,14 +269,24 @@ fn sx_cut_str(s: &str, n: usize) -> String {
     String::from_utf8_lossy(sx_cut(s.as_bytes(), n)).into_owned()
 }
 
-// A documentSymbol answer's symbols, nested at most four deep.
+// A documentSymbol answer's symbols, nested at most four deep. What is
+// declared inside a function's body (lua-language-server lists its locals,
+// parameters and blocks) is left out and counted: Go's and PHP's servers do
+// not list it.
 fn add_symbols(found: &mut Found, file: usize, ns: &[u8], text: &[u8], symbols: &[DocumentSymbol], parent: Option<usize>, depth: usize) {
     for s in symbols {
         let Some(d) = add_def(found, file, ns, text, s, parent) else { continue };
-        if let (Some(children), true) = (&s.children, depth < 4) {
+        let Some(children) = &s.children else { continue };
+        if suffix(s.kind) == b'm' {
+            found.in_bodies += count(children);
+        } else if depth < 4 {
             add_symbols(found, file, ns, text, children, Some(d), depth + 1);
         }
     }
+}
+
+fn count(symbols: &[DocumentSymbol]) -> usize {
+    symbols.iter().map(|s| 1 + s.children.as_deref().map_or(0, count)).sum()
 }
 
 fn add_def(found: &mut Found, file: usize, ns: &[u8], text: &[u8], s: &DocumentSymbol, parent: Option<usize>) -> Option<usize> {
@@ -302,6 +325,7 @@ fn add_def(found: &mut Found, file: usize, ns: &[u8], text: &[u8], s: &DocumentS
     let at = s.selection_range;
     let d = found.defs.len();
     found.def_at.insert((file, at.start.line, at.start.character), d);
+    found.starts_at.entry((file, s.range.start.line, s.range.start.character)).or_insert(d);
     found.defs.push(Def {
         name: String::from_utf8_lossy(short).into_owned(),
         desc,

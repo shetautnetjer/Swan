@@ -18,8 +18,7 @@ use crate::fresh::scip_time_of;
 use crate::gradle::gradle_scip_tasks;
 use crate::gsort::goose_sort;
 use crate::index::{index_main_locked, SCHEMA_VERSION};
-use crate::json;
-use crate::modules::{lang_of_path, lsp_server_present};
+use crate::modules::map_entries;
 use crate::pypatch::{ensure_scip_python_patch, ensure_scip_python_site_patch, pypatch_count};
 use crate::pyplan::{piece_target, plan_python};
 use crate::query::meta_value;
@@ -1114,6 +1113,31 @@ pub fn map_main(repo_arg: &[u8], out_arg: &[u8], report: &mut Vec<u8>, clean: bo
         writer.unlock();
     }
     ok
+}
+
+// The syntax index's job: `swan syntax-index` (src/syntax.rs, this binary
+// itself) over the repo but for the files in skip, and its fingerprint.
+fn syntax_plan(walk: &Walk, stamps: &mut Stamps, repo: &[u8], out: &[u8], swan_bin: &[u8], skip: &HashSet<Vec<u8>>) -> (Vec<Vec<u8>>, u64) {
+    let mut a: Vec<Vec<u8>> = vec![swan_bin.to_vec(), b"syntax-index".to_vec(), repo.to_vec(), [out, b"/index-syntax.scip"].concat()];
+    let mut listed: Vec<&Vec<u8>> = skip.iter().collect();
+    listed.sort();
+    let listed: Vec<u8> = listed.iter().flat_map(|f| f.iter().copied().chain([b'\n'])).collect();
+    let mut skip_word: Vec<u8> = Vec::new();
+    let list = [out, b"/syntax-skip.txt"].concat();
+    sys::delete_file(&list);
+    if !listed.is_empty() {
+        sys::write_file(&list, &listed);
+        a.push(b"--skip-files".to_vec());
+        a.push(list);
+        skip_word = format!("\tskip {}", hash(&listed)).into_bytes();
+    }
+    let mut fp = hash(&[&b"syntax-goose-1\t"[..], swan_bin, b"\t", sys::file_size(swan_bin).to_string().as_bytes(), &skip_word].concat());
+    walk.each_file(repo, |full, name| {
+        if syntax_file(full, name) && !skip.contains(&full[repo.len() + 1..]) {
+            fp = hash_combine(fp, hash_combine(hash(full), stamps.stamp(full)));
+        }
+    });
+    (a, fp)
 }
 
 // The public wrapper holds the writer lock for every shared output: cached
@@ -2358,107 +2382,105 @@ fn map_main_locked(repo: &[u8], out: &[u8], report: &mut Vec<u8>, clean: bool) -
     }
 
     // Languages with a language server and no SCIP indexer, when their entry
-    // in tools/modules.json says "map": "lsp": `swan lsp-index` (this binary)
-    // asks the server for every definition and its references. Left out when
-    // the server is not installed here.
-    let mut lsp_mapped: Vec<u8> = vec![b' ']; // " go goose ": the languages mapped this way in this run
-    let mut mods_text: Vec<u8> = Vec::new();
-    if !l.other.is_empty() && sys::read_file(&[&home[..], b"/tools/modules.json"].concat(), &mut mods_text) {
-        let swan_bin = [&home[..], b"/bin/swan"].concat();
-        // A file that cannot be read as JSON names no language.
-        if let Some(mods) = json::parse(&mods_text) {
-            for lang in l.other.split(|&c| c == b' ') {
-                let m = mods.member(mods.root(), lang);
-                if mods.as_string(mods.member(m, b"map")) != Some(&b"lsp"[..]) || !lsp_server_present(&mods, m, &home) {
-                    continue;
-                }
-                // Go modules below the top of the repo (from the survey):
-                // one run per module, the server started in the module's
-                // own folder, as an editor opens it. With a go.mod or a
-                // go.work at the top, or no survey, one run over the repo.
-                let mut folders: Vec<u8> = Vec::new();
-                if lang == b"go" {
-                    let mods_at = survey_paths(&survey, b"go", &survey_skip);
-                    if !mods_at.is_empty() && !contains_line(&mods_at, b".") && !sys::file_exists(&[repo, b"/go.work"].concat()) {
-                        folders.extend_from_slice(&mods_at);
-                    }
-                }
-                if folders.is_empty() {
-                    folders.extend_from_slice(b".\n");
-                }
-                let per_folder = folders != b".\n";
-                let mut covered: i64 = 0;
-                let mut all_files: i64 = 0;
-                for within in folders.split(|&c| c == b'\n') {
-                    if within.is_empty() {
-                        continue;
-                    }
-                    let whole = within == b".";
-                    let target = if whole {
-                        [out, b"/index-lsp-", lang, b".scip"].concat()
-                    } else {
-                        [out, b"/index-lsp-", lang, b"-", (hash(within) % 1000000).to_string().as_bytes(), b".scip"].concat()
-                    };
-                    let mut a: Vec<Vec<u8>> = vec![swan_bin.clone(), b"lsp-index".to_vec(), repo.to_vec(), out.to_vec(), lang.to_vec(), target.clone()];
-                    if !whole {
-                        a.push(b"--within".to_vec());
-                        a.push(within.to_vec());
-                    }
-                    let mut fp = hash(&[b"lsp-index-2\t", lang, b"\t", within, b"\t", &swan_bin[..], b"\t", sys::file_size(&swan_bin).to_string().as_bytes()].concat());
-                    let under = [repo, b"/", within, b"/"].concat();
-                    walk.each_file(repo, |full, name| {
-                        if lang_of_path(name) == lang && (whole || starts_with(full, &under)) {
-                            fp = hash_combine(fp, hash_combine(hash(full), stamps.stamp(full)));
-                            covered += 1;
-                        }
-                    });
-                    let label = if whole { [b"lsp-index ", lang].concat() } else { [b"lsp-index ", lang, b" ", within].concat() };
-                    jobs.add_lang(report, &label, &target, a, child_env(&l, &[], b""), fp, false, b"", false);
-                }
-                if per_folder {
-                    walk.each_file(repo, |_full, name| {
-                        if lang_of_path(name) == lang {
-                            all_files += 1;
-                        }
-                    });
-                    report.extend_from_slice(lang);
-                    report.extend_from_slice(b": ");
-                    push_int(report, count_lines(&folders));
-                    report.extend_from_slice(b" modules below the top of the repo, each mapped from its own folder");
-                    if all_files > covered {
-                        report.extend_from_slice(b"; ");
-                        push_int(report, all_files - covered);
-                        report.extend_from_slice(&[b" ", lang, b" files outside every module are not mapped"].concat());
-                    }
-                    report.push(b'\n');
-                }
-                lsp_mapped.extend_from_slice(lang);
-                lsp_mapped.push(b' ');
-            }
-        }
-    }
-    if l.syn {
-        // No compiler, no repo code run: a syntax-level map (definitions,
-        // bodies, references by name) for the languages above.
-        let target = [out, b"/index-syntax.scip"].concat();
-        // `swan syntax-index` (src/syntax.rs), this binary itself.
-        let swan_bin = [&home[..], b"/bin/swan"].concat();
-        let mut a: Vec<Vec<u8>> = vec![swan_bin.clone(), b"syntax-index".to_vec(), repo.to_vec(), target.clone()];
-        // Go mapped by its language server is left out here: its rows would
-        // only repeat, by name, what the server resolved.
-        let skip_go = find(&lsp_mapped, b" go ") >= 0;
-        if skip_go {
-            a.push(b"--skip".to_vec());
-            a.push(b"go".to_vec());
-        }
-        let skip_word: &[u8] = if skip_go { b"\tskip-go" } else { b"" };
-        let mut fp = hash(&[&b"syntax-goose-1\t"[..], &swan_bin, b"\t", sys::file_size(&swan_bin).to_string().as_bytes(), skip_word].concat());
+    // in tools/modules.json has "map_lsp" servers or says "map": "lsp":
+    // `swan lsp-index` (this binary) asks the server for every definition and
+    // its references, for the files the entry's "match" names. Left out, and
+    // said, when the server is not here.
+    let swan_bin = [&home[..], b"/bin/swan"].concat();
+    // The files the lsp-index jobs map, repo-relative; and each job's place
+    // in the list, its files, and whether the syntax index can map them
+    // instead when its server fails.
+    let mut covered: HashSet<Vec<u8>> = HashSet::new();
+    let mut lsp_jobs: Vec<(usize, Vec<Vec<u8>>, bool)> = Vec::new();
+    for (lang_name, entry) in map_entries(&home) {
+        let lang = lang_name.as_bytes();
+        let (mut all_files, mut by_syntax): (i64, i64) = (0, 0);
         walk.each_file(repo, |full, name| {
-            if syntax_file(full, name) && !(skip_go && ends_with(name, b".go")) {
-                fp = hash_combine(fp, hash_combine(hash(full), stamps.stamp(full)));
+            if entry.holds(name) {
+                all_files += 1;
+                by_syntax += syntax_file(full, name) as i64;
             }
         });
-        jobs.add_lang(report, b"syntax-index", &target, a, child_env(&l, &[], b""), fp, false, b"", false);
+        if all_files == 0 {
+            continue;
+        }
+        if let Some(missing) = entry.missing(&home) {
+            let then: &[u8] = if by_syntax > 0 { b"its files are mapped by name (syntax index)" } else { b"its files are not mapped" };
+            report.extend_from_slice(&[lang, b": its language server is not here (", &missing[..], b"); ", then, b"\n"].concat());
+            continue;
+        }
+        // Go modules below the top of the repo (from the survey): one run
+        // per module, the server started in the module's own folder, as an
+        // editor opens it. With a go.mod or a go.work at the top, or no
+        // survey, one run over the repo.
+        let mut folders: Vec<u8> = Vec::new();
+        if lang == b"go" {
+            let mods_at = survey_paths(&survey, b"go", &survey_skip);
+            if !mods_at.is_empty() && !contains_line(&mods_at, b".") && !sys::file_exists(&[repo, b"/go.work"].concat()) {
+                folders.extend_from_slice(&mods_at);
+            }
+        }
+        if folders.is_empty() {
+            folders.extend_from_slice(b".\n");
+        }
+        let per_folder = folders != b".\n";
+        let mut in_folders: i64 = 0;
+        // What the job runs: the map servers as written, and the size of
+        // each file they need (a server fetched again maps again).
+        let servers = [entry.map_text().as_bytes(), b"\t", &entry.needs_identity(&home)[..]].concat();
+        for within in folders.split(|&c| c == b'\n') {
+            if within.is_empty() {
+                continue;
+            }
+            let whole = within == b".";
+            let target = if whole {
+                [out, b"/index-lsp-", lang, b".scip"].concat()
+            } else {
+                [out, b"/index-lsp-", lang, b"-", (hash(within) % 1000000).to_string().as_bytes(), b".scip"].concat()
+            };
+            let mut a: Vec<Vec<u8>> = vec![swan_bin.clone(), b"lsp-index".to_vec(), repo.to_vec(), out.to_vec(), lang.to_vec(), target.clone()];
+            if !whole {
+                a.push(b"--within".to_vec());
+                a.push(within.to_vec());
+            }
+            let mut fp = hash(&[b"lsp-index-3\t", lang, b"\t", within, b"\t", &swan_bin[..], b"\t", sys::file_size(&swan_bin).to_string().as_bytes(), b"\t", &servers[..]].concat());
+            let under = [repo, b"/", within, b"/"].concat();
+            let mut files: Vec<Vec<u8>> = Vec::new();
+            walk.each_file(repo, |full, name| {
+                if entry.holds(name) && (whole || starts_with(full, &under)) {
+                    fp = hash_combine(fp, hash_combine(hash(full), stamps.stamp(full)));
+                    files.push(full[repo.len() + 1..].to_vec());
+                }
+            });
+            in_folders += files.len() as i64;
+            covered.extend(files.iter().cloned());
+            lsp_jobs.push((jobs.list.len(), files, by_syntax > 0));
+            let label = if whole { [b"lsp-index ", lang].concat() } else { [b"lsp-index ", lang, b" ", within].concat() };
+            // With a by-name fallback the map goes on when the server fails.
+            jobs.add_lang(report, &label, &target, a, child_env(&l, &[], b""), fp, false, b"", by_syntax > 0);
+        }
+        if per_folder {
+            report.extend_from_slice(lang);
+            report.extend_from_slice(b": ");
+            push_int(report, count_lines(&folders));
+            report.extend_from_slice(b" modules below the top of the repo, each mapped from its own folder");
+            if all_files > in_folders {
+                report.extend_from_slice(b"; ");
+                push_int(report, all_files - in_folders);
+                report.extend_from_slice(&[b" ", lang, b" files outside every module are left to the syntax index"].concat());
+            }
+            report.push(b'\n');
+        }
+    }
+    // No compiler, no repo code run: a syntax-level map (definitions,
+    // bodies, references by name) for the languages above, but for the
+    // files a language server maps in this run: their rows would only
+    // repeat, by name, what the server resolved.
+    let mut syntax_at: Option<usize> = None;
+    if l.syn {
+        let (a, fp) = syntax_plan(&walk, &mut stamps, repo, out, &swan_bin, &covered);
+        syntax_at = Some(jobs.list.len());
+        jobs.add_lang(report, b"syntax-index", &[out, b"/index-syntax.scip"].concat(), a, child_env(&l, &[], b""), fp, false, b"", false);
     }
     // (What waits for trust is also kept for `swan serve` to say, in the
     // Goose program's `map_held`: that comes with the server.)
@@ -2566,6 +2588,57 @@ fn map_main_locked(repo: &[u8], out: &[u8], report: &mut Vec<u8>, clean: bool) -
     while running > 0 {
         wait_one(&pids, &mut codes, &began, &mut took, &mut running);
     }
+    // A language server that failed leaves its files without rows: the
+    // syntax index runs again, now mapping them too, by name.
+    let fell: Vec<&(usize, Vec<Vec<u8>>, bool)> =
+        lsp_jobs.iter().filter(|(i, _, _)| !jobs.list[*i].argv.is_empty() && (codes[*i] != 0 || !sys::file_exists(&jobs.list[*i].target))).collect();
+    if let (Some(si), true) = (syntax_at, fell.iter().any(|(_, _, by_name)| *by_name)) {
+        let mut skip = covered.clone();
+        for (_, files, _) in &fell {
+            for f in files {
+                skip.remove(f);
+            }
+        }
+        let (argv, fp) = syntax_plan(&walk, &mut stamps, repo, out, &swan_bin, &skip);
+        let target = jobs.list[si].target.clone();
+        // Its manifest line is for what it is run with now.
+        let mut manifest: Vec<u8> = Vec::new();
+        for line in jobs.index_manifest.split(|&c| c == b'\n').filter(|l| !l.is_empty()) {
+            if starts_with(line, b"syntax-index\t") {
+                manifest.extend_from_slice(&[&b"syntax-index\t"[..], fp.to_string().as_bytes(), b"\t", &target[..]].concat());
+            } else {
+                manifest.extend_from_slice(line);
+            }
+            manifest.push(b'\n');
+        }
+        jobs.index_manifest = manifest;
+        let job = &mut jobs.list[si];
+        job.argv = argv;
+        job.label = b"syntax-index".to_vec();
+        let inner: Vec<&[u8]> = job.argv.iter().map(|a| &a[..]).collect();
+        let launch: Vec<Vec<u8>> = if sandbox_on() { seal_argv(&inner, repo, out, trusted) } else { job.argv.clone() };
+        let launch: Vec<&[u8]> = launch.iter().map(|a| &a[..]).collect();
+        let env: Vec<&[u8]> = job.env.iter().map(|e| &e[..]).collect();
+        let log = [out, b"/log-", si.to_string().as_bytes(), b".txt"].concat();
+        let before = took[si];
+        codes[si] = -999;
+        began[si] = std::time::Instant::now();
+        match sys::spawn_job(&launch, repo, &env, &log) {
+            Ok(pid) => {
+                pids[si] = pid;
+                running = 1;
+                while running > 0 {
+                    wait_one(&pids, &mut codes, &began, &mut took, &mut running);
+                }
+            }
+            Err(code) => codes[si] = code,
+        }
+        took[si] += before;
+    }
+    for (i, _, by_name) in &fell {
+        let then: &[u8] = if *by_name && syntax_at.is_some() { b"its files are mapped by name (syntax index) in this map" } else { b"its files are not mapped" };
+        report.extend_from_slice(&[&jobs.list[*i].label[..], b": the language server failed; ", then, b"\n"].concat());
+    }
 
     let mut scips: Vec<Vec<u8>> = Vec::new(); // the index files, for the flattener
     let mut failed: Vec<u8> = Vec::new(); // their index files, one per line
@@ -2578,6 +2651,16 @@ fn map_main_locked(repo: &[u8], out: &[u8], report: &mut Vec<u8>, clean: bool) -
             report.extend_from_slice(b": ");
             push_int(report, took[idx]);
             report.extend_from_slice(b" ms");
+        }
+        // What a language server answered, as swan lsp-index counts it.
+        if code == 0 && starts_with(&job.label, b"lsp-index ") {
+            let mut log: Vec<u8> = Vec::new();
+            sys::read_file(&[out, b"/log-", idx.to_string().as_bytes(), b".txt"].concat(), &mut log);
+            if let Some(line) = log.split(|&c| c == b'\n').rev().find(|l| starts_with(l, b"lsp-index ")) {
+                let from = find(line, b": ").max(0) as usize + 2;
+                let to = rfind(line, b", ").max(from as i64) as usize;
+                report.extend_from_slice(&[b" (", &line[from.min(to)..to], b")"].concat());
+            }
         }
         if code == 0 && sys::file_exists(&job.target) {
             if !job.label.is_empty() {

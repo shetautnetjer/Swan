@@ -1,5 +1,5 @@
 {
-  "_about": "Per-language tools Swan runs after edits: linters (into get_diagnostics; they must not write into the repo, so their caches are off), formatters (format_file) and test runners (run_tests), which act on the repo by design. Each kind is a list of candidates; the first whose conditions hold is used. when_file: one of these exists in the repo. when_cmd: this command exits 0. Placeholders: {repo}, {python} (the repo's virtualenv, else python3), {tools} (Swan's .tools), {bin} (Swan's tools/node_modules/.bin), {out} (the map folder), {compdb} (the folder of the compile_commands.json that built the map: the repo's own, else the map folder's), {rust_std_source} (a JSON string or null: the standard library source rust-analyzer should read when the repo pins an installed Rust older than rustup's default one), {files} and {tests} (one argument each; a candidate needing them is skipped when there are none). parser: how output becomes diagnostics (github: ::error file=..,line=..,col=..::message; cargo: cargo's JSON lines). lsp: a language server swan serve keeps running for live answers (get_diagnostics and find_implementations with live): language_id for didOpen, init the settings as a JSON string (placeholders expanded; sent as initializationOptions and as the answer to workspace/configuration, by section), settle: check (wait for the check a save starts: rust-analyzer) or publish (wait for the file's next published set); runs_repo_code: the candidate runs the repo's own build files (cargo build scripts, Gradle, MSBuild), so it is used only once the repo is trusted (swan trust <repo>, or SWAN_TRUST_BUILD=1); test runners run the repo's code by design and are not marked. quiet_ms: for a server that publishes nothing for a clean file (lua-language-server), how long a silence means no problems.",
+  "_about": "Per-language tools Swan runs after edits: linters (into get_diagnostics; they must not write into the repo, so their caches are off), formatters (format_file) and test runners (run_tests), which act on the repo by design. Each kind is a list of candidates; the first whose conditions hold is used. when_file: one of these exists in the repo. when_cmd: this command exits 0. Placeholders: {repo}, {python} (the repo's virtualenv, else python3), {tools} (Swan's .tools), {bin} (Swan's tools/node_modules/.bin), {out} (the map folder), {compdb} (the folder of the compile_commands.json that built the map: the repo's own, else the map folder's), {rust_std_source} (a JSON string or null: the standard library source rust-analyzer should read when the repo pins an installed Rust older than rustup's default one), {files} and {tests} (one argument each; a candidate needing them is skipped when there are none). parser: how output becomes diagnostics (github: ::error file=..,line=..,col=..::message; cargo: cargo's JSON lines). lsp: a language server swan serve keeps running for live answers (get_diagnostics and find_implementations with live): language_id for didOpen, init the settings as a JSON string (placeholders expanded; sent as initializationOptions and as the answer to workspace/configuration, by section), settle: check (wait for the check a save starts: rust-analyzer) or publish (wait for the file's next published set); runs_repo_code: the candidate runs the repo's own build files (cargo build scripts, Gradle, MSBuild), so it is used only once the repo is trusted (swan trust <repo>, or SWAN_TRUST_BUILD=1); test runners run the repo's code by design and are not marked. quiet_ms: for a server that publishes nothing for a clean file (lua-language-server), how long a silence means no problems. match: the file names that are the language's (each ends with one of these); swan map's language-server jobs and the Rust program's syntax index go by it. map: lsp: the language is mapped by asking its \"lsp\" server for every definition and its references (swan lsp-index). map_lsp: read only by the Rust program: the servers swan lsp-index starts for the map, candidates shaped like \"lsp\" ones, used in place of \"lsp\" for the map, so a language mapped through SolidLSP keeps its own live server; a language with map_lsp is mapped this way without \"map\". needs: paths (placeholders expanded) that must exist for a candidate to hold, such as the real server behind tools/solidlsp/bridge.py; when the first candidate's program or needs are missing, the language is left to the syntax index and the map says so.",
   "python": {
     "match": [".py", ".pyi"],
     "lint": [
@@ -111,6 +111,23 @@
     "lsp": [
       {"cmd": ["{tools}/lua-ls/bin/lua-language-server", "--logpath={out}/lua-ls-log", "--metapath={out}/lua-ls-meta"],
        "language_id": "lua", "settle": "publish", "quiet_ms": 3000, "init": "{}"}
+    ],
+    "map_lsp": [
+      {"cmd": ["{tools}/solidlsp/venv/bin/python", "{swan}/tools/solidlsp/bridge.py", "lua"], "needs": ["{tools}/lua-ls/bin/lua-language-server"],
+       "language_id": "lua", "sealed": true, "init": "{}",
+       "env": ["PYTHONPATH={tools}/solidlsp/src:{swan}/tools/solidlsp/shim", "SWAN_BRIDGE_PATH={tools}/lua-ls/bin",
+               "SWAN_SOLIDLSP_DATA={out}/solidlsp", "SWAN_SOLIDLSP_HOLD_OPEN=1", "LLS_LOG_PATH={out}/lua-ls-log", "LLS_META_PATH={out}/lua-ls-meta",
+               "PYTHONDONTWRITEBYTECODE=1"]}
+    ]
+  },
+  "php": {
+    "match": [".php", ".phtml"],
+    "map_lsp": [
+      {"cmd": ["{tools}/solidlsp/venv/bin/python", "{swan}/tools/solidlsp/bridge.py", "php_phpantom"], "needs": ["{tools}/phpantom/phpantom_lsp"],
+       "language_id": "php", "sealed": true, "init": "{}",
+       "env": ["PYTHONPATH={tools}/solidlsp/src:{swan}/tools/solidlsp/shim", "SWAN_SOLIDLSP_DATA={out}/solidlsp",
+               "SWAN_SOLIDLSP_SETTINGS={\"php_phpantom\":{\"ls_path\":\"{tools}/phpantom/phpantom_lsp\"}}",
+               "SWAN_SOLIDLSP_UNOPENED=1", "PYTHONDONTWRITEBYTECODE=1"]}
     ]
   },
   "glsl": {

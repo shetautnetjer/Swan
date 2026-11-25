@@ -12,7 +12,11 @@
 // in the repo). The flattener marks them "name" (found by name, not resolved
 // by a compiler), and answers show them as by_name.
 //
-//   swan syntax-index <repo> <out.scip> [--skip go]
+//   swan syntax-index <repo> <out.scip> [--skip go | --skip-files <list>]
+//
+// --skip go leaves out every Go file; --skip-files leaves out the files a
+// list names (repo-relative paths, one a line): swan map's language-server
+// jobs map those.
 //
 // Carried over from src/syntax.goose. Columns are UTF-8 bytes, the encoding
 // the index declares. One thing is kept another way: the Goose program finds
@@ -20,7 +24,7 @@
 // and the name, and this one through a table of names for each language.
 // The answers are the same unless two different keys share that hash.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::sys;
 use crate::util::{ends_with, find, hash, push_int, rfind, starts_with, trim, TextMap, TextSet};
@@ -114,7 +118,7 @@ fn sx_shebang_word(head: &[u8], w: &[u8]) -> bool {
 }
 
 // The language of a file, or -1. skip_go is `--skip go`: Go is mapped by its
-// language server in this run.
+// language server.
 fn sx_lang_of(full: &[u8], name: &[u8], skip_go: bool) -> i64 {
     if ends_with(name, b".go") {
         return if skip_go { -1 } else { SX_GO };
@@ -159,7 +163,7 @@ fn sx_lang_of(full: &[u8], name: &[u8], skip_go: bool) -> i64 {
 // walked: appends "<lang>\t<relative path>\n" for every file to index. An
 // explicit stack: a folder's children go on in reverse, so the first sorted
 // name comes off next and a subfolder is finished before its next sibling.
-fn sx_walk(walk: &Walk, repo: &[u8], skip_go: bool, out: &mut Vec<u8>) {
+fn sx_walk(walk: &Walk, repo: &[u8], skip_go: bool, skip: &HashSet<Vec<u8>>, out: &mut Vec<u8>) {
     let mut stack: Vec<Vec<u8>> = Vec::new();
     let mut dir: Vec<u8> = repo.to_vec();
     let mut have_dir = true;
@@ -194,7 +198,7 @@ fn sx_walk(walk: &Walk, repo: &[u8], skip_go: bool, out: &mut Vec<u8>) {
             let size = sys::file_size(&full);
             if size >= 0 && size <= 1000000 {
                 let l = sx_lang_of(&full, n, skip_go);
-                if l >= 0 {
+                if l >= 0 && !skip.contains(&full[repo.len() + 1..]) {
                     push_int(out, l);
                     out.push(b'\t');
                     out.extend_from_slice(&full[repo.len() + 1..]);
@@ -480,7 +484,7 @@ impl Defs {
     }
 }
 
-pub fn syntax_index_main(repo_arg: &[u8], out_path: &[u8], skip_go: bool) -> bool {
+pub fn syntax_index_main(repo_arg: &[u8], out_path: &[u8], skip_go: bool, skip: &HashSet<Vec<u8>>) -> bool {
     let mut rend = repo_arg.len();
     while rend > 1 && repo_arg[rend - 1] == b'/' {
         rend -= 1;
@@ -493,7 +497,7 @@ pub fn syntax_index_main(repo_arg: &[u8], out_path: &[u8], skip_go: bool) -> boo
         walk.load(repo, &out_path[..cut as usize]);
     }
     let mut listing: Vec<u8> = Vec::new();
-    sx_walk(&walk, repo, skip_go, &mut listing);
+    sx_walk(&walk, repo, skip_go, skip, &mut listing);
 
     // Files: their paths, languages and text, in walk order.
     let mut paths: Vec<&[u8]> = Vec::new();

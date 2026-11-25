@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Fetches the pinned Goose compiler, rust-analyzer, clangd, lua-language-server,
+# Fetches the pinned Goose compiler, rust-analyzer, clangd, lua-language-server, PHPantom,
 # the shader language server, Blender's Python stubs, the .NET SDK with
 # csharp-ls and scip-dotnet, a JDK, scip-java,
 # scip-clang, clang's headers and CUDA headers into .tools/ and the
@@ -14,7 +14,11 @@ cd "$(dirname "$0")/.."
 #   c     scip-clang, clang headers, CUDA headers, clangd
 #   game  lua-language-server, shader server, Blender stubs
 #   csharp  .NET SDK, csharp-ls, scip-dotnet
+#   go    SolidLSP, Go and gopls
+#   php   SolidLSP and PHPantom
+# Lua (game) is mapped through SolidLSP too, so it comes with it.
 want() { [ -z "${SWAN_LANGS:-}" ] || [[ ",$SWAN_LANGS," == *",$1,"* ]]; }
+want_solidlsp() { want go || { [ -z "$runtime_only" ] && { want game || want php; }; }; }
 # SWAN_RUNTIME_ONLY=1 provisions only the SCIP map indexers for the chosen
 # languages into .tools/ (this is what `swan-up install` runs against an
 # installed prefix). It skips the Goose compiler, the live-error language
@@ -200,7 +204,7 @@ SOLIDLSP_SHA256=7516525421621cfe459d05dd8bc9f885bf9dfaa79e07a64a42ce77861fde466a
 GO_VERSION=1.27.4
 GO_SHA256=7226736c2339719cda28fbf3a54d71aa63bcefe376e98cef00034268dab24840
 GOPLS_VERSION=v0.24.0
-if want go && [ ! -d .tools/solidlsp/src/solidlsp ]; then
+if want_solidlsp && [ ! -d .tools/solidlsp/src/solidlsp ]; then
   mkdir -p .tools/solidlsp .tools/dl
   tgz=.tools/dl/serena-$SOLIDLSP_COMMIT.tar.gz
   curl -fsSL -o "$tgz" "https://github.com/oraios/serena/archive/$SOLIDLSP_COMMIT.tar.gz"
@@ -209,7 +213,7 @@ if want go && [ ! -d .tools/solidlsp/src/solidlsp ]; then
     "serena-$SOLIDLSP_COMMIT/src/solidlsp" "serena-$SOLIDLSP_COMMIT/LICENSE" "serena-$SOLIDLSP_COMMIT/LICENSES/MIT.txt"
   rm "$tgz"
 fi
-if want go && [ ! -x .tools/solidlsp/venv/bin/python ]; then
+if want_solidlsp && [ ! -x .tools/solidlsp/venv/bin/python ]; then
   uv venv -q --python 3.12 .tools/solidlsp/venv
   uv pip install -q --python .tools/solidlsp/venv/bin/python overrides==7.7.0 sensai-utils==1.5.0 psutil==7.0.0 \
     requests==2.33.0 urllib3==2.8.0 pathspec==0.12.1 typing-extensions==4.16.0 ruamel.yaml==0.18.14 filelock==3.25.2 \
@@ -266,6 +270,20 @@ if [ -z "$runtime_only" ] && want game && [ ! -x .tools/shader-ls/bin/shader-lan
   chmod +x .tools/shader-ls/bin/shader-language-server
 fi
 [ -z "$runtime_only" ] && want game && { [ -d .tools/blender-stubs/bpy-stubs ] || uv pip install -q --target .tools/blender-stubs "fake-bpy-module-5.0==20260730"; }
+# PHP, through SolidLSP: PHPantom (MIT), one static binary that needs no PHP.
+# It maps PHP repos; tools/modules.json names it to SolidLSP (ls_path), so
+# SolidLSP downloads nothing. For a dev checkout only, as lua-language-server
+# is: the program that ships does not map through either yet, and an install
+# (SWAN_RUNTIME_ONLY) should not download what it cannot use.
+if [ -z "$runtime_only" ] && want php; then
+  case "$(uname -m)" in
+    x86_64) fetch_zip phpantom https://github.com/PHPantom-dev/phpantom_lsp/releases/download/1.1.0/phpantom_lsp-x86_64-unknown-linux-gnu.tar.gz \
+      f374e72ebd51d5e991bb0e7e395ec3a49b3dc75f101e69e4743f908515e9d7e7 tgz ;;
+    aarch64) fetch_zip phpantom https://github.com/PHPantom-dev/phpantom_lsp/releases/download/1.1.0/phpantom_lsp-aarch64-unknown-linux-gnu.tar.gz \
+      888633fd40b9af4709338af7cc76a34e9096f4259812cd24911109af1d068c5f tgz ;;
+    *) echo "fetch-tools: no PHPantom for $(uname -m), so PHP is not mapped" >&2 ;;
+  esac
+fi
 # C# (Unity scripts, Godot C#, .NET): the .NET SDK, csharp-ls for live errors
 # and scip-dotnet for the full map, as dotnet tools. Their homes and NuGet's
 # package cache stay under .tools too.

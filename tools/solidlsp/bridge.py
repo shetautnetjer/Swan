@@ -11,12 +11,31 @@ and asks for errors live, exactly as it does through its own client.
 
 Answered: initialize, shutdown, exit, textDocument/documentSymbol,
 references, definition, implementation and diagnostic. Files are read from
-disk by SolidLSP, so didOpen/didChange/didSave need no answer.
+disk by SolidLSP, which opens and closes a file around every question, so
+didOpen, didChange and didSave need no answer.
 
 Environment:
   SWAN_SOLIDLSP_DATA   where SolidLSP may keep its data (a folder in the map)
   SWAN_BRIDGE_PATH     folders put first on PATH for the real server
-                       (Swan's own Go toolchain and gopls)
+                       (Swan's own Go toolchain and gopls, lua-language-server)
+  SWAN_SOLIDLSP_SETTINGS  SolidLSP's ls_specific_settings as a JSON object: for
+                       a SolidLSP language id, its launcher's settings. A
+                       server fetched ahead is named here ({"php_phpantom":
+                       {"ls_path": ...}}), so SolidLSP downloads nothing
+  SWAN_SOLIDLSP_HOLD_OPEN  1: a file Swan opens (didOpen) stays open in the
+                       server until Swan closes it (didClose), as in an
+                       editor. The server then reads and checks it once, not
+                       again for every question. For a map only, where
+                       nothing is edited between questions: a held file is
+                       not read from disk again, so live answers, which follow
+                       edits, must not set it
+  SWAN_SOLIDLSP_UNOPENED  1: no file is opened in the server; each question goes
+                       to it as asked, not through SolidLSP's own requests (which
+                       open the file around it), and it reads the file from
+                       disk. For PHPantom: a file opened once its workspace is
+                       indexed loses uses its index had, and SolidLSP's
+                       launcher waits 1 s before each references and
+                       definition question
 """
 import json
 import logging
@@ -96,12 +115,18 @@ def main():
 
     server = None
     root = None
+    held = {}                         # uri: the open_file context of a file Swan has open
 
     def rel(params):
         return os.path.relpath(path_of(params["textDocument"]["uri"]), root)
 
     def locations(found):
-        return [{"uri": l["uri"], "range": l["range"]} for l in (found or [])]
+        if isinstance(found, dict):
+            found = [found]
+        return [{"uri": l.get("uri") or l["targetUri"], "range": l.get("range") or l["targetSelectionRange"]} for l in (found or [])]
+
+    unopened = os.environ.get("SWAN_SOLIDLSP_UNOPENED") == "1"
+    hold = os.environ.get("SWAN_SOLIDLSP_HOLD_OPEN") == "1" and not unopened
 
     while True:
         message = read_message(sys.stdin.buffer)
@@ -110,12 +135,24 @@ def main():
         method, ident, params = message.get("method"), message.get("id"), message.get("params") or {}
         if method == "exit":
             break
-        if ident is None:
-            continue                  # a notification: SolidLSP reads files from disk
+        if ident is None:             # a notification: SolidLSP reads files from disk
+            uri = (params.get("textDocument") or {}).get("uri")
+            try:
+                if method == "textDocument/didOpen" and hold and server is not None and uri not in held:
+                    held[uri] = server.open_file(rel(params))
+                    held[uri].__enter__()
+                elif method == "textDocument/didClose" and uri in held:
+                    held.pop(uri).__exit__(None, None, None)
+            except Exception:
+                logging.exception("bridge: %s failed", method)
+                held.pop(uri, None)
+            continue
         try:
             if method == "initialize":
                 root = os.path.realpath(path_of(params.get("rootUri") or "") or params.get("rootPath") or os.getcwd())
-                settings = SolidLSPSettings(solidlsp_dir=os.path.join(data, "solidlsp"), project_data_path=os.path.join(data, "project"))
+                specific = json.loads(os.environ.get("SWAN_SOLIDLSP_SETTINGS") or "{}")
+                settings = SolidLSPSettings(solidlsp_dir=os.path.join(data, "solidlsp"), project_data_path=os.path.join(data, "project"),
+                                            ls_specific_settings=specific)
                 server = SolidLanguageServer.create(LanguageServerConfig(ls_id=LanguageServerId(language)), root, solidlsp_settings=settings)
                 server.start()
                 result = {"capabilities": {"textDocumentSync": 1, "documentSymbolProvider": True, "referencesProvider": True,
@@ -124,13 +161,23 @@ def main():
                           "serverInfo": {"name": "swan-solidlsp-bridge", "version": language}}
             elif method == "shutdown":
                 if server is not None:
+                    held.clear()
                     server.stop()
                     server = None
                 result = None
+            elif method == "textDocument/documentSymbol" and unopened:
+                assert server is not None
+                result = [as_document_symbol(s) for s in (server.server.send.document_symbol({"textDocument": params["textDocument"]}) or [])]
             elif method == "textDocument/documentSymbol":
                 result = [as_document_symbol(s) for s in server.request_document_symbols(rel(params)).root_symbols]
                 if language == "go":
                     name_go_receivers(result, path_of(params["textDocument"]["uri"]))
+            elif method in ("textDocument/references", "textDocument/definition", "textDocument/implementation") and unopened:
+                assert server is not None
+                raw = server.server.send
+                ask = {"textDocument/references": raw.references, "textDocument/definition": raw.definition,
+                       "textDocument/implementation": raw.implementation}[method]
+                result = locations(ask(params))
             elif method in ("textDocument/references", "textDocument/definition", "textDocument/implementation"):
                 ask = {"textDocument/references": server.request_references, "textDocument/definition": server.request_definition,
                        "textDocument/implementation": server.request_implementation}[method]

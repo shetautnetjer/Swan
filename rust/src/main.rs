@@ -201,9 +201,17 @@ fn main() {
         if !ok {
             exit(1);
         }
-    } else if cmd == b"syntax-index" && (n == 4 || (n == 6 && is(4, "--skip"))) {
-        let skip_go = n == 6 && is(5, "go");
-        if !syntax::syntax_index_main(&a[2], &a[3], skip_go) {
+    } else if cmd == b"syntax-index" && (n == 4 || (n == 6 && (is(4, "--skip") || is(4, "--skip-files")))) {
+        let skip_go = n == 6 && is(4, "--skip") && is(5, "go");
+        let mut skip = std::collections::HashSet::new();
+        if n == 6 && is(4, "--skip-files") {
+            let mut list = Vec::new();
+            if !sys::read_file(&a[5], &mut list) {
+                die(&[b"swan syntax-index: cannot read ", &a[5][..]].concat());
+            }
+            skip.extend(list.split(|&c| c == b'\n').filter(|p| !p.is_empty()).map(<[u8]>::to_vec));
+        }
+        if !syntax::syntax_index_main(&a[2], &a[3], skip_go, &skip) {
             exit(1);
         }
     } else if cmd == b"plan-python" && (n == 3 || n == 4) {

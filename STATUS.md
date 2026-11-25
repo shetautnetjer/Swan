@@ -2642,3 +2642,112 @@ Limits:
 - The Rust program now carries Apache-2.0 libraries; what a shipped binary
   must say of them (NOTICE) is for when it ships.
 - The suite in the microVM was not run: no Goose source changed.
+
+## 2026-11-25T09:04Z: Lua and PHP mapped through their language servers by the Rust program; shell and Ruby measured and left by name
+
+What was wrong: four languages had no compiler-grade map. Lua, shell and
+Ruby were matched by name (the syntax index) and PHP was only searched. On
+Penlight (117 Lua files) every one of 11,895 references was a name match;
+on Slim (125 PHP files) the map held no row at all.
+
+The owner, 2026-11-25: "ok keep going with the next languages".
+
+What changed (branch `rust-lsp-languages`, from `rust-stage-4`; the Rust
+program only, nothing that ships behaves differently):
+- `tools/modules.json`: a language entry may hold `"map_lsp"`, the servers
+  `swan lsp-index` starts for the map. Only the Rust program reads it; the
+  Goose program knows `"map"` and `"lsp"` and is unchanged (below). A
+  candidate's `"needs"` names the real server behind the bridge, so a
+  server not fetched is seen before a job is planned. Lua has one
+  (lua-language-server 3.19.2, already fetched) and PHP is a new entry
+  (PHPantom 1.1.0, MIT, a pinned fetch in `scripts/fetch-tools.sh`, group
+  `php`).
+- `rust/src/modules.rs`, `pipeline.rs`, `lspindex.rs`: which languages are
+  mapped this way and which files are theirs come from the entries (the
+  hard-coded list is gone). What a function declares inside it is not
+  mapped. When a language's server fails, or is not fetched, its files are
+  mapped by name in the same map and the report says so. A job's
+  fingerprint takes in its servers as written and the size of each file
+  they need. An implementation answer may name where a symbol starts
+  (PHPantom gives a class from its `class` keyword).
+- `tools/solidlsp/bridge.py`: SolidLSP's per-language settings from
+  `SWAN_SOLIDLSP_SETTINGS` (a server fetched ahead is named, nothing is
+  downloaded at map time); `SWAN_SOLIDLSP_HOLD_OPEN=1` keeps a file open
+  across questions (a map only); `SWAN_SOLIDLSP_UNOPENED=1` sends each
+  question as asked and opens no file. Without either it does what it did.
+- `rust/tests/lsp_languages.rs`, `fixtures/lsp-lua`, `fixtures/lsp-php`.
+- docs/languages-through-servers.md: each language's verdict, numbers,
+  traps, and the recipes that were not kept.
+
+| | Before | After |
+|---|---|---|
+| Penlight, Lua, 117 files | 0.2 s; 941 definitions, 11,895 references, all by name | 18.7 s; 6,026 definitions, 17,796 references, all from the server |
+| Slim, PHP, 125 files | 0.1 s; no rows | 1.2 s; 1,119 definitions, 4,387 references, 194 implements |
+| cobra, Go, 36 files | 4.8 s; 789 definitions, 5,920 references | the same, every table's hash but meta equal |
+
+- Lua, 20 sites read where the two maps disagree: the server right at 17,
+  the match by name at 3 (calls through a file-level alias, which the
+  server links to the alias). Mapping every symbol the server lists took
+  224 s; leaving out what functions declare inside them 84 s; holding files
+  open 18.7 s.
+- PHP, 28 references read in the source: 28 right. SolidLSP's launcher
+  sleeps 1 s before each references question (1,123 s on Slim); going
+  around it loses nothing: 1,116 of 1,119 definitions answer as in the slept
+  run, and the difference is five more references, each right.
+- Shell (bash-language-server, bats-core, 54 files): 8.2 s against 0.78 s,
+  and of 10 disagreements read the server was right at 5; every reference
+  only it had sat on another definition of the same name. Not kept: its
+  answers are name matches that would be stored as resolved.
+- Ruby (ruby-lsp, rack, 104 files): methods matched by name (of 81 method
+  names defined more than once, 74 got the same references for every
+  definition), 70 ms a question, no implementations. Not kept. Getting it
+  to run without the repo's code took four stops (the repo's Gemfile, the
+  repo's `ruby_lsp` add-ons, SolidLSP choosing `mise exec` or `bundle exec`
+  from the repo's files, RuboCop's `require`); each is in the doc with the
+  launcher that was measured. Solargraph answers by type and evaluates the
+  repo's gemspecs and Gemfile: not for a repo that is not trusted.
+
+How it was built: two worker agents at once, one building Lua and shell in
+the Rust program and one finding the PHP and Ruby recipes in a scratch
+folder; a third took shell back out, cut Lua's time and added PHP. The lead
+read every change, reran the numbers above, and changed one thing: the
+worker's bridge held files open for every caller, which would have had the
+Goose program's live Go answers come from a copy opened before an edit; it
+is now a setting only Lua's map entry gives. A second opinion on the
+`"map_lsp"` key came from the architect profile (it agreed, and named the
+test below).
+
+Checked on this tree: build with no warnings; `cargo test` 24 (2, 17 and
+5; 6 new; each new behaviour broken on purpose and seen to fail: `map_lsp`
+ignored, locals mapped, no fallback, the class-start match, the PHP sleep
+back, the fingerprint, a server not here); RustRover finds no errors in the
+changed Rust files. The Goose program with the old and the new
+`tools/modules.json` and bridge gives the same rows, by the hash of every
+table but meta, on fixtures tiny-lua, tiny-game, tiny-syntax, tiny-go and
+go-modules. Go and Goose rows from the Rust program are as before on
+tiny-go, tiny-goose and cobra. No server process is left after a map, on
+success or on failure, and a map writes nothing into the repo it maps.
+`scripts/port-map.sh`: 14 of 440 now differ, each in the report's text (an
+lsp-index line carries its counts; Lua and PHP are mapped), as meant.
+
+Limits:
+- Not judged against an IDE: PhpStorm (PHP) and GoLand (Go) each need the
+  trial repos' folder among their trusted locations, the owner's to add.
+  There is no JetBrains IDE for Lua here.
+- A Lua map costs about 2 ms a definition; one changed Lua file redoes the
+  language's whole job.
+- PHP calls through a type from a package resolve to nothing in a repo as
+  cloned (`vendor/` is filled by composer, the repo's package manager).
+  PHPantom answered one call on Slim differently from run to run.
+- Two things the Rust program now does differently from before for Go: a
+  Go file outside every module is mapped by name (it was not mapped), and a
+  Go server that fails leaves by-name rows and a line in the report, not a
+  failed map.
+- Found on the way, not mended here: `swan map` gives its sealed children
+  its whole environment. Inside the seal there is no network, but a child
+  can write what it reads into the map folder. HANDOFF.md has it.
+- The report's first line still says "(syntax only)" of Go and Lua.
+- The suite in the microVM: on this tree as it was before these records
+  and one later change to `scripts/fetch-tools.sh` that no check runs
+  (PHPantom is fetched in a dev checkout only): 58 + 322 checks, 0 failed,
+  56 Python tests OK. None is new; the new checks are the Rust tests above.

@@ -866,3 +866,38 @@ waited in HANDOFF.md for the language-server stage.
 **Not decided:** which languages move first; whether a language with a SCIP
 indexer also gets SolidLSP for its live answers. Both are asked of him in
 HANDOFF.md.
+
+## 2026-11-25T09:04Z — Lua and PHP are mapped through their language servers; shell and Ruby stay matched by name; a key of the Rust program's own in tools/modules.json
+
+**The owner's words, 2026-11-25:** "ok keep going with the next languages".
+The order had been put to him on 2026-11-23 and answered "anyways sure":
+the languages with no indexer that were only searched or matched by name
+(Ruby, PHP, Lua, shell), then live answers for the rest.
+
+**What the working agent decided from the measure (his to overrule):**
+- Lua (lua-language-server) and PHP (PHPantom) are kept. STATUS.md of this
+  hour has the numbers; docs/languages-through-servers.md has each
+  language's recipe and traps.
+- Shell is not kept: bash-language-server gives every occurrence of a name,
+  so a map from it would hold the syntax index's guesses, slower, stored as
+  resolved.
+- Ruby is not kept: ruby-lsp matches methods by name and takes 70 ms a
+  question on a 104-file repo; Solargraph answers by type and runs the
+  repo's code. Two ways on are written down and not started (the server's
+  symbols with references still by name; Solargraph for a trusted repo).
+- A language is given to the Rust program's map by a new key, `"map_lsp"`,
+  not by `"map": "lsp"`: the Goose program reads that file too, would
+  double a language's rows (its syntax index leaves out only Go) and would
+  move its live answers onto the bridge untested. The architect profile was
+  asked and agreed; the test it named (the Goose program with the old and
+  the new file gives the same rows) was run on five fixtures and held.
+- For PHP the bridge goes around SolidLSP's own request path (its launcher
+  sleeps 1 s before each question). SolidLSP still starts, configures and
+  stops the server.
+
+**A departure from what was written, said plainly:** the handoff said each
+language is "measured against its JetBrains IDE before it is kept". PHP is
+kept on this branch on its fixture and 28 references read in the source;
+PhpStorm cannot open the trial repos until the owner adds their folder to
+its trusted locations. There is no JetBrains IDE for Lua here. The PhpStorm
+comparison is owed before this branch merges.
