@@ -4,6 +4,8 @@
 // of that file (linters, formatters, test runners) comes with the commands
 // that use it.
 
+use std::time::Duration;
+
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
@@ -94,6 +96,19 @@ pub fn map_entries(home: &[u8]) -> Vec<(String, Entry)> {
         .collect()
 }
 
+// The language whose "match" holds a file (its path from the repo), with its
+// entry, from the tools/modules.json of this Swan; None when no language does.
+pub fn language_of(rel: &[u8]) -> Result<Option<(String, Entry)>, Vec<u8>> {
+    let mods = read_modules(&swan_home())?;
+    for (lang, v) in mods.iter().filter(|(lang, _)| !lang.starts_with('_')) {
+        let e = entry_of(lang, v)?;
+        if e.holds(rel) {
+            return Ok(Some((lang.clone(), e)));
+        }
+    }
+    Ok(None)
+}
+
 // One language's entry, from the tools/modules.json of this Swan.
 pub fn map_entry(lang: &[u8]) -> Result<Entry, Vec<u8>> {
     let name = String::from_utf8_lossy(lang);
@@ -125,6 +140,21 @@ pub struct ServerSpec {
     pub init: Value,
     /// It runs inside eggshell (lsp.rs).
     pub sealed: bool,
+    /// How it says it has had its say about a file (live.rs).
+    pub settle: Settle,
+}
+
+/// How a live server says it is done with a file: the candidate's "settle"
+/// and "quiet_ms". live.rs carries each rule and its reason.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Settle {
+    /// The file's next published set. quiet: for a server that publishes
+    /// nothing for a clean file, the silence that means none.
+    Publish { quiet: Option<Duration> },
+    /// Asked for (textDocument/diagnostic) once the server is ready.
+    Pull,
+    /// rust-analyzer: the check a save starts, then the set that follows.
+    Check,
 }
 
 // One "lsp" or "map_lsp" entry as written. The first whose conditions hold
@@ -151,6 +181,18 @@ struct Candidate {
     /// (the real server behind the SolidLSP bridge).
     #[serde(default)]
     needs: Vec<String>,
+    // Not in the map's fingerprint (map_text): only live answers read them.
+    #[serde(default, skip_serializing)]
+    settle: Option<String>,
+    #[serde(default, skip_serializing)]
+    quiet_ms: Option<u64>,
+}
+
+// What a server is chosen for, which names it in a refusal.
+#[derive(Clone, Copy)]
+enum Use {
+    Map,
+    Live,
 }
 
 // What the placeholders stand for (src/modules.goose, ModCtx and expand).
@@ -196,16 +238,28 @@ fn put(text: &mut Vec<u8>, from: &[u8], to: impl FnOnce() -> Vec<u8>) {
 }
 
 impl Entry {
-    // The server that maps lang here, chosen as src/live.goose chooses a
-    // live one: the first candidate whose conditions hold, where one that
-    // runs the repo's code holds only for a trusted repo. Err says why there
-    // is none.
+    // The server that maps lang here (its "map_lsp" or "lsp" candidates).
     pub fn map_server(&self, walk: &Walk, repo: &[u8], out: &[u8], lang: &[u8]) -> Result<ServerSpec, Vec<u8>> {
+        self.server(self.map_candidates(), Use::Map, walk, repo, out, lang)
+    }
+
+    // The server that answers live questions about lang here (its "lsp" candidates).
+    pub fn live_server(&self, walk: &Walk, repo: &[u8], out: &[u8], lang: &[u8]) -> Result<ServerSpec, Vec<u8>> {
+        self.server(&self.lsp, Use::Live, walk, repo, out, lang)
+    }
+
+    // The first candidate whose conditions hold, where one that runs the
+    // repo's code holds only for a trusted repo, ready to start. Err says
+    // why there is none.
+    fn server(&self, cands: &[Candidate], purpose: Use, walk: &Walk, repo: &[u8], out: &[u8], lang: &[u8]) -> Result<ServerSpec, Vec<u8>> {
         let home = swan_home();
         let lang_name = String::from_utf8_lossy(lang);
-        let cands = self.map_candidates();
         if cands.is_empty() {
-            return Err(format!("tools/modules.json names no server to map {lang_name} with").into_bytes());
+            return Err(match purpose {
+                Use::Map => format!("tools/modules.json names no server to map {lang_name} with"),
+                Use::Live => format!("no live server for {lang_name} in tools/modules.json"),
+            }
+            .into_bytes());
         }
         let trusted = build_trusted(repo);
         let mut l = detect(walk, repo);
@@ -236,7 +290,11 @@ impl Entry {
             let why = if !trusted && cands.iter().any(|c| c.runs_repo_code) {
                 untrusted_note(format!(" the {lang_name} language server").as_bytes(), repo)
             } else {
-                format!("no server to map {lang_name} with applies here").into_bytes()
+                match purpose {
+                    Use::Map => format!("no server to map {lang_name} with applies here"),
+                    Use::Live => format!("no live server for {lang_name} applies here"),
+                }
+                .into_bytes()
             };
             return Err(why);
         };
@@ -245,6 +303,14 @@ impl Entry {
         }
         let init_text = c.init.as_deref().map_or_else(|| b"{}".to_vec(), |s| places.expand(s));
         let init = serde_json::from_slice(&init_text).map_err(|e| format!("tools/modules.json, {lang_name}: its init is not JSON once filled in: {e}").into_bytes())?;
+        let settle = match c.settle.as_deref() {
+            None | Some("publish") => Settle::Publish { quiet: c.quiet_ms.filter(|&ms| ms > 0).map(Duration::from_millis) },
+            Some("pull") => Settle::Pull,
+            Some("check") => Settle::Check,
+            // The map never waits for a settle: a word it does not know is a live refusal only.
+            Some(_) if matches!(purpose, Use::Map) => Settle::Publish { quiet: None },
+            Some(other) => return Err(format!("tools/modules.json, {lang_name}: settle \"{other}\" is not publish, pull or check").into_bytes()),
+        };
         let mut env = base;
         env.extend(c.env.iter().map(|s| places.expand(s)));
         Ok(ServerSpec {
@@ -253,6 +319,7 @@ impl Entry {
             language_id: c.language_id.clone().unwrap_or_else(|| lang_name.to_string()),
             init,
             sealed: c.sealed,
+            settle,
         })
     }
 }

@@ -6,7 +6,13 @@
 // stops reading can hold this process: every failure is an LspError. The
 // server runs in a process group of its own, killed when the client is shut
 // down or dropped, so nothing it started outlives the command.
+//
+// What the server says unasked (published diagnostics, work-done progress,
+// its status) is kept in one state, Heard, by whichever wait reads the
+// message: request(), which waits for its answer, or wait_until(), which
+// waits for the state to hold a condition.
 
+use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::fmt;
 use std::fs::{File, OpenOptions};
@@ -47,8 +53,88 @@ impl fmt::Display for LspError {
     }
 }
 
+/// What the server has said unasked, as of the last message read.
+pub struct Heard {
+    /// Per file (the path its URI names, decoded), the last set of
+    /// diagnostics the server published for it.
+    pub published: HashMap<Vec<u8>, Published>,
+    /// How many sets it has published.
+    pub publishes: u64,
+    /// Work-done progress begun and not ended: token, title.
+    pub working: HashMap<String, String>,
+    /// How many times work under each token has ended.
+    pub ended: HashMap<String, u64>,
+    /// What experimental/serverStatus (rust-analyzer's) last said of
+    /// quiescent; None while the server has said nothing of it.
+    pub quiescent: Option<bool>,
+    /// And what it last said of its health ("ok", "warning", "error") and
+    /// why.
+    pub status: Option<Status>,
+    /// When the server last sent anything.
+    pub last_heard: Instant,
+}
+
+pub struct Status {
+    pub health: String,
+    pub message: String,
+}
+
+pub struct Published {
+    /// Which set this was, counting the session's publishes from 1.
+    pub seq: u64,
+    /// The version of the text it is for, when the server says.
+    pub version: Option<i64>,
+    /// As the server sent them.
+    pub diagnostics: Vec<Value>,
+}
+
+impl Heard {
+    fn new() -> Heard {
+        Heard { published: HashMap::new(), publishes: 0, working: HashMap::new(), ended: HashMap::new(), quiescent: None, status: None, last_heard: Instant::now() }
+    }
+
+    fn take(&mut self, n: Notification) {
+        let p = &n.params;
+        match n.method.as_str() {
+            "textDocument/publishDiagnostics" => {
+                let Some(uri) = p.get("uri").and_then(Value::as_str) else { return };
+                self.publishes += 1;
+                let diagnostics = p.get("diagnostics").and_then(Value::as_array).cloned().unwrap_or_default();
+                self.published.insert(uri_path(uri), Published { seq: self.publishes, version: p.get("version").and_then(Value::as_i64), diagnostics });
+            }
+            "$/progress" => {
+                let token = match p.get("token") {
+                    Some(Value::String(s)) => s.clone(),
+                    Some(other) => other.to_string(),
+                    None => return,
+                };
+                let value = p.get("value");
+                match value.and_then(|v| v.get("kind")).and_then(Value::as_str) {
+                    Some("begin") => {
+                        let title = value.and_then(|v| v.get("title")).and_then(Value::as_str).unwrap_or_default();
+                        self.working.insert(token, title.to_string());
+                    }
+                    Some("end") => {
+                        self.working.remove(&token);
+                        *self.ended.entry(token).or_insert(0) += 1;
+                    }
+                    _ => {}
+                }
+            }
+            "experimental/serverStatus" => {
+                let said = |k: &str| p.get(k).and_then(Value::as_str).unwrap_or_default().to_string();
+                self.quiescent = p.get("quiescent").and_then(Value::as_bool);
+                self.status = Some(Status { health: said("health"), message: said("message") });
+            }
+            _ => {}
+        }
+    }
+}
+
 pub struct Client {
     child: Child,
+    /// In the server's process group: kills it once this process has ended.
+    watcher: Option<Child>,
     /// The server's process group, until it is killed.
     group: Option<i32>,
     /// To the writer thread; None once the server's input is closed.
@@ -60,6 +146,7 @@ pub struct Client {
     settings: Value,
     root_uri: String,
     log: File,
+    heard: Heard,
 }
 
 impl Client {
@@ -124,7 +211,8 @@ impl Client {
             }
         });
         let root_uri = file_uri(workspace);
-        let mut client = Client { child, group: Some(group), input: Some(input), output, next_id: 1, settings: spec.init.clone(), root_uri, log };
+        let watcher = watch(group);
+        let mut client = Client { child, watcher, group: Some(group), input: Some(input), output, next_id: 1, settings: spec.init.clone(), root_uri, log, heard: Heard::new() };
         let init = json!({
             "processId": null,
             "rootUri": client.root_uri,
@@ -173,15 +261,54 @@ impl Client {
                 return Err(LspError::Timeout(method.to_string()));
             }
             match self.output.recv_timeout(left) {
-                Ok(Message::Response(r)) if r.id == mine => {
-                    return r.response_result.map_err(|e| LspError::Server { code: e.code, message: e.message });
-                }
-                Ok(Message::Request(asked)) => self.answer(asked)?,
-                // Notifications, and late answers to questions given up on.
-                Ok(_) | Err(RecvTimeoutError::Timeout) => {}
+                Ok(m) => match self.read(m)? {
+                    Some(r) if r.id == mine => return r.response_result.map_err(|e| LspError::Server { code: e.code, message: e.message }),
+                    // A late answer to a question given up on.
+                    _ => {}
+                },
+                Err(RecvTimeoutError::Timeout) => {}
                 Err(RecvTimeoutError::Disconnected) => return Err(LspError::Closed),
             }
         }
+    }
+
+    /// Reads what the server sends until done holds of what it has said, or
+    /// the deadline passes: Ok(true) when it held, Ok(false) at the deadline.
+    /// done is asked again at least every 50 ms, so a condition on silence
+    /// (how long since last_heard) is seen when it starts to hold.
+    pub fn wait_until(&mut self, deadline: Instant, mut done: impl FnMut(&Heard) -> bool) -> Result<bool, LspError> {
+        loop {
+            if done(&self.heard) {
+                return Ok(true);
+            }
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return Ok(false);
+            }
+            match self.output.recv_timeout(left.min(Duration::from_millis(50))) {
+                Ok(m) => {
+                    self.read(m)?;
+                }
+                Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => return Err(LspError::Closed),
+            }
+        }
+    }
+
+    pub fn heard(&self) -> &Heard {
+        &self.heard
+    }
+
+    // One message from the server: what it asks is answered, what it says is
+    // kept, an answer is handed back.
+    fn read(&mut self, m: Message) -> Result<Option<Response>, LspError> {
+        self.heard.last_heard = Instant::now();
+        match m {
+            Message::Response(r) => return Ok(Some(r)),
+            Message::Request(asked) => self.answer(asked)?,
+            Message::Notification(n) => self.heard.take(n),
+        }
+        Ok(None)
     }
 
     pub fn notify(&mut self, method: &str, params: Value) -> Result<(), LspError> {
@@ -189,11 +316,17 @@ impl Client {
     }
 
     /// Asks the server to shut down and exit, then stops it.
-    pub fn shutdown(mut self) {
+    pub fn shutdown(self) {
+        self.shutdown_within(Duration::from_secs(5));
+    }
+
+    /// The same, giving the server up to t to answer and as long again (at
+    /// most 3 s) to exit.
+    pub fn shutdown_within(mut self, t: Duration) {
         // A server that does not take part is killed all the same.
-        let _ = self.request("shutdown", Value::Null, Duration::from_secs(5));
+        let _ = self.request("shutdown", Value::Null, t);
         let _ = self.notify("exit", Value::Null);
-        self.stop(Duration::from_secs(3));
+        self.stop(t.min(Duration::from_secs(3)));
     }
 
     // workspace/configuration is answered from the settings, item by item;
@@ -230,7 +363,23 @@ impl Client {
         }
         unsafe { libc::kill(-group, libc::SIGKILL) };
         let _ = self.child.wait();
+        if let Some(mut w) = self.watcher.take() {
+            let _ = w.wait();
+        }
     }
+}
+
+// A watcher in the server's process group: a shell waiting to read its input,
+// whose other end only this process holds. Once this process has ended,
+// however it ended (a hook kills swan broke with SIGKILL at its timeout, and
+// no Drop runs then), that end is closed and the watcher kills the group:
+// the server and what it started. A sealed server's group is eggshell's
+// unshare, whose --kill-child takes the whole seal with it.
+fn watch(group: i32) -> Option<Child> {
+    let kill = "read _; kill -KILL -- \"-$1\"";
+    let mut cmd = Command::new("/bin/sh");
+    cmd.args(["-c", kill, "swan-watcher", &group.to_string()]).stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::null()).process_group(group);
+    cmd.spawn().ok()
 }
 
 impl Drop for Client {
@@ -257,6 +406,28 @@ fn configuration(settings: &Value, params: &Value) -> Value {
     Value::Array(items.iter().map(one).collect())
 }
 
+/// The path a file:// URI names, percent-decoded: servers encode a URI each
+/// their own way, so it is compared decoded.
+pub fn uri_path(uri: &str) -> Vec<u8> {
+    let rest = uri.strip_prefix("file://").unwrap_or(uri).as_bytes();
+    let mut path = Vec::with_capacity(rest.len());
+    let mut i = 0;
+    while i < rest.len() {
+        let hex = rest.get(i + 1..i + 3).and_then(|h| std::str::from_utf8(h).ok()).and_then(|h| u8::from_str_radix(h, 16).ok());
+        match (rest[i], hex) {
+            (b'%', Some(v)) => {
+                path.push(v);
+                i += 3;
+            }
+            (c, _) => {
+                path.push(c);
+                i += 1;
+            }
+        }
+    }
+    path
+}
+
 pub fn file_uri(path: &[u8]) -> String {
     let mut u = String::from("file://");
     push_encoded(&mut u, path);
@@ -281,7 +452,8 @@ mod tests {
     use std::os::unix::ffi::OsStringExt;
 
     fn fake(script: &str) -> ServerSpec {
-        ServerSpec { cmd: vec![b"/bin/sh".to_vec(), b"-c".to_vec(), script.as_bytes().to_vec()], env: Vec::new(), language_id: "go".to_string(), init: json!({}), sealed: false }
+        let cmd = vec![b"/bin/sh".to_vec(), b"-c".to_vec(), script.as_bytes().to_vec()];
+        ServerSpec { cmd, env: Vec::new(), language_id: "go".to_string(), init: json!({}), sealed: false, settle: crate::modules::Settle::Pull }
     }
 
     fn scratch(name: &str) -> Vec<u8> {

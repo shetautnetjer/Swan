@@ -8,6 +8,7 @@
 // stages). A command whose stage is not carried over yet says so and exits
 // with NOT_CARRIED, so a comparison can tell "not yet" from "wrong".
 
+mod broke;
 mod change;
 mod db;
 mod diag;
@@ -18,6 +19,7 @@ mod gradle;
 mod graph;
 mod index;
 mod json;
+mod live;
 mod lsp;
 mod lspindex;
 mod modules;
@@ -50,12 +52,12 @@ const USAGE: &str = "\
 usage: swan map <repo> <out-dir> [--clean]  index or refresh; --clean bypasses all cached output
        swan doctor [--profile core|python-typescript] [--json]
        swan check <repo> <out-dir>      run compilers and linters into the map
-       swan broke <out-dir> <file>...   errors new in these files since last asked (exit 1 if any)
+       swan broke <out-dir> <file>...   errors new in these files since last asked (exit 1 if any; 3 if none but a file could not be asked)
        swan trust <repo>                let map, check and live answers run the repo's build files
        swan gradle-tasks <repo>         the Gradle tasks map would give scip-java (runs nothing)
        swan cargo-projects <repo>       the cargo projects map would run rust-analyzer in, with its settings (runs nothing)
        swan lsp-index <repo> <out-dir> <lang> <target.scip> [--within <folder>]   a SCIP index from the language's server (what swan map runs); --within: only that folder of the repo, the server started in it
-       swan lsp-ask <repo> <out-dir> <file> <method> [line col] [more]   one question to the file's language server
+       swan lsp-ask <repo> <out-dir> <file> <method> [line col] [more]   one question to the file's language server; line and col from 1, in the server's units (UTF-16 code units unless it says otherwise); more: members for the params, as JSON
        swan format <repo> <out-dir> <file>...
        swan test <repo> <out-dir> <name_path|file> [relative_path]
        swan index <flattened-dir> <db> [repo-root]
@@ -262,13 +264,29 @@ fn main() {
     } else if cmd == b"check" && n == 4 {
         not_carried(cmd, 6);
     } else if cmd == b"broke" && n >= 4 {
-        not_carried(cmd, 6);
+        exit(broke::broke_main(&a[2], &a[3..]));
     } else if cmd == b"lsp-index" && (n == 6 || (n == 8 && is(6, "--within"))) {
         if !lspindex::lsp_index_main(&abs_path(&a[2]), &abs_path(&a[3]), &a[4], &a[5], if n == 8 { &a[7] } else { b"" }) {
             exit(1);
         }
-    } else if cmd == b"lsp-ask" && n >= 6 {
-        not_carried(cmd, 5);
+    } else if cmd == b"lsp-ask" && (6..=9).contains(&n) {
+        let Ok(method) = std::str::from_utf8(&a[5]) else { usage() };
+        let from_1 = |s: &[u8]| parse_int(s).filter(|&v| v >= 1 && v <= u32::MAX as i64).map(|v| v as u32);
+        let place = match n {
+            8 | 9 => match (from_1(&a[6]), from_1(&a[7])) {
+                (Some(line), Some(col)) => Some((line, col)),
+                _ => usage(),
+            },
+            _ => None,
+        };
+        let more: &[u8] = match n {
+            7 => &a[6],
+            9 => &a[8],
+            _ => b"",
+        };
+        if !live::lsp_ask_main(&a[2], &a[3], &a[4], method, place, more) {
+            exit(1);
+        }
     } else if cmd == b"format" && n >= 5 {
         not_carried(cmd, 6);
     } else if cmd == b"test" && n >= 5 {

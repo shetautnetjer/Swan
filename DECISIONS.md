@@ -901,3 +901,45 @@ kept on this branch on its fixture and 28 references read in the source;
 PhpStorm cannot open the trial repos until the owner adds their folder to
 its trusted locations. There is no JetBrains IDE for Lua here. The PhpStorm
 comparison is owed before this branch merges.
+
+## 2026-11-25T12:15Z — Live answers in the Rust program: the same server entries, one process per command, and "no errors" only from a server that could have seen the file
+
+**The owner's words, 2026-11-25:** "continue", after "ok keep going with
+the next languages". The first item of the handoff's order (PHP beside
+PhpStorm, Go beside GoLand) waits on him, so the second was taken: live
+answers.
+
+**What the working agent decided (his to overrule):**
+- The Rust program takes a language's live server from the `"lsp"` entries
+  of tools/modules.json as they are, the ones the program that ships uses.
+  Not every server goes behind SolidLSP: the bridge answers seven requests
+  and reads from disk, and last week each SolidLSP launcher cost a sleep or
+  a download that had to be gone around. Whether a server is direct or
+  behind the bridge stays the entry's own data. The architect profile was
+  asked and agreed.
+- Telling a server that a file changed (so one server can answer after
+  every edit) is not built yet. No command could reach it and a scripted
+  server would not prove it. A second question about a changed file is
+  refused instead. It is built with the server that stays running, with a
+  real server's test.
+- PHP gets no live entry on this branch. The architect read the bridge and
+  showed its diagnostics path opens the file. Its own branch, the bridge
+  first.
+- `swan broke` exits 3 when it found nothing new but could not ask about a
+  file. The shipped command exits 0 there. The hook reads the JSON, not the
+  exit code, so it is not affected.
+- The seen file keeps the shipped format. It does not record which server
+  entry answered, so trusting a repo between two asks can show errors as
+  new that only the other entry reports. Accepted.
+- One time budget for a command, 100 s, under the hook's 120 s.
+- For Rust: when rust-analyzer says its health is not ok, the errors it
+  reports are passed on and an answer with no error is "not settled". The
+  health field decides, not the words of its message. A first rule that
+  matched the words "cargo check failed to start" missed the cold case.
+- A wait made for one server that could not be run here (the Kotlin
+  server's import) was not written blind.
+
+**For the owner:** the program that ships has the fault this work found
+(a Rust check that does not run reads as "nothing new"), and its hook is
+silent when a file cannot be asked. Neither is changed. HANDOFF.md,
+"Decisions waiting", has both.

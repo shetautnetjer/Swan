@@ -30,7 +30,7 @@ use scip::types::symbol_information::Kind;
 use scip::types::{Document, Index, Metadata, Occurrence, ProtocolVersion, Relationship, SymbolInformation, TextEncoding, ToolInfo};
 use serde_json::{json, Value};
 
-use crate::lsp::{Client, LspError};
+use crate::lsp::{uri_path, Client, LspError};
 use crate::modules::{map_entry, Entry};
 use crate::syntax::{sx_basename, sx_cut, sx_dirname, sx_ident, sx_ns};
 use crate::sys;
@@ -384,22 +384,8 @@ fn line_of(text: &[u8], n: usize) -> &[u8] {
 // The repo-relative path a file:// URI names, percent-decoded; None when it
 // is not inside the repo.
 fn repo_path(uri: &str, repo: &[u8]) -> Option<Vec<u8>> {
-    let rest = uri.strip_prefix("file://")?.as_bytes();
-    let mut path = Vec::with_capacity(rest.len());
-    let mut i = 0;
-    while i < rest.len() {
-        let hex = rest.get(i + 1..i + 3).and_then(|h| std::str::from_utf8(h).ok()).and_then(|h| u8::from_str_radix(h, 16).ok());
-        match (rest[i], hex) {
-            (b'%', Some(v)) => {
-                path.push(v);
-                i += 3;
-            }
-            (c, _) => {
-                path.push(c);
-                i += 1;
-            }
-        }
-    }
+    uri.strip_prefix("file://")?;
+    let path = uri_path(uri);
     let inside = path.len() > repo.len() + 1 && path.starts_with(repo) && path[repo.len()] == b'/';
     inside.then(|| path[repo.len() + 1..].to_vec())
 }

@@ -404,6 +404,7 @@ folders are.
 | 2026-11-23T14:15Z | `swan map` whole in Rust (src/pipeline.goose to its end): the jobs started and waited for (`spawn_job`, `wait_any`), what each took or how it failed, the records, the flattener, the store, rows moved after cosmetic edits (`shift_cosmetic`, `mark_edited`), the crates with no rows, the end of the report. `scripts/port-map.sh` compares whole maps: 440 of 440 the same, where 32 were made to their end before. Agent-Reach mapped sealed by both: every table's hash the same but `meta`. relate mapped by the Rust program in 38 s, its Go folder apart. A new map the Rust `index` left locked, found and mended (below). The same day, on the owner's word: no longer line by line, no provers, and then no more matching of the Goose program (DECISIONS.md). |
 | 2026-11-23T15:00Z | `swan lsp-index` in Rust: `lsp.rs` (a synchronous client on `lsp-server` and `lsp-types`), `lspindex.rs` (SCIP written with the `scip` crate), a language's server read from tools/modules.json in `modules.rs`. Not copied from `lsp/golsp.goose`. cobra: the same rows as the Goose program's map, 4.7 s against 7.1 s. relate mapped whole. `port-map.sh` 440 of 440 with no Goose program behind the Rust one; `SWAN_PORT_GOOSE` is gone. Built by a worker agent with RustRover's MCP server; the crates chosen from a survey of the same day. |
 | 2026-11-25T09:04Z | Languages through their servers (branch `rust-lsp-languages`). `"map_lsp"` in tools/modules.json, read by the Rust program only: Lua (lua-language-server) and PHP (PHPantom 1.1.0) are mapped by `swan lsp-index` through SolidLSP. Penlight: 17,796 references from the server in 18.7 s, where 11,895 were name matches. Slim: 1,119 definitions and 4,387 references in 1.2 s, where there were none. Shell and Ruby were measured and left with the syntax index. A language's files fall back to their by-name rows when its server fails. docs/languages-through-servers.md has the verdicts and the recipes. |
+| 2026-11-25T12:15Z | Live answers (branch `rust-live-answers`). `swan lsp-ask` and `swan broke` in Rust, one process each, on the Rust client, from the `"lsp"` entries as they are: the client keeps what a server says unasked, `live.rs` holds one server and the three settles, one time budget per command under the hook's 120 s. Through the real hook on five trial repos and this repo's own Rust, the same words as the program that ships, in the same seconds or fewer (Go 0.9 s where it takes 3.3 s). A server no longer outlives a swan killed with SIGKILL. Found: both programs said "nothing new" for a Rust file whose check did not run; the Rust program now says "not settled" with rust-analyzer's words. No server stays running yet, PHP has no live entry, and Java, Kotlin and C# were not run. |
 
 ## What exists in Rust to build on (surveyed 2026-11-23T14:33Z)
 
@@ -811,6 +812,8 @@ why the bridge stays); and sealing a repo so its code does not run unasked.
   into /tmp).
 
 ## Next
+
+**As of 2026-11-25T12:15Z.** `swan lsp-ask` and `swan broke` are in Rust (HANDOFF.md, "The work, in order", says what is left of live answers: the server that stays running, PHP, and the three languages not run).
 
 **As of 2026-11-25T09:04Z.** Items 1 to 3 of the list below are done for Go, Lua and
 PHP; shell and Ruby were measured and left with the syntax index

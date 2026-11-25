@@ -2751,3 +2751,118 @@ Limits:
   and one later change to `scripts/fetch-tools.sh` that no check runs
   (PHPantom is fetched in a dev checkout only): 58 + 322 checks, 0 failed,
   56 Python tests OK. None is new; the new checks are the Rust tests above.
+
+## 2026-11-25T12:15Z: `swan lsp-ask` and `swan broke` in the Rust program; a Rust check that did not run is no longer a clean answer
+
+What was wrong: the Rust program had no live answers. `swan lsp-ask` (one
+question to a file's language server) and `swan broke` (the errors new in
+a file since last asked, which the post-edit hook runs) each ended with
+exit 70. And, found on the way, in the program that ships: when the Rust
+compiler check cannot run, `swan broke` says "nothing new". On a copy of
+this repo's `rust/` folder whose build script fails, a planted type error
+was answered asked, nothing new, exit 0.
+
+The owner, 2026-11-25: "continue" (after "ok keep going with the next
+languages"). The two IDE judges still wait on him, so this is the next
+piece in the handoff's order.
+
+What changed (branch `rust-live-answers`, from `rust-lsp-languages`; the
+Rust program only: no file outside `rust/` and README.md, so nothing that
+ships behaves differently):
+- `rust/src/lsp.rs`: the client keeps what a server says unasked
+  (published diagnostics, work in progress, its status) in one state that
+  every wait feeds. A watcher in the server's process group kills the group
+  when swan itself is killed: the hook kills `swan broke` with SIGKILL at
+  its timeout, and no cleanup runs then.
+- `rust/src/modules.rs`: a server's `settle` as a type (publish, with or
+  without a quiet spell; pull; check), and the live server chosen from a
+  language's `"lsp"` entries by the same rule as the map's (trust, needs,
+  conditions). tools/modules.json is as it was.
+- `rust/src/live.rs` (new): one running server for one language of one
+  repo. The file on disk is the truth: read, sent once, asked. One time
+  budget per command (100 s, `SWAN_LIVE_BUDGET_MS`), under the hook's 120 s.
+  A path that leaves the repo, a missing file and a file that is not UTF-8
+  are refused before a server starts. A settle that does not happen is "not
+  settled", never an empty answer.
+- `rust/src/broke.rs` (new): the shipped command's JSON keys and its
+  `broke-seen.tsv`, so the hook and a map folder work with either program.
+  On purpose it differs in four things: one server per language in turn; a
+  file that could not be asked says why and keeps its remembered lines; the
+  seen file is written under a lock; exit 3 when nothing new was found but
+  a file could not be asked (the shipped program exits 0 there).
+- Rust files: with rust-analyzer saying its health is not ok, the errors it
+  reports are passed on and "no errors" is not given as an answer.
+- `rust/tests/live.rs` with a scripted server (`rust/tests/fake_lsp.py`),
+  and `rust/tests/live_servers.rs` with the real ones.
+
+Seconds for one ask through the real hook, on a scratch copy, each program
+with its own sealed map: the clean file first, then after one planted
+error. The hook's words were the same from both programs in all ten cases.
+
+| | The program that ships | The Rust program |
+|---|---|---|
+| cobra, Go (sealed, through SolidLSP) | 5.8, then 3.3 | 3.4, then 0.9 |
+| Penlight, Lua | 2.0, then 1.9 | 1.9, then 1.8 |
+| Agent-Reach, Python | 0.7, then 0.7 | 0.7, then 0.7 |
+| Understand-Anything, TypeScript | 0.8, then 0.8 | 0.8, then 0.8 |
+| rea, TypeScript, 154 MB | 6.0, then 6.0 | 6.1, then 6.0 |
+| this repo's Rust, trusted, building | 22.7 cold, then 2.5 | 22.7 cold, then 2.5 |
+| this repo's Rust, its build script failing | asked, nothing new, exit 0: wrong | not asked, exit 3, with rust-analyzer's own words |
+
+- Go is faster because the shipped client waits 3 s after start before it
+  asks any server that is pulled (a rule made for the Kotlin server).
+- relate (Rust, not trusted): both programs refuse with the same note and
+  start nothing.
+- swan killed with SIGKILL in the middle of a question: Go's six processes
+  (sealed), TypeScript's five, Lua's two and Python's two were gone a second
+  later. Before the watcher a cold Rust check left cargo and a build script
+  running, and Go's bridge left four processes.
+- The map is as it was: Penlight 17.6 s before and 17.5 s after with the
+  same counts, Slim 1.1 s with the same counts.
+- On fixture copies by hand, the same three checks (a clean file, a planted
+  error, a definition in another file): clangd 0.4 s, the three shader
+  languages 3.6 s each, Goose 0.6 s.
+
+What the real servers showed that the shipped client's rules did not
+expect: the TypeScript server starts loading its project 9 ms after a file
+is opened and answers a question asked before that from no project (the
+shipped program is right only because it waits 2 s anyway); rust-analyzer
+runs its check once its workspace is loaded, saved or not; gopls puts its
+children in a session of their own, which only the seal's own process
+namespace reaches.
+
+How it was built: one worker agent built it from a shape the lead named;
+the architect profile was asked first and cut three things (PHP's live
+entry, telling a server of a changed file, and waits that cannot be run
+here). The lead read every line, reran every number above with a probe of
+its own (`swan-broke-probe` in the owner's tools folder), and that probe is
+what found the false "nothing new" for Rust. The worker then found the
+cold case behind it.
+
+Checked on this tree: build with no warnings; `cargo test` 46 (2, 18, 15,
+6 and 5), 22 of them new, each new behaviour broken on purpose and seen to
+fail; RustRover reports no errors in the eight changed files and resolves a
+call from broke.rs into live.rs. The suite in the microVM was not run: it
+judges the Goose program, and this change touches nothing that program
+reads or runs.
+
+Limits:
+- The program that ships still gives the false "nothing new" for a Rust
+  check that did not run. It is not changed here.
+- The hook prints only new errors, so "could not ask" reaches an agent as
+  silence, the same as "nothing new".
+- No server is kept running, and a server is never told that a file
+  changed: each command is one process. A second question about a file that
+  changed on disk is refused. This comes with the MCP server.
+- Java, Kotlin and C# were not run. Java's entry has a placeholder nobody
+  fills in, so its live server is refused; the Kotlin server's wait for its
+  import is not carried.
+- PHP has no live server: the bridge's diagnostics path opens the file,
+  which PHPantom's setting exists to avoid. Its own branch.
+- Line and column go to the server as given, in its own units (UTF-16).
+- One budget for a command: a silent server uses up the time of the
+  languages after it.
+- With rust-analyzer not healthy for a reason that does no harm, a clean
+  Rust file is answered "not settled" every time.
+- A live server runs sealed only when its entry says so, as in the program
+  that ships: the Python, TypeScript, C, Lua and shader servers do not.
