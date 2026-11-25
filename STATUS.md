@@ -2862,6 +2862,8 @@ Limits:
 - Line and column go to the server as given, in its own units (UTF-16).
 - One budget for a command: a silent server uses up the time of the
   languages after it.
+- That a pulled server is asked only once it is ready was shown on the
+  scripted server alone: Go's bridge reports no progress.
 - With rust-analyzer not healthy for a reason that does no harm, a clean
   Rust file is answered "not settled" every time.
 - A live server runs sealed only when its entry says so, as in the program

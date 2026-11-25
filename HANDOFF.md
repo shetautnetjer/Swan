@@ -171,6 +171,10 @@ Known and small, for whoever is next in these files:
   before the column.
 - One budget per command: a silent server uses up the time of the languages
   asked after it.
+- That a pulled server is asked only once it is ready (silent for a moment,
+  no work in progress) was shown on the scripted server alone: Go's bridge
+  reports no progress. rust-analyzer's health was only ever seen as "ok" or
+  "warning"; "error" is treated as any health that is not ok.
 - What didOpen calls a JavaScript file (`javascript`, not the entry's
   `typescript`) is a rule in `live.rs`, not data: the data file is shared
   with the program that ships.
