@@ -816,3 +816,24 @@ recommendation was yes.
 **Second opinion:** the Hermes `architect` profile chose once per file
 over the other two, and asked for classes of reason instead of the raw
 text, so that wording does not make a note come again.
+
+## 2026-11-26T07:05Z — Callers the index cannot resolve: a second, marked list in get_callers
+
+**The owner's word:** asked whether `get_callers` should add a list of
+callers matched by syntax, taken from Spread-Wings and marked as such, he
+said: "i follow your recommendations, using antigravity swarm abilities to
+attack and fix places you need". The recommendation was yes.
+
+**Decided (mine, his to overrule):** a separate key, never merged into
+`callers` and never counted in `summary`; each site says how
+Spread-Wings tied it; at most 50 with the full count; "checked": false
+with the reason when Spread-Wings could not be asked, never an empty list;
+distance 1 only; no switch to turn it off.
+
+**Why a list and not a count that points at `what_touches`:** a second
+call is the one an agent skips, at the moment it is judging what a change
+breaks.
+
+**Second opinion:** the Hermes `architect` profile said the same shape,
+and named what not to build: distance beyond 1, any ranking or score, a
+switch per language.

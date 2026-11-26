@@ -35,7 +35,7 @@ rest of this page describes the Goose program. The bar, the stages and the log a
 | You want to know | Swan tool | How fast |
 | --- | --- | --- |
 | Where is this defined, and who uses it? | `find_symbol`, `find_referencing_symbols` | a few ms |
-| What breaks if I change this, and which tests cover it? | `get_callers`, `run_tests` | about 10 ms |
+| What breaks if I change this, and which tests cover it? | `get_callers`, `run_tests` | about 70 ms (under 1 ms for the exact callers; the rest is Spread-Wings bringing its graph up to date for `possible_callers`) |
 | What implements this interface or trait? | `find_implementations`, `get_type_hierarchy` | a few ms |
 | What errors does this file have right now, after my edit? | `get_diagnostics` with `live` | 0.4 to 0.9 s |
 | Every place that looks like `$X.unwrap()`, and rewrite them all | `search_pattern`, `rewrite_pattern` | 0.14 s over 2,361 files |
@@ -162,7 +162,7 @@ only that whole path. Lines and columns in answers are 1-based.
 | `find_referencing_symbols` | `name_path`, `relative_path?`, `max_results?` | per matched symbol, every reference: file, line, column, the symbol it sits inside, and its line of source |
 | `get_symbols_overview` | `relative_path` (file or directory) | every symbol defined there, in order |
 | `get_symbol_at` | `relative_path`, `line`, `column` | what a position refers to: definition, signature, docs, the symbol around it (JetBrains' quick documentation) |
-| `get_callers` | `name_path`, `relative_path?`, `depth?` (1 to 5), `max_results?` | who calls or uses the symbol (import lines left out), and who uses those: the impact radius, with each caller's distance, whether it is test code and its `call_sites` (exact file and line of each use, including uses inside anonymous callbacks and top-level code), and a summary of affected symbols, files and test files |
+| `get_callers` | `name_path`, `relative_path?`, `depth?` (1 to 5), `max_results?` | who calls or uses the symbol (import lines left out), and who uses those: the impact radius, with each caller's distance, whether it is test code and its `call_sites` (exact file and line of each use, including uses inside anonymous callbacks and top-level code), and a summary of affected symbols, files and test files; plus a separate `possible_callers` list (distance 1 only, never merged into `callers` or `summary`) of call sites Spread-Wings ties by syntax that the compiler index does not cover (up to 50 sites with `total` and each site's `how`, omitted when none, or `checked: false` and `why` if Spread-Wings is unavailable or fails) |
 | `get_callees` | `name_path`, `relative_path?`, `calls_only?`, `max_results?` | what the symbol's body uses, with counts (`calls_only` keeps functions, methods, constructors, macros and classes); dependency symbols show their package and version |
 | `find_implementations` | `name_path`, `relative_path?`, `max_results?`, `live?` | what implements, extends or overrides it, with distance; `live` asks the configured language server, subject to that server's capabilities |
 | `get_type_hierarchy` | `name_path`, `relative_path?`, `depth?`, `max_results?` | supertypes and subtypes, from SCIP relationships |

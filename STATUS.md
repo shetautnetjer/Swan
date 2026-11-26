@@ -2123,6 +2123,70 @@ Limits:
 - This entry is one commit after the tree that was tested; that commit
   changes STATUS.md and DECISIONS.md only.
 
+## 2026-11-26T07:05Z: `get_callers` also names the callers the compiler index could not resolve
+
+What was wrong: `get_callers` answered from the compiler index alone, and
+a call the indexer could not resolve was missing with nothing to say so.
+On a two-file Python fixture, `paths.ensure()` inside
+`def untyped(paths, args)` (no type on the parameter) is not in the map,
+beside the same call in `def typed(paths: Paths, args)`, which is:
+`get_callers` of `Paths/ensure` listed one caller of two. It was found
+by asking Swan, Spread-Wings and a hosted code graph who calls thirty
+functions of a private repo: the other two named a caller Swan lacked.
+
+What changed: the answer gains a separate list, `possible_callers`, for
+distance 1. It holds the call sites Spread-Wings ties to the definition by
+syntax that the exact answer does not have and that the index does not
+resolve to another symbol, each with `how` it was tied (Spread-Wings'
+own resolution; `by_name` means any definition of that name could be the
+one called), at most 50 with the full count in `total`. It is never
+merged into `callers` or counted in `summary`. The key is left out
+when there is nothing; when Spread-Wings cannot be asked it reads
+`{"checked": false, "why": ...}`. The read snapshot is released before
+Spread-Wings runs. The tool's description, the README's row and the
+swan-code-check skill say the same.
+
+| | before | after |
+|---|---|---|
+| the fixture, callers of `Paths/ensure` | `typed` | `typed`; possible_callers: pkg/cli.py line 5, in `untyped`, how `imported_file` |
+| a private repo, 903 functions asked | no such list | 21 functions gained one, 33 sites in all |
+| one answer on that repo, median | under 1 ms | 67 ms (95 in 100 under 75 ms; the first one 486 ms, while the graph is made) |
+
+The 33 sites, read in the source: 30 are calls of that function (calls
+from test files that are outside the TypeScript project, through a
+dynamic import, through a table of functions, on an untyped parameter,
+and the one this started with); 3 are `tree.validate(...)` matched by
+name alone, which the list says of them.
+
+Checked:
+- Five new checks in the lang suite: the fixture's two targets, a symbol
+  with nothing by syntax (no key), and Spread-Wings missing.
+- `scripts/space-test.sh` in the microVM on `8ddfe79`: 58 checks
+  passed, 0 failed; the cosmetic, layer and piece checks passed; 56 Python
+  tests OK; 327 checks passed, 0 failed (322 before). Exit 0.
+- By hand with this build and the build from before: the table.
+  `swan query <db> callers` on the command line answers as before,
+  without the list.
+
+How it was made: an Antigravity swarm (`agy-task --swarm`) wrote the
+change in a copy, from a brief; the measure on the private repo and the
+reading of its 33 sites were done outside the swarm.
+
+Limits:
+- Every `get_callers` now starts Spread-Wings, sealed, to bring its
+  graph up to date: about 60 ms more an answer on these repos. By the
+  swarm's own timing on the fixture most of it is starting the seal (36
+  ms) and a 20 ms sleep while waiting for the child; that was not measured
+  again, and nothing was done about it.
+- Distance 1 only. A test file that appears only in `possible_callers`
+  is not among `summary.test_files`.
+- A call written over several lines could be listed though the index has
+  it on another line: sites are compared by file and line. None was seen
+  among the 33.
+- Measured on Python and TypeScript. Not judged by an IDE.
+- This entry is one commit after the tree that was tested; that commit
+  changes STATUS.md and DECISIONS.md only.
+
 ## 2026-11-26T07:15Z: three points of the automated review taken into the hook
 
 The Graphify review of this pull request listed nine possible faults it
