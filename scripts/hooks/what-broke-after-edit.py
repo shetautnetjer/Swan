@@ -3,8 +3,14 @@
 
 Reads the hook's JSON on stdin, takes the edited file, finds the Swan map
 that covers it and runs `swan broke`. New errors go to stderr with exit 2,
-which Claude Code shows to the agent; otherwise it is silent (exit 0). It
-never blocks an edit, and does nothing for files no map covers.
+which Claude Code shows to the agent. When a file has a configured language
+server that could not check it (untrusted repo build, server did not settle,
+or server failed), the hook says so once per file and reason: as PostToolUse
+`additionalContext` JSON on stdout (exit 0) when there are no new errors, or
+after the error lines on stderr (exit 2) when there are. Files with no live
+server (`no_server`), repeated notices, older Swan output without a reason,
+clean edits, and files no map covers stay silent (exit 0). It never blocks an
+edit.
 
 settings.json:
   {"hooks": {"PostToolUse": [{"matcher": "Edit|Write|MultiEdit",
@@ -13,6 +19,12 @@ settings.json:
 SWAN_BIN and SWAN_MAPS override the swan binary and the maps folder.
 """
 import json, os, sqlite3, subprocess, sys
+
+REASON_TEXT = {
+    "untrusted": "checks that run this repo's build are off for it by its owner's choice.",
+    "unsettled": "its language server did not settle in time.",
+    "failed": "its language server did not answer.",
+}
 
 def main():
     try: event = json.load(sys.stdin)
@@ -40,12 +52,27 @@ def main():
         r = subprocess.run([swan, "broke", best, path], capture_output=True, text=True, timeout=120)
         answer = json.loads(r.stdout)
     except Exception: return 0
-    lines = []
+    if not isinstance(answer, dict): return 0
+    lines, notes = [], []
     for f in answer.get("files", []):
         for e in f.get("new_errors", []):
             lines.append(f"{f['relative_path']}:{e['line']}:{e['col']}: {e['message'].splitlines()[0]}")
-    if not lines: return 0
-    print("Swan: this edit introduced " + ("an error" if len(lines) == 1 else f"{len(lines)} errors") + " the language server did not report before:\n" + "\n".join(lines), file=sys.stderr)
+        if f.get("asked") is False and f.get("first_time") is True:
+            reason = f.get("reason")
+            if isinstance(reason, str) and reason and reason != "no_server":
+                # A reason this hook does not know is named as given, when it is a plain word.
+                said = REASON_TEXT.get(reason) or (f'the reason given is "{reason}".' if reason.replace("_", "").isalnum() and len(reason) <= 24 else "no reason this hook knows was given.")
+                notes.append(f"Swan did not check {f['relative_path']}: {said}")
+    if notes:
+        notes.append("Errors in a file Swan did not check will not be reported here; verify those another way." if lines
+                     else "Errors from this edit will not be reported here; verify another way.")
+    if not lines:
+        if not notes: return 0
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": "\n".join(notes)}}))
+        return 0
+    msg = "Swan: this edit introduced " + ("an error" if len(lines) == 1 else f"{len(lines)} errors") + " the language server did not report before:\n" + "\n".join(lines)
+    if notes: msg += "\n" + "\n".join(notes)
+    print(msg, file=sys.stderr)
     return 2
 
 sys.exit(main())
