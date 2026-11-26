@@ -203,20 +203,38 @@ fn rust_check_that_did_not_run_is_not_clean() {
     let line = lib.lines().count() + 1;
     fs::write(copy.join("src/lib.rs"), format!("{lib}fn copied<T: Copy>(_: T) {{}} pub fn broken() {{ copied(String::new()) }}\n")).unwrap();
     let map_arg = map.to_str().unwrap();
-    for (ask, said) in [("cold", "Failed to run build scripts"), ("warm", "cargo check failed to start")] {
+    for (ask, said, first) in [("cold", "Failed to run build scripts", true), ("warm", "cargo check failed to start", false)] {
         let (code, refused) = swan(&home, &["broke", map_arg, "src/lib.rs"], true);
         let f = &refused["files"][0];
-        assert!(code == 3 && f["asked"] == false && f["why"].as_str().is_some_and(|w| w.starts_with("not settled: ") && w.contains(said)), "{ask}: {refused}");
-        assert!(!map.join("broke-seen.tsv").exists(), "{ask}: a file not asked was remembered");
+        assert!(code == 3 && f["asked"] == false && f["reason"] == "unsettled" && f["first_time"] == first && f["why"].as_str().is_some_and(|w| w.starts_with("not settled: ") && w.contains(said)), "{ask}: {refused}");
+        assert_eq!(fs::read_to_string(map.join("broke-seen.tsv")).unwrap(), "src/lib.rs\tnot-asked|unsettled|\n", "{ask}");
     }
     fs::remove_file(copy.join("build.rs")).unwrap();
     let (code, planted) = swan(&home, &["broke", map_arg, "src/lib.rs"], true);
     let news = planted["files"][0]["new_errors"].as_array().cloned().unwrap_or_default();
     assert!(code == 1 && news.iter().any(|e| e["line"] == line), "no error on line {line}: {planted}");
+    let seen = fs::read_to_string(map.join("broke-seen.tsv")).unwrap();
+    assert!(!seen.contains("not-asked"), "not-asked line stayed: {seen}");
     let until = Instant::now() + Duration::from_secs(5);
     while !left_running(&[&home, &copy]).is_empty() && Instant::now() < until {
         std::thread::sleep(Duration::from_millis(100));
     }
     assert_eq!(left_running(&[&home, &copy]), Vec::<String>::new(), "processes left");
+    let _ = fs::remove_dir_all(home.parent().unwrap());
+}
+
+// rust-analyzer's check runs the crate's build: without trust the file is
+// not asked, and that is said once and kept as one line. No server is
+// started for it.
+#[test]
+fn rust_not_trusted_is_said_once() {
+    let (home, copy, map) = setup("tiny-rs", "rust-not-trusted");
+    for first in [true, false] {
+        let (code, r) = swan(&home, &["broke", map.to_str().unwrap(), "src/lib.rs"], false);
+        let f = &r["files"][0];
+        assert!(code == 3 && f["asked"] == false && f["reason"] == "untrusted" && f["first_time"] == first, "{r}");
+        assert_eq!(fs::read_to_string(map.join("broke-seen.tsv")).unwrap_or_default(), "src/lib.rs\tnot-asked|untrusted|\n");
+    }
+    assert_eq!(left_running(&[&home, &copy]), Vec::<String>::new());
     let _ = fs::remove_dir_all(home.parent().unwrap());
 }
