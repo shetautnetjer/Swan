@@ -2967,3 +2967,61 @@ Limits:
   answer. One Hermes profile starts an older copy of Swan from another
   folder, which this does not reach.
 - The remote and local branches of the three pull requests were left.
+
+## 2026-11-26T08:40Z: the Rust `swan broke` says why a file was not checked, once
+
+What was wrong: since #80 the program that ships gives a file it could not
+ask a `reason` and a `first_time`, and the post-edit hook says so once.
+The Rust `swan broke` gave only `why`, so with it the hook said nothing:
+on the trial clone of relate (Rust, sealed, not trusted) main's hook was
+silent on both of its runs.
+
+What changed (rust/src/modules.rs, live.rs, broke.rs): a refusal is typed
+where it is made. `modules.rs` says which kind of "no server" it is
+(`Refused`), `live.rs` gives a `Refusal` with one of four reasons
+(`no_server`, `untrusted`, `unsettled`, `failed`), and `broke.rs`
+reports the reason, `first_time`, and keeps one
+`file<TAB>not-asked|reason|` line in broke-seen.tsv under its lock, by
+the rules of `src/broke.goose`. `swan lsp-ask` answers word for word as
+before. Nothing outside `rust/` changed.
+
+| main's hook on relate, one .rs file | the build before | this build |
+|---|---|---|
+| first run | nothing | "Swan did not check extensions/relate-dungeon/src/lib.rs: checks that run this repo's build are off for it by its owner's choice. …" |
+| second run, an error added | nothing | nothing |
+| `swan broke` | not asked, exit 3 | not asked, exit 3 |
+| left running; the clone | nothing; unchanged | nothing; unchanged |
+
+Checked:
+- `cargo test`: 55 pass (47 before: 2, 18, 23, 7 and 5), no warnings,
+  with the real language servers (none skipped).
+- New, against the scripted server: 7 tests, and 4 changed. On the code
+  from before, 10 of those 23 fail. The two that pin what must not be
+  remembered were seen to fail by the swarm with that rule broken.
+- New, with the real rust-analyzer: a crate that is not trusted is
+  `untrusted`, said once; a check that did not run is `unsettled`, said
+  on the cold ask and not on the warm one. Both fail on the code from
+  before.
+- The microVM suite was not run: it judges the Goose program, and nothing
+  it reads or runs changed.
+
+How it was made: from a written plan
+(docs/superpowers/plans/2026-11-26-rust-broke-reasons.md), by one
+Antigravity swarm (`agy-task --swarm`, 21 minutes, 171 thousand tokens by
+its count) in a copy holding the plan, the spec's files of main and the
+tree-sitter sources the build needs. Its code went in as it wrote it. The
+last test of the plan was rewritten by hand after the swarm named three
+faults in it (it left its folder behind, looked for leftovers in the wrong
+places, and did not check the seen file). The real-server tests and the
+measure were run outside the swarm, whose copy has no servers.
+
+Limits:
+- Not remembered, so not said by the hook: a file outside the repo, a file
+  that is not UTF-8 text, a name holding a tab. The Goose program
+  remembers any name given from the repo's top.
+- A language whose candidates include one that runs the repo's code reads
+  `untrusted` in a repo that is not trusted, also when that candidate
+  would not have applied for another reason. The words were already so.
+- No test runs the hook with the Rust program; HANDOFF.md says why.
+- `lsp::tests::a_silent_server_times_out_and_is_killed` did not pass in
+  the swarm's sandbox (a child not reaped there); it passes here.

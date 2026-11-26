@@ -1,6 +1,6 @@
-# Handoff: Swan in Rust (branch `rust-live-answers`, on `rust-lsp-languages`, on `rust-stage-4`)
+# Handoff: Swan in Rust (branch `rust-broke-reasons`, on `rust-live-answers`, on `rust-lsp-languages`, on `rust-stage-4`)
 
-Written 2026-11-20T07:25Z; stage 2 part rewritten 2026-11-20T16:21Z, stage 3 part 2026-11-20T23:51Z and again 2026-11-22T06:15Z, when stage 3 was finished; stage 4 part 2026-11-22T06:50Z, 2026-11-22T07:26Z 2026-11-22T16:46Z, 2026-11-22T18:18Z and 2026-11-22T18:45Z, when the prover had run on TypeScript's chunks and every job of a map was planned in Rust. For the next session, any agent. **Start at "Next action".** The end of the map, and the owner's two changes of direction: 2026-11-23T14:15Z. `lsp-index` in Rust: 2026-11-23T15:00Z. The languages mapped through their servers: 2026-11-25T09:04Z. Live answers (`lsp-ask`, `broke`): 2026-11-25T12:15Z. Three fixes to the program that ships, and the check rule corrected: 2026-11-26T07:08Z; merged and installed: 2026-11-26T07:35Z.
+Written 2026-11-20T07:25Z; stage 2 part rewritten 2026-11-20T16:21Z, stage 3 part 2026-11-20T23:51Z and again 2026-11-22T06:15Z, when stage 3 was finished; stage 4 part 2026-11-22T06:50Z, 2026-11-22T07:26Z 2026-11-22T16:46Z, 2026-11-22T18:18Z and 2026-11-22T18:45Z, when the prover had run on TypeScript's chunks and every job of a map was planned in Rust. For the next session, any agent. **Start at "Next action".** The end of the map, and the owner's two changes of direction: 2026-11-23T14:15Z. `lsp-index` in Rust: 2026-11-23T15:00Z. The languages mapped through their servers: 2026-11-25T09:04Z. Live answers (`lsp-ask`, `broke`): 2026-11-25T12:15Z. Three fixes to the program that ships, and the check rule corrected: 2026-11-26T07:08Z; merged and installed: 2026-11-26T07:35Z. The Rust `broke`'s reasons, and the order agreed to a Rust Swan agents can use: 2026-11-26T08:40Z.
 
 ## The task
 Swan in Rust, on the owner's word. Until 2026-11-23 it was carried over
@@ -26,7 +26,7 @@ The stages as they were drawn, what was judged and how are in
 | Stage 3, syntax | Done and on main (#78, merged 2026-11-22 on the owner's word): the trees, `query pattern`, `syntax-index`, `stamp-bench` and `stamp-worker`. STATUS.md has the counts |
 | Stage 4, the map | Done on branch `rust-stage-4` (from main, pushed; no pull request): `scip-python-patch`, `scip-typescript-patch`, `trust`, `doctor`, and the whole of `swan map`: it plans, starts and waits for the indexers, flattens, stores, moves rows after cosmetic edits and ends its report. `scripts/port-map.sh`: 440 of 440 whole maps the same as the Goose program's. Its `lsp-index` child is in Rust too since 2026-11-23T15:00Z (below). Not in Rust: `map_held`, and what `src/wings.goose` and `src/seal.goose` hold that a map does not use |
 | Languages through servers | Done on branch `rust-lsp-languages` (from `rust-stage-4`, pushed; no pull request): Lua and PHP are mapped by `swan lsp-index` through SolidLSP, each from a `"map_lsp"` entry in tools/modules.json that only the Rust program reads; shell and Ruby were measured and left with the syntax index. docs/languages-through-servers.md has each verdict; STATUS.md, 2026-11-25, the numbers |
-| Live answers | Done on branch `rust-live-answers` (from `rust-lsp-languages`, pushed; no pull request): `swan lsp-ask` and `swan broke`, one process each, on the Rust client, from the `"lsp"` entries of tools/modules.json as they are. Go, Lua, Python, TypeScript and Rust were run against their real servers and beside the program that ships; C, the shader languages and Goose by hand; Java, Kotlin and C# not at all. STATUS.md, 2026-11-25T12:15Z, has the numbers |
+| Live answers | Done on branch `rust-live-answers` (from `rust-lsp-languages`, pushed; no pull request): `swan lsp-ask` and `swan broke`, one process each, on the Rust client, from the `"lsp"` entries of tools/modules.json as they are. Go, Lua, Python, TypeScript and Rust were run against their real servers and beside the program that ships; C, the shader languages and Goose by hand; Java, Kotlin and C# not at all. STATUS.md, 2026-11-25T12:15Z, has the numbers. On branch `rust-broke-reasons` since 2026-11-26T08:40Z: `broke` gives a file not asked a `reason` and `first_time`, and keeps one line for it, as the program that ships does |
 | What is left | A server that stays running and is told of edits (with the MCP server), checking and editing, the MCP server, the build and the suite. Every command of theirs exits 70 and names the stage it was drawn in |
 
 ## What passed, and how to see it again
@@ -66,13 +66,38 @@ still match the source? nothing is built) and break numbers (only those).
 The check suites judge the Goose program: the Rust program cannot run them
 before stage 8.
 
-## Next action: the two IDE judges; then the server that stays running (a new branch from `rust-live-answers`)
+## Next action: the Rust onto main, then `swan serve` in Rust; the two IDE judges when PhpStorm and GoLand trust the trial folder
 
 The owner, 2026-11-23: "i wouldn't try to match goose, i would try to
 create your own solutions using jetbrains and serena styles and what lsp
 scip exist this is why i also keep mentioning just having a stable way by
 using solidlsp just like serena". And on 2026-11-25: "ok keep going with
 the next languages", and later that day "continue".
+
+### The order the owner agreed to, 2026-11-26
+
+Asked what stands between today and "stable working rust code that gives
+agents ide awareness", he was given six steps and said "ok do this"
+(DECISIONS.md, 2026-11-26T08:40Z). An Antigravity swarm writes each from a written
+plan (docs/superpowers/plans/), and the lead checks it outside the swarm.
+1. The hook's reasons in the Rust `swan broke`. **Done** on branch
+   `rust-broke-reasons` (STATUS.md, 2026-11-26T08:40Z).
+2. **The Rust onto main.** Merge main into `rust-stage-4` and up the
+   stack (it is three commits behind: #79, #80, #81), the owner starts
+   `/code-review ultra` on the top branch (he starts it; it is billed),
+   its findings are answered, then four pull requests, the lowest first,
+   each on his word.
+3. **`swan serve` in Rust, the tools that read first** (find, references,
+   callers with `possible_callers`, overview, diagnostics, what_broke).
+   The suite's 58 checks of the server speak to it over its protocol: try
+   them against the Rust server as its judge before writing a new one.
+4. The server that stays running and is told of edits ("The work, in
+   order", item 2).
+5. The tools that edit and check.
+6. Ship it: the installer packages the Rust program; the Goose one goes
+   when the suite passes against the Rust one.
+The IDE judges below (PHP, Go) are done beside these when the two IDEs
+trust the trial folder; they hold up step 2 only for `rust-lsp-languages`.
 
 ### What is there to build on
 - SolidLSP (src/solidlsp of oraios/serena, pinned in
@@ -169,13 +194,13 @@ Known and small, for whoever is next in these files:
   goose-lsp#7. There the hook's note for it reads "its language server did
   not settle in time" (the reason is `unsettled`): true to the answer,
   short of the cause, which `why` has.
-- **The Rust `swan broke` does not yet say what #80 made the Goose one
-  say**: a `reason` for a file not asked (`no_server`, `untrusted`,
-  `unsettled`, `failed`), `first_time`, and the
-  `file<TAB>not-asked|reason|` line in broke-seen.tsv. The hook stays
-  silent for an answer without `reason`. Carry it before this program
-  replaces that one; src/broke.goose on #80's branch is the model, and the
-  not-asked path here must then take the lock and write.
+- The Rust `swan broke` remembers no refusal, and gives no
+  `first_time`, for a file outside the repo, a file that is not UTF-8
+  text, or a name holding a tab: the hook stays silent for those. The
+  Goose program remembers any name given from the repo's top.
+- No test here runs the hook with the Rust program: the hook that reads
+  `reason` is main's, and this stack is behind main. It was run by hand
+  (STATUS.md, 2026-11-26T08:40Z); the test comes when main is merged in.
 - `swan broke` and `lsp-ask` pass line and column as given, in the
   server's units (UTF-16); nothing was tried with a character outside ASCII
   before the column.
@@ -280,6 +305,12 @@ porting", has the call.
   - This stack (`rust-stage-4`, `rust-lsp-languages`, this branch) is
     three commits behind main. Main is merged into the lowest when its
     pull request is opened.
+- 2026-11-26: he started PhpStorm, GoLand, DataSpell and DataGrip and
+  turned on brave mode for their MCP servers. None was running when looked
+  at, and the trusted locations of PhpStorm and GoLand still hold no trial
+  folder: the command is his. Brave mode changes nothing here; only the
+  tools that read are used.
+- `rust-broke-reasons` is the fourth branch on the stack.
 - A pull request for `rust-live-answers`: it is the third on the stack
   (`rust-stage-4`, `rust-lsp-languages`, this). Each is opened when he
   asks, the lowest first.

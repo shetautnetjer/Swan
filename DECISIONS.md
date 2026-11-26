@@ -973,3 +973,33 @@ here and a check with it in the live suite (#79) guard it.
 #80, #81): "i follow your recommendations, using antigravity swarm
 abilities to attack and fix places you need", 2026-11-26. Each pull
 request's DECISIONS.md entry has what was decided in it.
+
+## 2026-11-26T08:40Z — The order to a Rust Swan that agents can use
+
+**The owner's words:** "we need to have stable working rust code that
+gives agents ide awareness", asking what stands in the way. Given six
+steps, he said "ok do this".
+
+**What stands in the way (as told to him):** the Rust program has no
+server for agents (all 28 tools are the Goose program's); 9,193 lines of
+its Rust are on three branches, not on main, not built or installed; two
+programs mean each fix twice; the early stages match the Goose program
+byte for byte and the later ones do not; it still runs helpers the Goose
+build makes; and nothing tests it the way an agent uses it.
+
+**The order:** 1. the hook's reasons in the Rust `swan broke`; 2. the
+Rust onto main, after a `/code-review ultra` he starts; 3. `swan serve`
+in Rust, the tools that read first; 4. the server that stays running; 5.
+the tools that edit and check; 6. ship it and retire the Goose program
+when the suite passes against the Rust one. Each of 2 to 6 gets its own
+written plan.
+
+**How it is built (his word, 2026-11-26: "using antigravity swarm
+abilities"):** an Antigravity swarm writes each change from the plan; the
+lead reads it, builds it, measures and tests it outside the swarm, and
+writes the records.
+
+**Mine, his to overrule:** the read tools come before the editing ones,
+because an agent can switch to the Rust server for looking while it still
+edits through the Goose one; and the suite's own server checks are tried
+as the judge before any new judge is written.
