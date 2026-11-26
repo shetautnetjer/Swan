@@ -3236,3 +3236,32 @@ Limits:
 - No test runs the hook with the Rust program; HANDOFF.md says why.
 - `lsp::tests::a_silent_server_times_out_and_is_killed` did not pass in
   the swarm's sandbox (a child not reaped there); it passes here.
+
+## 2026-11-26T10:55Z: the Rust stack brought up to main
+
+The four Rust branches were three commits behind main (#79, #80, #81).
+Main was merged into `rust-stage-4`, and each branch into the one above it,
+up to `rust-broke-reasons`. Merges, not rebases: nothing was force-pushed.
+
+- Only STATUS.md and DECISIONS.md conflicted, as a dry run had shown. Both
+  sides had only added dated entries at the end; every entry was kept, in
+  the order of its heading's UTC stamp.
+- The `lsp` and `wings` pins are main's (`2daeb2c`, `049fe53`).
+
+| Branch | Merge |
+|---|---|
+| `rust-stage-4` | `5f7ae14` |
+| `rust-lsp-languages` | `8214cda` |
+| `rust-live-answers` | `eb66fac` |
+| `rust-broke-reasons` | `b0d9f47` (no conflict left) |
+
+Checked on `rust-broke-reasons` at `b0d9f47`:
+- `cargo test --release`: 55 passed, no warnings (as before the merge).
+- The whole suite in the microVM: 58 + 333 checks and 66 Python tests,
+  0 failed. Main's own counts.
+
+Not done: a test that runs main's hook against the Rust `swan broke`. The
+suite runs the Goose `bin/swan` in the microVM, so it waits for the Rust
+binary to be there (step 3's first task). The plan for step 3 is
+docs/superpowers/plans/2026-11-26-rust-serve-read-tools.md, for the owner
+to read before any swarm starts.

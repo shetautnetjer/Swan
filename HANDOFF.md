@@ -82,8 +82,8 @@ agents ide awareness", he was given six steps and said "ok do this"
 plan (docs/superpowers/plans/), and the lead checks it outside the swarm.
 1. The hook's reasons in the Rust `swan broke`. **Done** on branch
    `rust-broke-reasons` (STATUS.md, 2026-11-26T08:40Z).
-2. **The Rust onto main.** Merge main into `rust-stage-4` and up the
-   stack (it is three commits behind: #79, #80, #81), the owner starts
+2. **The Rust onto main.** Main is merged into `rust-stage-4` and up the
+   stack (STATUS.md, 2026-11-26T10:55Z: no branch is behind main). The owner starts
    `/code-review ultra` on the top branch (he starts it; it is billed),
    its findings are answered, then four pull requests, the lowest first,
    each on his word.
@@ -198,9 +198,10 @@ Known and small, for whoever is next in these files:
   `first_time`, for a file outside the repo, a file that is not UTF-8
   text, or a name holding a tab: the hook stays silent for those. The
   Goose program remembers any name given from the repo's top.
-- No test here runs the hook with the Rust program: the hook that reads
-  `reason` is main's, and this stack is behind main. It was run by hand
-  (STATUS.md, 2026-11-26T08:40Z); the test comes when main is merged in.
+- No test here runs the hook with the Rust program. Main's hook is in the
+  tree since 2026-11-26T10:55Z, but the suite runs in the microVM with the
+  Goose `bin/swan`, so such a test needs the Rust binary there first (step 3,
+  `SWAN_SERVE_BIN`). It was run by hand (STATUS.md, 2026-11-26T08:40Z).
 - `swan broke` and `lsp-ask` pass line and column as given, in the
   server's units (UTF-16); nothing was tried with a character outside ASCII
   before the column.
@@ -302,9 +303,8 @@ porting", has the call.
   - One Hermes profile starts an older copy of Swan from a tools folder
     in the home directory (a checkout from before #72, with its own maps),
     not the installed one. The update does not reach it.
-  - This stack (`rust-stage-4`, `rust-lsp-languages`, this branch) is
-    three commits behind main. Main is merged into the lowest when its
-    pull request is opened.
+  - This stack (`rust-stage-4`, `rust-lsp-languages`, `rust-live-answers`,
+    this branch) holds main since 2026-11-26T10:55Z (merged, not rebased).
 - 2026-11-26: he started PhpStorm, GoLand, DataSpell and DataGrip and
   turned on brave mode for their MCP servers. None was running when looked
   at, and the trusted locations of PhpStorm and GoLand still hold no trial
