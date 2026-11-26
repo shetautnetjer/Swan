@@ -42,7 +42,7 @@ fn usage() {
         usage: swan map <repo> <out-dir> [--clean]  index or refresh; --clean bypasses all cached output
                swan doctor [--profile core|python-typescript] [--json]
                swan check <repo> <out-dir>      run compilers and linters into the map
-               swan broke <out-dir> <file>...   errors new in these files since last asked (exit 1 if any)
+               swan broke <out-dir> <file>...   errors new in these files since last asked (exit 1 if any, 3 if a file was not asked)
                swan trust <repo>                let map, check and live answers run the repo's build files
                swan gradle-tasks <repo>         the Gradle tasks map would give scip-java (runs nothing)
                swan cargo-projects <repo>       the cargo projects map would run rust-analyzer in, with its settings (runs nothing)
@@ -206,11 +206,12 @@ fn main() {
             else if starts_with(a[k], str(root, "/")) { format(files, a[k][root.len + 1..], "\n"); }
         }
         var report: u8[>..] = [];
-        let n = what_broke(db, a[2], files, report);
+        let n, asked, unasked = what_broke(db, a[2], files, report);
         live_stop();
         close_db(db);
         print(report);
         if n > 0 { exit(1); }
+        if unasked > 0 { exit(3); }
     } else if a[1] == "lsp-index" && (a.len == 6 || (a.len == 8 && a[6] == "--within")) {
         if !lsp_index_main(abs_path(a[2]), abs_path(a[3]), a[4], a[5], if a.len == 8 { a[7] } else { "" }) { exit(1); }
     } else if a[1] == "lsp-ask" && a.len >= 6 {

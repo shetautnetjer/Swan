@@ -2869,6 +2869,190 @@ Limits:
 - A live server runs sealed only when its entry says so, as in the program
   that ships: the Python, TypeScript, C, Lua and shader servers do not.
 
+## 2026-11-26T07:04Z: a Rust check that did not run is no longer a clean answer
+
+What was wrong: live diagnostics for Rust settle on rust-analyzer's check.
+When the check does not run, the server ends its progress and publishes
+nothing, and the answer was "no errors". On a copy of fixtures/tiny-rs with
+a build.rs that exits 1 and a type error added to src/lib.rs (trusted: our
+own fixture), `swan broke` said `"asked":true` with nothing new, before
+and after the error was added. The post-edit hook passed that on as
+silence.
+
+What changed: the client library (`lsp/`, goose-lsp branch
+`check-health`, `2daeb2c`) keeps the health and message of
+`experimental/serverStatus`. Once a check has settled, a status that says
+the check did not run, with no error in the file's set, answers
+`not settled:` in the server's words; errors that were found are still
+returned. "Did not run" is rust-analyzer's own two sentences for it: "cargo
+check failed to start" and "Failed to run build scripts". Nothing in
+`src/` changed: a refused answer already read `"asked":false`.
+
+| `swan broke` on the crate | before | after |
+|---|---|---|
+| build.rs exits 1, type error added | asked, nothing new | not asked: "not settled: Failed to run build scripts of some packages. …cargo check failed to start…" |
+| healthy | asked, nothing new | the same |
+| healthy, type error added | the error on line 61, new, exit 1 | the same |
+
+What the microVM found: the rule first built was "any health other than
+ok". In the VM rust-analyzer warns that the standard library's sources are
+not installed ("has sysroot errors"), cargo check runs all the same, and
+the two live checks that expect a clean file failed (322 passed, 2
+failed). The rule became the two sentences; that warning does not refuse.
+
+Checked:
+- goose-lsp's own test: 27 answers, 4 of them new. On the client from
+  before, the first new case fails (`{'ok': True, 'diagnostics': []}`);
+  with any warning refusing, the second does.
+- A new check in the live suite maps the crate with the failing build.rs
+  and expects the refusal, and one more that the server is stopped.
+- `scripts/space-test.sh` in the microVM on `fc7c210`: 58 checks
+  passed, 0 failed; the cosmetic, layer and piece checks passed; 56 Python
+  tests OK; 324 checks passed, 0 failed (322 before). Exit 0.
+
+How it was made: an Antigravity swarm (`agy-task --swarm`) wrote the
+change in a copy, from a brief. The rule was corrected by hand after the
+microVM run, and every number above was measured again outside the swarm.
+
+Limits:
+- The two sentences are rust-analyzer's wording (0.3.3089, the pinned
+  one). If a later version words them otherwise the live suite's new check
+  fails; nothing else would say so.
+- For a refusal of this kind `why` in `swan broke` is still the
+  library's whole JSON answer as text, and the exit is still 0; the hook's
+  own pull request changes both.
+- The pin is a commit on goose-lsp's branch. It stays reachable from that
+  repo's main when the pull request there is merged with a merge commit,
+  as its earlier ones were; a squash would need the pin moved.
+- This entry is one commit after the tree that was tested; that commit
+  changes STATUS.md and DECISIONS.md only.
+
+## 2026-11-26T07:04Z: the post-edit hook says when a file could not be checked
+
+What was wrong: after an edit the hook
+(scripts/hooks/what-broke-after-edit.py; the Hermes plugin runs the same
+script) said nothing when the file could not be checked at all, and
+silence read as "clean". On an untrusted copy of fixtures/tiny-rs,
+`swan broke` answered `"asked":false` and left with exit 0, and the
+hook printed nothing. Beside it, an answer the server had not settled in
+time was taken for a full answer.
+
+What changed:
+- `swan broke` and the `what_broke` tool: a file not asked has a
+  `reason` (`no_server`, `untrusted`, `unsettled`, `failed`)
+  and, when a live server exists for it, `first_time`: true the first
+  time it is not asked for that reason. One line for it is kept in
+  broke-seen.tsv (`file<TAB>not-asked|reason|`) until the file is asked.
+  An answer with `"settled":false` is not asked. `why` holds the
+  client library's own words for a refusal, not its JSON. Exit 3 when
+  nothing is new and a file was not asked (the Rust rebuild's numbers).
+- The hook: a note, once per file and reason, as PostToolUse context when
+  there are no new errors (exit 0), and after the error lines when there
+  are (exit 2). Nothing for a file with no live server. It never prints
+  `why` and never names a way to trust a repo.
+- The Hermes plugin reads the note the same way.
+
+| untrusted tiny-rs | before | after |
+|---|---|---|
+| `swan broke`, first ask | asked false, exit 0 | asked false, reason untrusted, first_time true, exit 3 |
+| `swan broke`, second ask | the same | first_time false, exit 3 |
+| the hook, first edit | nothing | "Swan did not check src/lib.rs: checks that run this repo's build are off for it by its owner's choice. Errors from this edit will not be reported here; verify another way." |
+| the hook, second edit | nothing | nothing |
+| a Markdown file | nothing, exit 0 | nothing; reason no_server, exit 3 |
+| tiny-py, an error added | the error, hook exit 2 | the same |
+
+Checked:
+- Four new checks in the lang suite (a Markdown file, an untrusted Rust
+  file asked twice, a file the server cannot read) and 8 new Python tests:
+  7 drive the real hook with a stand-in swan, 1 the plugin.
+- `scripts/space-test.sh` in the microVM on `d605b01`: 58 checks
+  passed, 0 failed; the cosmetic, layer and piece checks passed; 64 Python
+  tests OK (56 before); 326 checks passed, 0 failed (322 before). Exit 0.
+- By hand, this build and the build from before on the same copies: the
+  table. The Swan from before reads a seen file that holds the new line
+  and answers as it did.
+
+How it was made: an Antigravity swarm (`agy-task --swarm`) wrote the
+change in a copy, from a brief; the words in `why` and the check for
+them were added by hand, and the table was measured outside the swarm.
+
+Limits:
+- "unsettled" was not seen with a real server (it takes one that says
+  nothing for two minutes): that path was read, and the hook's side of it
+  is tested with the stand-in.
+- The Rust rebuild's `swan broke` gives no `reason` or `first_time`
+  yet. The hook treats such an answer as before, with silence; the rebuild
+  has to follow before it replaces this program.
+- The note is said once per file. A long session may have forgotten it by
+  the time it matters.
+- The seen file is written without a lock in this program, as before.
+- This entry is one commit after the tree that was tested; that commit
+  changes STATUS.md and DECISIONS.md only.
+
+## 2026-11-26T07:05Z: `get_callers` also names the callers the compiler index could not resolve
+
+What was wrong: `get_callers` answered from the compiler index alone, and
+a call the indexer could not resolve was missing with nothing to say so.
+On a two-file Python fixture, `paths.ensure()` inside
+`def untyped(paths, args)` (no type on the parameter) is not in the map,
+beside the same call in `def typed(paths: Paths, args)`, which is:
+`get_callers` of `Paths/ensure` listed one caller of two. It was found
+by asking Swan, Spread-Wings and a hosted code graph who calls thirty
+functions of a private repo: the other two named a caller Swan lacked.
+
+What changed: the answer gains a separate list, `possible_callers`, for
+distance 1. It holds the call sites Spread-Wings ties to the definition by
+syntax that the exact answer does not have and that the index does not
+resolve to another symbol, each with `how` it was tied (Spread-Wings'
+own resolution; `by_name` means any definition of that name could be the
+one called), at most 50 with the full count in `total`. It is never
+merged into `callers` or counted in `summary`. The key is left out
+when there is nothing; when Spread-Wings cannot be asked it reads
+`{"checked": false, "why": ...}`. The read snapshot is released before
+Spread-Wings runs. The tool's description, the README's row and the
+swan-code-check skill say the same.
+
+| | before | after |
+|---|---|---|
+| the fixture, callers of `Paths/ensure` | `typed` | `typed`; possible_callers: pkg/cli.py line 5, in `untyped`, how `imported_file` |
+| a private repo, 903 functions asked | no such list | 21 functions gained one, 33 sites in all |
+| one answer on that repo, median | under 1 ms | 67 ms (95 in 100 under 75 ms; the first one 486 ms, while the graph is made) |
+
+The 33 sites, read in the source: 30 are calls of that function (calls
+from test files that are outside the TypeScript project, through a
+dynamic import, through a table of functions, on an untyped parameter,
+and the one this started with); 3 are `tree.validate(...)` matched by
+name alone, which the list says of them.
+
+Checked:
+- Five new checks in the lang suite: the fixture's two targets, a symbol
+  with nothing by syntax (no key), and Spread-Wings missing.
+- `scripts/space-test.sh` in the microVM on `8ddfe79`: 58 checks
+  passed, 0 failed; the cosmetic, layer and piece checks passed; 56 Python
+  tests OK; 327 checks passed, 0 failed (322 before). Exit 0.
+- By hand with this build and the build from before: the table.
+  `swan query <db> callers` on the command line answers as before,
+  without the list.
+
+How it was made: an Antigravity swarm (`agy-task --swarm`) wrote the
+change in a copy, from a brief; the measure on the private repo and the
+reading of its 33 sites were done outside the swarm.
+
+Limits:
+- Every `get_callers` now starts Spread-Wings, sealed, to bring its
+  graph up to date: about 60 ms more an answer on these repos. By the
+  swarm's own timing on the fixture most of it is starting the seal (36
+  ms) and a 20 ms sleep while waiting for the child; that was not measured
+  again, and nothing was done about it.
+- Distance 1 only. A test file that appears only in `possible_callers`
+  is not among `summary.test_files`.
+- A call written over several lines could be listed though the index has
+  it on another line: sites are compared by file and line. None was seen
+  among the 33.
+- Measured on Python and TypeScript. Not judged by an IDE.
+- This entry is one commit after the tree that was tested; that commit
+  changes STATUS.md and DECISIONS.md only.
+
 ## 2026-11-26T07:08Z: the check rule corrected in the Rust program; three fixes to the program that ships are in pull requests
 
 What was wrong here: since 2026-11-25T12:15Z the Rust program refused a
@@ -2925,6 +3109,33 @@ Limits:
   program, and nothing it reads or runs changed here.
 - The swarm's runs are not kept in the repository; their briefs, reports
   and patches are in the session's scratch folder and the tool's cache.
+
+## 2026-11-26T07:15Z: three points of the automated review taken into the hook
+
+The Graphify review of this pull request listed nine possible faults it
+could not confirm, five of them with their text. Read in the code, three
+were right:
+- Beside errors that are reported, the closing line said "Errors from this
+  edit will not be reported here". It now speaks of the file that was not
+  checked. (One file is asked per edit today, so the two did not meet; the
+  code allowed it.)
+- A reason the hook does not know was said as "its language server did not
+  answer". It is now named as given.
+- An exit code other than 0, 1 or 3 dropped an answer that was there. The
+  hook reads the answer whatever the code, as it did before this branch.
+
+Not taken: output that is not the one JSON object is not a note (the hook
+prints nothing else); and the plugin does not track repeats itself, since
+`swan broke` gives the note once. Its docstring now says so.
+
+Checked: two new Python tests and one changed. `scripts/space-test.sh`
+in the microVM on `2dec374`: 58 checks passed, 0 failed; the cosmetic,
+layer and piece checks passed; 66 Python tests OK; 326 checks passed, 0
+failed. Exit 0.
+
+Limit: the four findings the review did not show in its comment were not
+read. This entry is one commit after the tree that was tested; that commit
+changes STATUS.md only.
 
 ## 2026-11-26T07:35Z: the three fixes merged into main and installed
 

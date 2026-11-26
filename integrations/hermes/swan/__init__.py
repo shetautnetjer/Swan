@@ -3,9 +3,15 @@
 Hermes's `write_file` and `patch` tools change a file; this plugin then asks
 Swan which errors the language server reports in that file that it did not
 report before (the same question Swan's Claude Code hook asks) and adds the
-answer to the tool result the model reads. Nothing is added when the edit
-broke nothing, when no Swan map covers the file, or when Swan is not
-installed. An edit is never blocked or changed.
+answer to the tool result the model reads. When a file has a configured
+language server that could not check it, the hook's one-time notice (read
+from its stdout `additionalContext` JSON on exit 0, or appended on stderr on
+exit 2 alongside new errors) is added to the tool result the same way.
+Nothing is added when the edit broke nothing and was checked (or has no live
+server), when Swan has given that notice for the file before (it gives it
+once per file and reason; this plugin keeps no record of its own), when no
+Swan map covers the file, or when Swan is not installed. An edit is never blocked or
+changed.
 
 The logic is Swan's own: this plugin runs
 <swan>/scripts/hooks/what-broke-after-edit.py, so it follows the installed
@@ -66,7 +72,7 @@ def session_cwd() -> Path:
 
 
 def what_broke(path: Path, root: Path) -> str:
-    """Swan's line(s) about the errors new in this file, or ''."""
+    """Swan's line(s) about new errors or an unchecked file, or ''."""
     script = root / "scripts" / "hooks" / "what-broke-after-edit.py"
     if not script.is_file():
         return ""
@@ -79,7 +85,19 @@ def what_broke(path: Path, root: Path) -> str:
         )
     except Exception:
         return ""
-    return r.stderr.strip() if r.returncode == 2 else ""
+    if r.returncode == 2:
+        return r.stderr.strip()
+    if r.returncode == 0 and r.stdout.strip():
+        try:
+            parsed = json.loads(r.stdout)
+        except Exception:
+            return ""
+        if isinstance(parsed, dict):
+            hook = parsed.get("hookSpecificOutput")
+            note = hook.get("additionalContext") if isinstance(hook, dict) else None
+            if isinstance(note, str):
+                return note.strip()
+    return ""
 
 
 def written_paths(parsed) -> list:
