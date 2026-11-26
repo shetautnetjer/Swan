@@ -240,7 +240,7 @@ So it is not learned again (docs/rust-port.md, "Found while porting"):
   two-file fixture (`def untyped(paths, args): paths.ensure()` beside the
   same function with `paths: Paths`) the map holds the typed call and not
   the other; `get_callers` answers with the one. Spread-Wings and Graphify
-  both link the untyped call by name. Found 2026-11-25 by asking all three
+  both link the untyped call by name. Found 2026-11-26 by asking all three
   who calls thirty functions of a private repo (15 TypeScript, 15 Python),
   counted as pairs of function and calling file, 93 in all once that one
   was read in the source: Swan 92, Spread-Wings 87, Graphify 85, and neither
