@@ -22,10 +22,12 @@ fn lang_suite() {
     lang_batch_touches();
     lang_wings_follows_files();
     lang_what_broke();
+    lang_what_broke_not_asked();
     lang_goose_map();
     lang_go_map();
     lang_go_modules();
     lang_py_attr_family();
+    lang_py_possible_callers();
     lang_gradle();
     lang_cuda();
     lang_modules();
@@ -449,6 +451,38 @@ fn lang_what_broke() {
           r4 == 1 && find(m, "\"new_errors\":1,") >= 0 && find(m, "\"line\":37") >= 0 && find(m, "\"errors_already_there\":1") >= 0, m);
 }
 
+// `swan broke` when a file cannot be asked: no live server (Markdown) and an
+// untrusted repo (Rust, run with SWAN_TRUST_BUILD=0 since the suite runs trusted).
+fn lang_what_broke_not_asked() {
+    let w = "data/rs-broke";
+    rm_rf(w);
+    mkdir_p(w);
+    var o: u8[>..] = [];
+    guard sh(argv(["cp", "-r", "fixtures/tiny-rs", str(w, "/repo")]), "", o) else { return; }
+    guard write_file(str(w, "/repo/README.md"), "# tiny-rs\n") else { return; }
+    let not_trusted = envv("SWAN_TRUST_BUILD", "0");
+    guard sh(argv(["bin/swan", "map", str(w, "/repo"), str(w, "/map")]), not_trusted, o) else { return; }
+    var t: u8[>..] = [];
+    var e: u8[>..] = [];
+    let c_md = run(argv(["bin/swan", "broke", str(w, "/map"), "README.md"]), not_trusted, t, e);
+    check("broke: a Markdown file has no live server (exit 3)",
+          c_md == 3 && find(t, "\"asked\":false") >= 0 && find(t, "\"reason\":\"no_server\"") >= 0, str("exit ", c_md, ": ", t, e));
+    let c_rs1 = run(argv(["bin/swan", "broke", str(w, "/map"), "src/lib.rs"]), not_trusted, t, e);
+    check("broke: an untrusted Rust file is reported as first_time true (exit 3)",
+          c_rs1 == 3 && find(t, "\"asked\":false") >= 0 && find(t, "\"reason\":\"untrusted\"") >= 0 &&
+          find(t, "\"first_time\":true") >= 0, str("exit ", c_rs1, ": ", t, e));
+    let c_rs2 = run(argv(["bin/swan", "broke", str(w, "/map"), "src/lib.rs"]), not_trusted, t, e);
+    check("broke: asked a second time, the same untrusted Rust file has first_time false (exit 3)",
+          c_rs2 == 3 && find(t, "\"asked\":false") >= 0 && find(t, "\"reason\":\"untrusted\"") >= 0 &&
+          find(t, "\"first_time\":false") >= 0, str("exit ", c_rs2, ": ", t, e));
+    // A refusal from the client library is said in its own words, not as its JSON.
+    guard sh(argv(["cp", "-r", "fixtures/tiny-py", str(w, "/py")]), "", o) else { return; }
+    guard sh(argv(["bin/swan", "map", str(w, "/py"), str(w, "/py-map")]), "", o) else { return; }
+    let c_gone = run(argv(["bin/swan", "broke", str(w, "/py-map"), "shapes/not_there.py"]), "", t, e);
+    check("broke: a file the server cannot read is not asked, with the reason in words (exit 3)",
+          c_gone == 3 && find(t, "\"reason\":\"failed\"") >= 0 && find(t, "\"why\":\"cannot read the file\"") >= 0, str("exit ", c_gone, ": ", t, e));
+}
+
 // A class attribute a subclass overrides is renamed as one family: the
 // base's declaration, each subclass's own assignment, and every use.
 fn lang_py_attr_family() {
@@ -467,6 +501,94 @@ fn lang_py_attr_family() {
     check("python: renaming a subclass's class attribute renames the base's and every use with it",
           r == 1 && find(text, "session") < 0 && find(text, "login: str = \"\"") >= 0 && find(text, "login = \"boss\"") >= 0 &&
           find(text, "return c.login + Boss().login") >= 0, str(t, "\n", text));
+}
+
+// Calls the compiler index could not resolve (an untyped parameter in Python)
+// appear in get_callers's separate possible_callers list, never merged into
+// callers or counted in summary, and never holding a site the compiler index
+// resolved to another symbol.
+fn lang_py_possible_callers() {
+    let w = "data/py-possible-callers";
+    rm_rf(w);
+    mkdir_p(str(w, "/repo/pkg"));
+    let paths_py = "class Paths:\n    def ensure(self) -> None:\n        return None\n\n\nclass Other:\n    def ensure(self) -> None:\n        return None\n\n\ndef solo() -> None:\n    return None\n";
+    let cli_py = "from pkg.paths import Other, Paths, solo\n\n\ndef untyped(paths, args):\n    paths.ensure()\n\n\ndef typed(paths: Paths, args):\n    paths.ensure()\n\n\ndef typed_other(other: Other, args):\n    other.ensure()\n    solo()\n";
+    let made = write_file(str(w, "/repo/pkg/__init__.py"), "") &&
+               write_file(str(w, "/repo/pkg/paths.py"), paths_py) &&
+               write_file(str(w, "/repo/pkg/cli.py"), cli_py);
+    guard made else { check("possible_callers: the Python fixture could be written", false, w); return; }
+    var o: u8[>..] = [];
+    guard sh(argv(["bin/swan", "map", str(w, "/repo"), str(w, "/map")]), "", o) else { return; }
+    let db = str(w, "/map/swan.db");
+
+    var t1: u8[>..] = [];
+    var t2: u8[>..] = [];
+    var t3: u8[>..] = [];
+    var t4: u8[>..] = [];
+    var r1: i64 = -1;
+    var r2: i64 = -1;
+    var r3: i64 = -1;
+    var r4: i64 = -1;
+    if mcp_open(argv(["bin/swan", "serve", db]), "") {
+        r1 = mcp_call("get_callers", """{"name_path":"Paths/ensure"}""", t1);
+        r2 = mcp_call("get_callers", """{"name_path":"Other/ensure"}""", t2);
+        r3 = mcp_call("get_callers", """{"name_path":"solo"}""", t3);
+        r4 = mcp_call("get_callers", """{"name_path":"untyped"}""", t4);
+        mcp_close();
+    }
+
+    var d1: json::Node[>..] = []; var x1: u8[>..] = [];
+    let p1, e1 = json::parse(t1, d1, x1);
+    let c1 = json::member(p1, "callers");
+    let s1 = json::member(p1, "summary");
+    let pc1 = json::member(p1, "possible_callers");
+    let ps1 = json::member(pc1, "sites");
+    check("possible_callers Paths/ensure: callers holds typed() alone and summary counts one symbol",
+          r1 == 1 && jcount(c1) == 1 && jstr(nth(c1, 0), "name_path") == "typed" &&
+          direct_sites(p1) == "pkg/cli.py:9" && jint(s1, "symbols") == 1 && jint(s1, "files") == 1 &&
+          jcount(json::member(s1, "test_files")) == 0, t1);
+    check("possible_callers Paths/ensure: holds the untyped call line and not Other.ensure's typed call",
+          r1 == 1 && jhas(p1, "possible_callers") && jint(pc1, "total") == 1 && jcount(ps1) == 1 &&
+          jlines(ps1) == "pkg/cli.py:5" && jstr(nth(ps1, 0), "in_symbol") == "untyped" &&
+          jstr(nth(ps1, 0), "how").len > 0 && find(jstr(pc1, "note"), "Spread-Wings") >= 0, t1);
+
+    var d2: json::Node[>..] = []; var x2: u8[>..] = [];
+    let p2, e2 = json::parse(t2, d2, x2);
+    let c2 = json::member(p2, "callers");
+    let s2 = json::member(p2, "summary");
+    let pc2 = json::member(p2, "possible_callers");
+    let ps2 = json::member(pc2, "sites");
+    check("possible_callers Other/ensure: typed_other() in callers, the untyped line in possible_callers",
+          r2 == 1 && jcount(c2) == 1 && jstr(nth(c2, 0), "name_path") == "typed_other" &&
+          direct_sites(p2) == "pkg/cli.py:13" && jint(s2, "symbols") == 1 &&
+          jhas(p2, "possible_callers") && jint(pc2, "total") == 1 && jcount(ps2) == 1 &&
+          jlines(ps2) == "pkg/cli.py:5" && jstr(nth(ps2, 0), "in_symbol") == "untyped" &&
+          jstr(nth(ps2, 0), "how").len > 0, t2);
+
+    var d3: json::Node[>..] = []; var x3: u8[>..] = [];
+    let p3, e3 = json::parse(t3, d3, x3);
+    var d4: json::Node[>..] = []; var x4: u8[>..] = [];
+    let p4, e4 = json::parse(t4, d4, x4);
+    check("possible_callers: omitted when nothing extra is found by syntax",
+          r3 == 1 && jcount(json::member(p3, "callers")) == 1 && !jhas(p3, "possible_callers") &&
+          r4 == 1 && jcount(json::member(p4, "callers")) == 0 && !jhas(p4, "possible_callers"),
+          str(t3, "\n     ", t4));
+
+    var t5: u8[>..] = [];
+    var r5: i64 = -1;
+    if mcp_open(argv(["bin/swan", "serve", db]), argv(["SWAN_SPREAD_WINGS=/nonexistent/spread-wings"])) {
+        r5 = mcp_call("get_callers", """{"name_path":"Paths/ensure"}""", t5);
+        mcp_close();
+    }
+    var d5: json::Node[>..] = []; var x5: u8[>..] = [];
+    let p5, e5 = json::parse(t5, d5, x5);
+    let c5 = json::member(p5, "callers");
+    let pc5 = json::member(p5, "possible_callers");
+    let ck, ckok = json::as_bool(json::member(pc5, "checked"));
+    check("possible_callers: without spread-wings the exact answer still comes, with checked false and why",
+          r5 == 1 && jcount(c5) == 1 && jstr(nth(c5, 0), "name_path") == "typed" &&
+          jint(json::member(p5, "summary"), "symbols") == 1 &&
+          ckok && !ck && jstr(pc5, "why").len > 0 && !jhas(pc5, "sites"), t5);
 }
 
 // A Goose map, made by asking Goose's own language server (swan lsp-index):

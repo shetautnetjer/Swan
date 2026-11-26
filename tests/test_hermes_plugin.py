@@ -20,9 +20,13 @@ PLUGIN = REPO / "integrations" / "hermes" / "swan"
 
 STAND_IN = """import json, sys
 path = json.load(sys.stdin)["tool_input"]["file_path"]
-if "BROKEN" in open(path).read():
+text = open(path).read()
+if "BROKEN" in text:
     print("Swan: this edit introduced an error the language server did not report before:\\n" + path + ":1:1: broken", file=sys.stderr)
     sys.exit(2)
+if "UNCHECKED" in text:
+    note = "Swan did not check " + path + ": checks that run this repo's build are off for it by its owner's choice.\\nErrors from this edit will not be reported here; verify another way."
+    print(json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": note}}))
 """
 
 
@@ -51,6 +55,8 @@ class HermesPlugin(unittest.TestCase):
         self.good.write_text("export const a = 1;\n")
         self.bad = self.tmp / "bad.ts"
         self.bad.write_text("BROKEN\n")
+        self.unchecked = self.tmp / "unchecked.rs"
+        self.unchecked.write_text("UNCHECKED\n")
 
     def tearDown(self):
         if self.old is None:
@@ -91,6 +97,20 @@ class HermesPlugin(unittest.TestCase):
     def test_a_breaking_edit_is_appended_to_a_text_result(self):
         out = self.plugin.after_edit(tool_name="patch", args={"mode": "replace", "path": str(self.bad)}, result="--- a\n+++ b\n", status="ok")
         self.assertTrue(out.startswith("--- a\n+++ b\n\n\nSwan: this edit introduced"))
+
+    def test_a_not_checked_note_reaches_the_result(self):
+        result = json.dumps({"bytes_written": 10, "resolved_path": str(self.unchecked)})
+        out = self.plugin.after_edit(tool_name="write_file", args={"path": "unchecked.rs"}, result=result, status="ok")
+        self.assertIsNotNone(out)
+        parsed = json.loads(out)
+        self.assertEqual(parsed["bytes_written"], 10)
+        self.assertIn("Swan did not check", parsed["swan"])
+        self.assertIn(str(self.unchecked), parsed["swan"])
+        self.assertIn("verify another way", parsed["swan"])
+        self.assertNotIn("hookSpecificOutput", parsed["swan"])
+        text_out = self.plugin.after_edit(tool_name="patch", args={"mode": "replace", "path": str(self.unchecked)}, result="--- a\n+++ b\n", status="ok")
+        self.assertIsNotNone(text_out)
+        self.assertTrue(text_out.startswith("--- a\n+++ b\n\n\nSwan did not check "))
 
     def test_the_files_the_tool_names_win_over_the_argument(self):
         result = json.dumps({"files_modified": [str(self.bad)]})
