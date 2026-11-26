@@ -22,6 +22,7 @@ fn lang_suite() {
     lang_batch_touches();
     lang_wings_follows_files();
     lang_what_broke();
+    lang_what_broke_not_asked();
     lang_goose_map();
     lang_go_map();
     lang_go_modules();
@@ -448,6 +449,38 @@ fn lang_what_broke() {
     let r4 = serve_once(str(w, "/map/swan.db"), "what_broke", """{"files":["shapes/__init__.py"]}""", m);
     check("broke: the what_broke tool reports only the second edit's error",
           r4 == 1 && find(m, "\"new_errors\":1,") >= 0 && find(m, "\"line\":37") >= 0 && find(m, "\"errors_already_there\":1") >= 0, m);
+}
+
+// `swan broke` when a file cannot be asked: no live server (Markdown) and an
+// untrusted repo (Rust, run with SWAN_TRUST_BUILD=0 since the suite runs trusted).
+fn lang_what_broke_not_asked() {
+    let w = "data/rs-broke";
+    rm_rf(w);
+    mkdir_p(w);
+    var o: u8[>..] = [];
+    guard sh(argv(["cp", "-r", "fixtures/tiny-rs", str(w, "/repo")]), "", o) else { return; }
+    guard write_file(str(w, "/repo/README.md"), "# tiny-rs\n") else { return; }
+    let not_trusted = envv("SWAN_TRUST_BUILD", "0");
+    guard sh(argv(["bin/swan", "map", str(w, "/repo"), str(w, "/map")]), not_trusted, o) else { return; }
+    var t: u8[>..] = [];
+    var e: u8[>..] = [];
+    let c_md = run(argv(["bin/swan", "broke", str(w, "/map"), "README.md"]), not_trusted, t, e);
+    check("broke: a Markdown file has no live server (exit 3)",
+          c_md == 3 && find(t, "\"asked\":false") >= 0 && find(t, "\"reason\":\"no_server\"") >= 0, str("exit ", c_md, ": ", t, e));
+    let c_rs1 = run(argv(["bin/swan", "broke", str(w, "/map"), "src/lib.rs"]), not_trusted, t, e);
+    check("broke: an untrusted Rust file is reported as first_time true (exit 3)",
+          c_rs1 == 3 && find(t, "\"asked\":false") >= 0 && find(t, "\"reason\":\"untrusted\"") >= 0 &&
+          find(t, "\"first_time\":true") >= 0, str("exit ", c_rs1, ": ", t, e));
+    let c_rs2 = run(argv(["bin/swan", "broke", str(w, "/map"), "src/lib.rs"]), not_trusted, t, e);
+    check("broke: asked a second time, the same untrusted Rust file has first_time false (exit 3)",
+          c_rs2 == 3 && find(t, "\"asked\":false") >= 0 && find(t, "\"reason\":\"untrusted\"") >= 0 &&
+          find(t, "\"first_time\":false") >= 0, str("exit ", c_rs2, ": ", t, e));
+    // A refusal from the client library is said in its own words, not as its JSON.
+    guard sh(argv(["cp", "-r", "fixtures/tiny-py", str(w, "/py")]), "", o) else { return; }
+    guard sh(argv(["bin/swan", "map", str(w, "/py"), str(w, "/py-map")]), "", o) else { return; }
+    let c_gone = run(argv(["bin/swan", "broke", str(w, "/py-map"), "shapes/not_there.py"]), "", t, e);
+    check("broke: a file the server cannot read is not asked, with the reason in words (exit 3)",
+          c_gone == 3 && find(t, "\"reason\":\"failed\"") >= 0 && find(t, "\"why\":\"cannot read the file\"") >= 0, str("exit ", c_gone, ": ", t, e));
 }
 
 // A class attribute a subclass overrides is renamed as one family: the

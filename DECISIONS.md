@@ -766,6 +766,57 @@ names crates the port could use for the language-server client at stage 5
 and holds better designs for after the port; each is a change of its own,
 measured.
 
+## 2026-11-26T07:04Z — When a Rust check counts as not run: the server's two sentences, not its health flag
+
+**The owner's word:** asked whether to mend the false "nothing new" for
+Rust in the Swan that ships, he said: "i follow your recommendations,
+using antigravity swarm abilities to attack and fix places you need". The
+recommendation was yes.
+
+**Decided (mine, his to overrule):** a set with no error is refused as an
+answer only when rust-analyzer's status says the check did not judge the
+code: "cargo check failed to start", or "Failed to run build scripts".
+Errors that were found are passed on either way.
+
+**Why not the health flag alone:** that was the rule built first, here and
+in the Rust rebuild (branch rust-live-answers, 2026-11-25). In the microVM
+rust-analyzer's health is "warning" for a reason that leaves cargo check
+alone (no standard library sources), every clean Rust file was refused,
+and two live checks failed. A machine without those sources would never
+hear "clean".
+
+**Why two sentences and not one:** on a first, cold check a failing build
+script leaves only "Failed to run build scripts" in the status; "cargo
+check failed to start" comes with the next check (measured on the Rust
+rebuild, 2026-11-25).
+
+**What it costs:** the rule reads rust-analyzer's wording. The pinned
+version and a check with the real server guard it.
+
+## 2026-11-26T07:04Z — The hook's note for a file it could not check: once per file and reason, and never a way to trust
+
+**The owner's word:** asked whether the post-edit hook should say so when
+it could not check a file, he said: "i follow your recommendations, using
+antigravity swarm abilities to attack and fix places you need". The
+recommendation was yes.
+
+**Decided (mine, his to overrule):**
+- Silence when there is no live server for that kind of file.
+- Once per file, and again when the reason changes; `swan broke`
+  remembers it beside the errors it has seen. Not on every edit: most
+  repos are never trusted, on purpose, so for Rust that is every edit, and
+  a note on every edit teaches an agent to ignore the hook or to "fix" it
+  by trusting the repo. Not once per session: the Hermes plugin passes no
+  session, and it would take a second state file.
+- The note states the fact and what follows from it. It never prints the
+  program's `why`, which names `swan trust`.
+- It is not an error: PostToolUse context with exit 0, so an agent does
+  not take it for a failure of its edit.
+
+**Second opinion:** the Hermes `architect` profile chose once per file
+over the other two, and asked for classes of reason instead of the raw
+text, so that wording does not make a note come again.
+
 ## 2026-11-26T07:05Z — Callers the index cannot resolve: a second, marked list in get_callers
 
 **The owner's word:** asked whether `get_callers` should add a list of
