@@ -2002,3 +2002,65 @@ Checked on `4b22745`:
 
 Limit: this entry is one commit after the tree that was tested; that
 commit changes STATUS.md and HANDOFF.md only.
+
+## 2026-11-26T07:04Z: the post-edit hook says when a file could not be checked
+
+What was wrong: after an edit the hook
+(scripts/hooks/what-broke-after-edit.py; the Hermes plugin runs the same
+script) said nothing when the file could not be checked at all, and
+silence read as "clean". On an untrusted copy of fixtures/tiny-rs,
+`swan broke` answered `"asked":false` and left with exit 0, and the
+hook printed nothing. Beside it, an answer the server had not settled in
+time was taken for a full answer.
+
+What changed:
+- `swan broke` and the `what_broke` tool: a file not asked has a
+  `reason` (`no_server`, `untrusted`, `unsettled`, `failed`)
+  and, when a live server exists for it, `first_time`: true the first
+  time it is not asked for that reason. One line for it is kept in
+  broke-seen.tsv (`file<TAB>not-asked|reason|`) until the file is asked.
+  An answer with `"settled":false` is not asked. `why` holds the
+  client library's own words for a refusal, not its JSON. Exit 3 when
+  nothing is new and a file was not asked (the Rust rebuild's numbers).
+- The hook: a note, once per file and reason, as PostToolUse context when
+  there are no new errors (exit 0), and after the error lines when there
+  are (exit 2). Nothing for a file with no live server. It never prints
+  `why` and never names a way to trust a repo.
+- The Hermes plugin reads the note the same way.
+
+| untrusted tiny-rs | before | after |
+|---|---|---|
+| `swan broke`, first ask | asked false, exit 0 | asked false, reason untrusted, first_time true, exit 3 |
+| `swan broke`, second ask | the same | first_time false, exit 3 |
+| the hook, first edit | nothing | "Swan did not check src/lib.rs: checks that run this repo's build are off for it by its owner's choice. Errors from this edit will not be reported here; verify another way." |
+| the hook, second edit | nothing | nothing |
+| a Markdown file | nothing, exit 0 | nothing; reason no_server, exit 3 |
+| tiny-py, an error added | the error, hook exit 2 | the same |
+
+Checked:
+- Four new checks in the lang suite (a Markdown file, an untrusted Rust
+  file asked twice, a file the server cannot read) and 8 new Python tests:
+  7 drive the real hook with a stand-in swan, 1 the plugin.
+- `scripts/space-test.sh` in the microVM on `d605b01`: 58 checks
+  passed, 0 failed; the cosmetic, layer and piece checks passed; 64 Python
+  tests OK (56 before); 326 checks passed, 0 failed (322 before). Exit 0.
+- By hand, this build and the build from before on the same copies: the
+  table. The Swan from before reads a seen file that holds the new line
+  and answers as it did.
+
+How it was made: an Antigravity swarm (`agy-task --swarm`) wrote the
+change in a copy, from a brief; the words in `why` and the check for
+them were added by hand, and the table was measured outside the swarm.
+
+Limits:
+- "unsettled" was not seen with a real server (it takes one that says
+  nothing for two minutes): that path was read, and the hook's side of it
+  is tested with the stand-in.
+- The Rust rebuild's `swan broke` gives no `reason` or `first_time`
+  yet. The hook treats such an answer as before, with silence; the rebuild
+  has to follow before it replaces this program.
+- The note is said once per file. A long session may have forgotten it by
+  the time it matters.
+- The seen file is written without a lock in this program, as before.
+- This entry is one commit after the tree that was tested; that commit
+  changes STATUS.md and DECISIONS.md only.

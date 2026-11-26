@@ -765,3 +765,27 @@ the Goose build's C, so the answers stay the same bytes. docs/rust-port.md
 names crates the port could use for the language-server client at stage 5
 and holds better designs for after the port; each is a change of its own,
 measured.
+
+## 2026-11-26T07:04Z — The hook's note for a file it could not check: once per file and reason, and never a way to trust
+
+**The owner's word:** asked whether the post-edit hook should say so when
+it could not check a file, he said: "i follow your recommendations, using
+antigravity swarm abilities to attack and fix places you need". The
+recommendation was yes.
+
+**Decided (mine, his to overrule):**
+- Silence when there is no live server for that kind of file.
+- Once per file, and again when the reason changes; `swan broke`
+  remembers it beside the errors it has seen. Not on every edit: most
+  repos are never trusted, on purpose, so for Rust that is every edit, and
+  a note on every edit teaches an agent to ignore the hook or to "fix" it
+  by trusting the repo. Not once per session: the Hermes plugin passes no
+  session, and it would take a second state file.
+- The note states the fact and what follows from it. It never prints the
+  program's `why`, which names `swan trust`.
+- It is not an error: PostToolUse context with exit 0, so an agent does
+  not take it for a failure of its edit.
+
+**Second opinion:** the Hermes `architect` profile chose once per file
+over the other two, and asked for classes of reason instead of the raw
+text, so that wording does not make a note come again.
