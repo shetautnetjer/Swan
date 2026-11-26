@@ -274,7 +274,9 @@ porting", has the call.
   its branch), then #79 (a Rust check that did not run is not clean), #80
   (the hook says when a file could not be checked), #81 (`get_callers`
   names the callers the index could not resolve). Each of the three passed
-  the whole suite in the microVM by itself, from main. STATUS.md and
+  the whole suite in the microVM by itself, from main; #80 once more after
+  three points of its automated review were taken (`2dec374`: 58 + 326
+  checks, 66 Python tests). STATUS.md and
   DECISIONS.md conflict between them (each adds an entry at the end): keep
   all entries in time order, and run the suite again on what main becomes
   before the next one goes in. Installing the result is a word of its own.
