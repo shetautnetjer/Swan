@@ -201,13 +201,32 @@ class WhatBrokeHook(unittest.TestCase):
         self.assertEqual(r.stdout, "")
         self.assertIn("src/app.py:5:1: bad call", r.stderr)
         note = "Swan did not check src/lib.rs: checks that run this repo's build are off for it by its owner's choice."
-        footer = "Errors from this edit will not be reported here; verify another way."
+        # Beside errors that are reported, the closing line speaks of the file not checked only.
+        footer = "Errors in a file Swan did not check will not be reported here; verify those another way."
         self.assertIn(note, r.stderr)
         self.assertIn(footer, r.stderr)
+        self.assertNotIn("Errors from this edit will not be reported", r.stderr)
         self.assertLess(r.stderr.index("src/app.py:5:1: bad call"), r.stderr.index(note))
         self.assertLess(r.stderr.index(note), r.stderr.index(footer))
         self.assertNotIn("swan trust", (r.stdout + r.stderr).lower())
         self.assertNotIn("rust-analyzer did not run", r.stdout + r.stderr)
+
+    def test_a_reason_the_hook_does_not_know_is_named_not_guessed(self):
+        answer = {"new_errors": 0, "files": [
+            {"relative_path": "src/lib.rs", "asked": False, "reason": "locked", "first_time": True, "why": "x"}]}
+        r = self.run_hook(self.rs_file, answer, 3)
+        self.assertEqual(r.returncode, 0)
+        note = json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"]
+        self.assertIn('Swan did not check src/lib.rs: the reason given is "locked".', note)
+        self.assertNotIn("did not answer", note)
+
+    def test_an_exit_code_the_hook_does_not_know_still_has_its_answer_read(self):
+        answer = {"new_errors": 1, "files": [
+            {"relative_path": "src/app.py", "asked": True, "first_look": False,
+             "new_errors": [{"line": 5, "col": 1, "message": "bad call"}], "errors_already_there": 0, "warnings": 0}]}
+        r = self.run_hook(self.py_file, answer, 9)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("src/app.py:5:1: bad call", r.stderr)
 
     def test_entry_without_reason_is_silent(self):
         for entry in (

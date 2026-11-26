@@ -8,8 +8,9 @@ language server that could not check it, the hook's one-time notice (read
 from its stdout `additionalContext` JSON on exit 0, or appended on stderr on
 exit 2 alongside new errors) is added to the tool result the same way.
 Nothing is added when the edit broke nothing and was checked (or has no live
-server), when the same unchecked notice was already shown, when no Swan map
-covers the file, or when Swan is not installed. An edit is never blocked or
+server), when Swan has given that notice for the file before (it gives it
+once per file and reason; this plugin keeps no record of its own), when no
+Swan map covers the file, or when Swan is not installed. An edit is never blocked or
 changed.
 
 The logic is Swan's own: this plugin runs

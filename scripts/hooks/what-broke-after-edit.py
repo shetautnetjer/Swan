@@ -50,7 +50,6 @@ def main():
     if not best: return 0
     try:
         r = subprocess.run([swan, "broke", best, path], capture_output=True, text=True, timeout=120)
-        if r.returncode not in (0, 1, 3): return 0
         answer = json.loads(r.stdout)
     except Exception: return 0
     if not isinstance(answer, dict): return 0
@@ -61,9 +60,12 @@ def main():
         if f.get("asked") is False and f.get("first_time") is True:
             reason = f.get("reason")
             if isinstance(reason, str) and reason and reason != "no_server":
-                notes.append(f"Swan did not check {f['relative_path']}: {REASON_TEXT.get(reason, REASON_TEXT['failed'])}")
+                # A reason this hook does not know is named as given, when it is a plain word.
+                said = REASON_TEXT.get(reason) or (f'the reason given is "{reason}".' if reason.replace("_", "").isalnum() and len(reason) <= 24 else "no reason this hook knows was given.")
+                notes.append(f"Swan did not check {f['relative_path']}: {said}")
     if notes:
-        notes.append("Errors from this edit will not be reported here; verify another way.")
+        notes.append("Errors in a file Swan did not check will not be reported here; verify those another way." if lines
+                     else "Errors from this edit will not be reported here; verify another way.")
     if not lines:
         if not notes: return 0
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": "\n".join(notes)}}))
