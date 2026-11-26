@@ -2925,3 +2925,45 @@ Limits:
   program, and nothing it reads or runs changed here.
 - The swarm's runs are not kept in the repository; their briefs, reports
   and patches are in the session's scratch folder and the tool's cache.
+
+## 2026-11-26T07:35Z: the three fixes merged into main and installed
+
+On the owner's word ("merge install"), in the order given to him:
+goose-lsp#7 with a merge commit (`af6b63d`; the pinned `2daeb2c` is on
+that repo's main), then #79 (`833ae3a`), #80 (`0c382a1`) and #81
+(`419b3be`), each squashed as main's others are.
+
+Before #80 and before #81 went in, main was merged into the branch
+(STATUS.md and DECISIONS.md keep every entry, in time order; nothing else
+conflicted) and the whole suite ran in the microVM on that merge:
+- #80 with #79 in it, `d6c3057`: 58 checks passed, 0 failed; cosmetic,
+  layer and piece checks passed; 66 Python tests OK; 328 checks passed, 0
+  failed.
+- #81 with both in it, `6e7cc5c`: 58 + 333 checks, 0 failed; 66 Python
+  tests OK. Main's tree at `419b3be` is that commit's tree
+  (`2a11178ca1e3`), so this run is of main's own files.
+Main before the three: 58 + 322 checks, 56 Python tests.
+
+Installed: `scripts/swan-up update --keep 99` built `419b3bed04af`
+from origin/main and switched to it; the five versions from before were
+kept. With the installed program, on fresh copies of fixtures:
+- a Python method called on an untyped parameter: `callers` holds the
+  typed caller, `possible_callers` the untyped one;
+- an untrusted Rust crate through the installed hook: the note the first
+  time, nothing the second, nothing for a Markdown file;
+- a crate whose build.rs fails, a type error added: not asked, reason
+  `unsettled`, "not settled: Failed to run build scripts of some
+  packages. …", exit 3; the healthy crate with the same error: the error,
+  new.
+And through an agent's own connection to Swan, on a private repo: the
+first answer came from the server of before, which then moved itself to
+the new version; the second named the caller that started all this.
+
+Limits:
+- #80 and #81 were merged while GitHub's own checks on their last commit
+  (the merge of main) were still running; they had passed on the commit
+  before, and the microVM run above is of the merged files.
+- Other agents' Swan servers move to the new version after their next
+  answer. One Hermes profile starts an older copy of Swan from another
+  folder, which this does not reach.
+- The remote and local branches of the three pull requests were left.

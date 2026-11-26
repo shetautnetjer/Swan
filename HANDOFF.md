@@ -1,6 +1,6 @@
 # Handoff: Swan in Rust (branch `rust-live-answers`, on `rust-lsp-languages`, on `rust-stage-4`)
 
-Written 2026-11-20T07:25Z; stage 2 part rewritten 2026-11-20T16:21Z, stage 3 part 2026-11-20T23:51Z and again 2026-11-22T06:15Z, when stage 3 was finished; stage 4 part 2026-11-22T06:50Z, 2026-11-22T07:26Z 2026-11-22T16:46Z, 2026-11-22T18:18Z and 2026-11-22T18:45Z, when the prover had run on TypeScript's chunks and every job of a map was planned in Rust. For the next session, any agent. **Start at "Next action".** The end of the map, and the owner's two changes of direction: 2026-11-23T14:15Z. `lsp-index` in Rust: 2026-11-23T15:00Z. The languages mapped through their servers: 2026-11-25T09:04Z. Live answers (`lsp-ask`, `broke`): 2026-11-25T12:15Z. Three fixes to the program that ships, in pull requests, and the check rule corrected: 2026-11-26T07:08Z.
+Written 2026-11-20T07:25Z; stage 2 part rewritten 2026-11-20T16:21Z, stage 3 part 2026-11-20T23:51Z and again 2026-11-22T06:15Z, when stage 3 was finished; stage 4 part 2026-11-22T06:50Z, 2026-11-22T07:26Z 2026-11-22T16:46Z, 2026-11-22T18:18Z and 2026-11-22T18:45Z, when the prover had run on TypeScript's chunks and every job of a map was planned in Rust. For the next session, any agent. **Start at "Next action".** The end of the map, and the owner's two changes of direction: 2026-11-23T14:15Z. `lsp-index` in Rust: 2026-11-23T15:00Z. The languages mapped through their servers: 2026-11-25T09:04Z. Live answers (`lsp-ask`, `broke`): 2026-11-25T12:15Z. Three fixes to the program that ships, and the check rule corrected: 2026-11-26T07:08Z; merged and installed: 2026-11-26T07:35Z.
 
 ## The task
 Swan in Rust, on the owner's word. Until 2026-11-23 it was carried over
@@ -165,9 +165,11 @@ Known and small, for whoever is next in these files:
   "Failed to run build scripts"), not by its health flag: a warning that
   leaves cargo check alone (no standard library sources, as in the
   microVM) does not refuse. In the Rust program since 2026-11-26T07:08Z
-  (`check_not_run`, live.rs); in the program that ships with #79 and
-  goose-lsp#7, not merged.
-- **The Rust `swan broke` does not yet say what #80 makes the Goose one
+  (`check_not_run`, live.rs); in the program that ships since #79 and
+  goose-lsp#7. There the hook's note for it reads "its language server did
+  not settle in time" (the reason is `unsettled`): true to the answer,
+  short of the cause, which `why` has.
+- **The Rust `swan broke` does not yet say what #80 made the Goose one
   say**: a `reason` for a file not asked (`no_server`, `untrusted`,
   `unsettled`, `failed`), `first_time`, and the
   `file<TAB>not-asked|reason|` line in broke-seen.tsv. The hook stays
@@ -266,20 +268,18 @@ repos without those languages 40%. docs/rust-port.md, "Found while
 porting", has the call.
 
 ## Decisions waiting on the owner
-- **Four pull requests wait for his word to merge**, written on his word of
-  2026-11-26 ("i follow your recommendations, using antigravity swarm
-  abilities to attack and fix places you need"), each by an Antigravity
-  swarm from a brief and then checked outside it. In this order:
-  goose-lsp#7 (with a merge commit, not a squash: #79 pins a commit of
-  its branch), then #79 (a Rust check that did not run is not clean), #80
-  (the hook says when a file could not be checked), #81 (`get_callers`
-  names the callers the index could not resolve). Each of the three passed
-  the whole suite in the microVM by itself, from main; #80 once more after
-  three points of its automated review were taken (`2dec374`: 58 + 326
-  checks, 66 Python tests). STATUS.md and
-  DECISIONS.md conflict between them (each adds an entry at the end): keep
-  all entries in time order, and run the suite again on what main becomes
-  before the next one goes in. Installing the result is a word of its own.
+- The three fixes are on main and installed (his word, 2026-11-26: "merge
+  install"): goose-lsp#7, then #79, #80, #81; main is `419b3be`, the
+  installed Swan `419b3bed04af`. Left for him:
+  - The five versions installed before it were kept (`swan-up update
+    --keep 99`): removing them is deleting, and frees about 8 GB. The
+    plain `scripts/swan-up update` keeps one and removes the rest.
+  - One Hermes profile starts an older copy of Swan from a tools folder
+    in the home directory (a checkout from before #72, with its own maps),
+    not the installed one. The update does not reach it.
+  - This stack (`rust-stage-4`, `rust-lsp-languages`, this branch) is
+    three commits behind main. Main is merged into the lowest when its
+    pull request is opened.
 - A pull request for `rust-live-answers`: it is the third on the stack
   (`rust-stage-4`, `rust-lsp-languages`, this). Each is opened when he
   asks, the lowest first.
@@ -330,8 +330,6 @@ porting", has the call.
   with stage 8? It is on main today, and shows only on a damaged map.
 - `wings/` still points at Spread-Wings from before its Rust port. Moving
   the pin is its own change.
-- The installed Swan is `fb8df2a4c199`, three merges behind main. Updating
-  it is the owner's word (AGENTS.md rule 6).
 - RustRover does not load `rust/` while Swan's folder is the project. To
   have the IDE judge the Rust in that window, attach `rust/Cargo.toml`
   there (the Cargo tool window). Until then a copy of `rust/` is opened as
