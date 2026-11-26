@@ -1,6 +1,6 @@
 # Handoff: Swan in Rust (branch `rust-live-answers`, on `rust-lsp-languages`, on `rust-stage-4`)
 
-Written 2026-11-20T07:25Z; stage 2 part rewritten 2026-11-20T16:21Z, stage 3 part 2026-11-20T23:51Z and again 2026-11-22T06:15Z, when stage 3 was finished; stage 4 part 2026-11-22T06:50Z, 2026-11-22T07:26Z 2026-11-22T16:46Z, 2026-11-22T18:18Z and 2026-11-22T18:45Z, when the prover had run on TypeScript's chunks and every job of a map was planned in Rust. For the next session, any agent. **Start at "Next action".** The end of the map, and the owner's two changes of direction: 2026-11-23T14:15Z. `lsp-index` in Rust: 2026-11-23T15:00Z. The languages mapped through their servers: 2026-11-25T09:04Z. Live answers (`lsp-ask`, `broke`): 2026-11-25T12:15Z.
+Written 2026-11-20T07:25Z; stage 2 part rewritten 2026-11-20T16:21Z, stage 3 part 2026-11-20T23:51Z and again 2026-11-22T06:15Z, when stage 3 was finished; stage 4 part 2026-11-22T06:50Z, 2026-11-22T07:26Z 2026-11-22T16:46Z, 2026-11-22T18:18Z and 2026-11-22T18:45Z, when the prover had run on TypeScript's chunks and every job of a map was planned in Rust. For the next session, any agent. **Start at "Next action".** The end of the map, and the owner's two changes of direction: 2026-11-23T14:15Z. `lsp-index` in Rust: 2026-11-23T15:00Z. The languages mapped through their servers: 2026-11-25T09:04Z. Live answers (`lsp-ask`, `broke`): 2026-11-25T12:15Z. Three fixes to the program that ships, in pull requests, and the check rule corrected: 2026-11-26T07:08Z.
 
 ## The task
 Swan in Rust, on the owner's word. Until 2026-11-23 it was carried over
@@ -160,12 +160,20 @@ the next languages", and later that day "continue".
 4. Checking and editing, and the MCP server on `rmcp`.
 
 Known and small, for whoever is next in these files:
-- **The program that ships says "nothing new" for a Rust file whose check
-  did not run** (a build script that fails, cargo that cannot start). The
-  Rust program does not: with rust-analyzer's health not ok, errors are
-  passed on and no errors is "not settled". "Decisions waiting" has it.
-- The hook prints only new errors, so a file that could not be asked reaches
-  an agent as silence. The JSON says `"asked": false` and why.
+- **A Rust check that did not run is "not settled" in both programs, by
+  rust-analyzer's own two sentences** ("cargo check failed to start",
+  "Failed to run build scripts"), not by its health flag: a warning that
+  leaves cargo check alone (no standard library sources, as in the
+  microVM) does not refuse. In the Rust program since 2026-11-26T07:08Z
+  (`check_not_run`, live.rs); in the program that ships with #79 and
+  goose-lsp#7, not merged.
+- **The Rust `swan broke` does not yet say what #80 makes the Goose one
+  say**: a `reason` for a file not asked (`no_server`, `untrusted`,
+  `unsettled`, `failed`), `first_time`, and the
+  `file<TAB>not-asked|reason|` line in broke-seen.tsv. The hook stays
+  silent for an answer without `reason`. Carry it before this program
+  replaces that one; src/broke.goose on #80's branch is the model, and the
+  not-asked path here must then take the lock and write.
 - `swan broke` and `lsp-ask` pass line and column as given, in the
   server's units (UTF-16); nothing was tried with a character outside ASCII
   before the column.
@@ -174,7 +182,7 @@ Known and small, for whoever is next in these files:
 - That a pulled server is asked only once it is ready (silent for a moment,
   no work in progress) was shown on the scripted server alone: Go's bridge
   reports no progress. rust-analyzer's health was only ever seen as "ok" or
-  "warning"; "error" is treated as any health that is not ok.
+  "warning".
 - What didOpen calls a JavaScript file (`javascript`, not the entry's
   `typescript`) is a rule in `live.rs`, not data: the data file is shared
   with the program that ships.
@@ -235,21 +243,17 @@ So it is not learned again (docs/rust-port.md, "Found while porting"):
   cannot be prepared) and the locked new map (above; the fault is in the
   Rust on main, the mend on this branch) both wait for the owner's word on
   how the Rust on main is brought up to date.
-- The Swan that ships lists no caller where a Python method is called
-  through a parameter with no type annotation, and says nothing of it. On a
-  two-file fixture (`def untyped(paths, args): paths.ensure()` beside the
-  same function with `paths: Paths`) the map holds the typed call and not
-  the other; `get_callers` answers with the one. Spread-Wings and Graphify
-  both link the untyped call by name. Found 2026-11-26 by asking all three
-  who calls thirty functions of a private repo (15 TypeScript, 15 Python),
-  counted as pairs of function and calling file, 93 in all once that one
-  was read in the source: Swan 92, Spread-Wings 87, Graphify 85, and neither
-  of those two named a wrong file. Six pairs both of them missed are a
-  method bound into another class by assignment (`name = Other.name`, read
-  at one site), which Swan has.
-- The Hermes plugin (`integrations/hermes/swan/__init__.py`) runs the same
-  hook and keeps its words only when it exits 2. A change to what the hook
-  says when a file could not be asked has to reach the plugin too.
+- The Swan that ships listed no caller where the compiler index could not
+  resolve a call (a Python method called on a parameter with no type; a
+  TypeScript test file outside its project) and said nothing of it. #81
+  adds a marked list, `possible_callers`, from Spread-Wings' graph. How it
+  was found: all of Swan, Spread-Wings and Graphify were asked who calls
+  thirty functions of a private repo, counted as pairs of function and
+  calling file, 93 in all: Swan 92, Spread-Wings 87, Graphify 85, and
+  neither of those two named a wrong file. When `get_callers` is carried
+  into Rust, the list comes with it.
+- `get_callers` in #81 starts Spread-Wings, sealed, for every answer:
+  about 60 ms where the exact part takes under one. Left as it is.
 
 ## Jev's judgement, 2026-11-22 (evidence, not decisions)
 Asked on the owner's word, one call, of a summary the working agent wrote:
@@ -262,13 +266,18 @@ repos without those languages 40%. docs/rust-port.md, "Found while
 porting", has the call.
 
 ## Decisions waiting on the owner
-- The program that ships tells an agent "nothing new" for a Rust file when
-  the compiler check did not run (STATUS.md, 2026-11-25T12:15Z: a planted
-  type error, exit 0). Mend it there too (the fault is in the client
-  library, the `lsp/` submodule, then a pin and the suite), or leave it to
-  the Rust program?
-- The post-edit hook is silent when a file could not be asked. Have it say
-  so once (it is a script of the program that ships), or leave it?
+- **Four pull requests wait for his word to merge**, written on his word of
+  2026-11-26 ("i follow your recommendations, using antigravity swarm
+  abilities to attack and fix places you need"), each by an Antigravity
+  swarm from a brief and then checked outside it. In this order:
+  goose-lsp#7 (with a merge commit, not a squash: #79 pins a commit of
+  its branch), then #79 (a Rust check that did not run is not clean), #80
+  (the hook says when a file could not be checked), #81 (`get_callers`
+  names the callers the index could not resolve). Each of the three passed
+  the whole suite in the microVM by itself, from main. STATUS.md and
+  DECISIONS.md conflict between them (each adds an entry at the end): keep
+  all entries in time order, and run the suite again on what main becomes
+  before the next one goes in. Installing the result is a word of its own.
 - A pull request for `rust-live-answers`: it is the third on the stack
   (`rust-stage-4`, `rust-lsp-languages`, this). Each is opened when he
   asks, the lowest first.
@@ -325,11 +334,6 @@ porting", has the call.
   have the IDE judge the Rust in that window, attach `rust/Cargo.toml`
   there (the Cargo tool window). Until then a copy of `rust/` is opened as
   its own project, beside the trial repos.
-- Callers Swan cannot resolve ("Also open, small": an untyped Python
-  parameter). Add a second list to `get_callers`, marked as matched by
-  name and taken from Spread-Wings' graph, or keep the answer exact and
-  say only that some calls could not be resolved? Either way it is a change
-  to the program that ships, on main, with a check.
 
 ## Held for after the port
 Seen 2026-11-22 while carrying TypeScript, in the Goose program and so in the
@@ -368,8 +372,11 @@ library is used where one fits.
   `"map_lsp"`.
 - Set `SWAN_SOLIDLSP_HOLD_OPEN` on a server that answers live: a held file
   is answered from the copy opened before the edit.
-- Give an empty answer for a settle that did not happen, or for a build the
-  server itself calls broken. "Not settled" with the reason is the answer.
+- Give an empty answer for a settle that did not happen, or for a check the
+  server says did not run. "Not settled" with the reason is the answer.
+- Refuse a clean Rust answer on rust-analyzer's health alone. It warns for
+  reasons that leave cargo check as it was, and a machine without the
+  standard library's sources would then never hear "clean".
 - Put a language server or its runtime on the machine's PATH to make a
   measurement easier. An editor's own plugin then starts it unsealed on the
   trial repos (ruby-lsp evaluates a repo's Gemfile).

@@ -943,3 +943,33 @@ answers.
 (a Rust check that does not run reads as "nothing new"), and its hook is
 silent when a file cannot be asked. Neither is changed. HANDOFF.md,
 "Decisions waiting", has both.
+
+## 2026-11-26T07:08Z — Correction to 2026-11-25T12:15Z: a Rust check is "not run" by the server's two sentences, not by its health flag
+
+**What that entry decided:** "no errors" only from a server that could
+have seen the file, and for Rust: once the check has ended, a health other
+than "ok" with no error in the file's set is not settled.
+
+**What was seen since:** in the microVM rust-analyzer's health is
+"warning" because the standard library's sources are not installed. Cargo
+check runs all the same. Under that rule every clean Rust file was
+refused, and two of the live suite's checks failed when the rule was put
+into the program that ships (#79).
+
+**Decided now (mine, the owner's to overrule):** in both programs a set
+with no error is refused only when the status holds rust-analyzer's own
+sentence for a check that did not judge the code: "cargo check failed to
+start", or "Failed to run build scripts". The second is needed because a
+first, cold check with a failing build script leaves only that one
+(measured 2026-11-25). Errors found are passed on either way. The
+principle of the entry stands; what told "could not have seen the file"
+was wrong.
+
+**What it costs:** the rule reads rust-analyzer's wording, which the first
+rule was chosen to avoid. The pinned version, a test with the real server
+here and a check with it in the live suite (#79) guard it.
+
+**The owner's word for the three fixes to the program that ships** (#79,
+#80, #81): "i follow your recommendations, using antigravity swarm
+abilities to attack and fix places you need", 2026-11-26. Each pull
+request's DECISIONS.md entry has what was decided in it.

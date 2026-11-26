@@ -155,9 +155,9 @@ impl Live {
             // compiler's only from the check a save starts (cargo check), and
             // it publishes only the sets that change. So the answer is the
             // set standing once that check has ended, the workspace loaded.
-            // While the server says its health is not ok, an error in that
-            // set is passed on and a set with none is no answer: the build
-            // it calls broken may never have reached the file.
+            // When the server's status says the check did not run
+            // (check_not_run), an error in that set is passed on and a set
+            // with none is no answer: the check never reached the file.
             Settle::Check => {
                 let held = self.client.wait_until(deadline, |h| h.quiescent == Some(true) && checks_ended(h) > checks && !checking(h)).map_err(|e| self.said(e))?;
                 if !held {
@@ -165,9 +165,9 @@ impl Live {
                 }
                 self.last_set()?;
                 let items = self.items(&key, 0);
-                if let Some(s) = self.client.heard().status.as_ref().filter(|s| s.health != "ok") {
+                if let Some(said) = self.client.heard().status.as_ref().and_then(check_not_run) {
                     if !items.iter().any(|d| d.severity == "error") {
-                        return Ok(Diagnosed::Unsettled(format!("not settled: {}", unhealthy(&self.lang, s))));
+                        return Ok(Diagnosed::Unsettled(format!("not settled: {said}")));
                     }
                 }
                 Some(items)
@@ -274,19 +274,24 @@ fn checking(h: &Heard) -> bool {
     h.working.keys().any(|t| is_check(t))
 }
 
-// Why a server whose health is not ok gave no answer: its status message,
-// the first two lines that hold text, at most 300 characters (what follows
-// them is a build log).
-fn unhealthy(lang: &str, s: &Status) -> String {
-    let said: Vec<&str> = s.message.lines().map(str::trim).filter(|l| !l.is_empty()).take(2).collect();
-    if said.is_empty() {
-        return format!("the {lang} language server says its health is {}", s.health);
+// rust-analyzer's own words, in its status message, for a check that did not
+// judge the code: its flycheck could not run, or a build script failed, which
+// stops cargo before the crate itself is compiled. Its other warnings (no
+// standard library sources, no proc-macro server) leave cargo check as it
+// was, and a set with no error under them is clean. The answer is what the
+// server said from there on: the first two lines that hold text, at most 300
+// characters (what follows them is a build log).
+fn check_not_run(s: &Status) -> Option<String> {
+    if s.health == "ok" {
+        return None;
     }
+    let from = ["Failed to run build scripts", "cargo check failed to start"].iter().filter_map(|said| s.message.find(said)).min()?;
+    let said: Vec<&str> = s.message[from..].lines().map(str::trim).filter(|l| !l.is_empty()).take(2).collect();
     let mut why = said.join(" ");
     if let Some((cut, _)) = why.char_indices().nth(300) {
         why.truncate(cut);
     }
-    why.trim_end_matches(':').to_string()
+    Some(why.trim_end_matches(':').to_string())
 }
 
 fn diag(d: &Value) -> Diag {

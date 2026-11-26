@@ -20,6 +20,8 @@ that holds WARN a warning. How the server has its say about a file:
             build script fails
   check-warns  as check, with a status warning about build scripts from the
             moment it is ready; the check runs
+  check-sysroot  as check, with a status warning that leaves the check alone
+            (no standard library sources); the check runs
   late      as the TypeScript server: busy from the moment a file is opened,
             it says so (progress) only 50 ms later, and until its work ends
             half a second after the open it finds no definition
@@ -81,6 +83,10 @@ def publish(uri, items, version: "int | None" = 1):
 BUILD_SCRIPTS = "Failed to run build scripts of some packages.\n\nPlease refer to the language server logs for more details on the errors."
 
 
+SYSROOT = ("Workspace `x/Cargo.toml` has sysroot errors: can't load standard library from sysroot\n"
+           "/opt/none\ntry installing `rust-src` the same way you installed `rustc`")
+
+
 def status(message=None):
     notify("experimental/serverStatus", {"health": "warning" if message else "ok", "quiescent": not state["busy"], "message": message})
 
@@ -102,7 +108,7 @@ def check(uri):
 
 def ready():
     state["busy"] = False
-    status(BUILD_SCRIPTS if mode == "check-warns" else None)
+    status(BUILD_SCRIPTS if mode == "check-warns" else SYSROOT if mode == "check-sysroot" else None)
     for uri in state["pending"]:
         check(uri)
 

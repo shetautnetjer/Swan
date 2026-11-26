@@ -2868,3 +2868,60 @@ Limits:
   Rust file is answered "not settled" every time.
 - A live server runs sealed only when its entry says so, as in the program
   that ships: the Python, TypeScript, C, Lua and shader servers do not.
+
+## 2026-11-26T07:08Z: the check rule corrected in the Rust program; three fixes to the program that ships are in pull requests
+
+What was wrong here: since 2026-11-25T12:15Z the Rust program refused a
+clean answer for a Rust file whenever rust-analyzer's health was not "ok".
+When the same rule went into the program that ships (#79), the microVM
+showed what it costs: rust-analyzer warns there that the standard
+library's sources are not installed ("has sysroot errors"), cargo check
+runs all the same, and every clean file was refused. Two live checks that
+expect a clean file failed (322 passed, 2 failed).
+
+What changed here (rust/src/live.rs): `check_not_run`. A set with no
+error is refused only when the status holds rust-analyzer's own sentence
+for a check that did not judge the code, "cargo check failed to start" or
+"Failed to run build scripts"; the reason given starts at that sentence.
+The scripted server has a mode with the sysroot warning, and there is one
+new test.
+
+Checked here: `cargo test`, 47 pass (46 before; 2, 18, 16, 6 and 5), no
+warnings. The new test fails on the rule from before (asked false where
+true is expected). The test with the real rust-analyzer, cold and warm,
+passes as it did.
+
+The program that ships, on the owner's word of this day ("i follow your
+recommendations, using antigravity swarm abilities to attack and fix
+places you need"). Each change was written by an Antigravity swarm
+(`agy-task --swarm`) from a brief, in a copy, then read, built and
+measured outside it, each on its own branch from main:
+
+| pull request | what it makes true | the suite in the microVM |
+|---|---|---|
+| #79, with goose-lsp#7 | a Rust check that did not run is "not settled", not "nothing new" | 58 + 324 checks, 0 failed; 56 Python tests (`fc7c210`) |
+| #80 | the post-edit hook says, once per file and reason, that a file could not be checked; `swan broke` gives the reason and exits 3 | 58 + 326 checks, 0 failed; 64 Python tests (`d605b01`) |
+| #81 | `get_callers` adds `possible_callers`: the call sites the compiler index could not resolve, from Spread-Wings, marked | 58 + 327 checks, 0 failed; 56 Python tests (`8ddfe79`) |
+
+Main at `245fb7e` gives 58 + 322 and 56. None is merged. Each pull
+request's own STATUS.md entry has its table and limits.
+
+What the swarm was like, for the next time: three runs at once, 15, 21 and
+26 minutes, 196, 215 and 143 thousand tokens by its own count. Each split
+its brief among named workers with one that only checked. The code of all
+three built and did what the brief said. The fault the microVM found was
+in the brief's rule, not in the swarm's code; and a "simpler" rewrite of
+four of its lines, by hand, did not compile (Goose will not clear a buffer
+while a slice of a parsed message is alive), where its own did. The copy
+it works in needs the Goose compiler and its package cache put inside it
+(a git archive holds neither, nor the submodules), every `.git` taken
+out, and the node tools linked in, or it can build nothing and map no
+Python or TypeScript.
+
+Limits:
+- The Rust `swan broke` does not give #80's `reason` and
+  `first_time`; the hook stays silent for it. HANDOFF.md has it.
+- The microVM suite was not run for this branch: it judges the Goose
+  program, and nothing it reads or runs changed here.
+- The swarm's runs are not kept in the repository; their briefs, reports
+  and patches are in the session's scratch folder and the tool's cache.

@@ -41,6 +41,7 @@ const LANGS: &[(&str, &str, &str, &str, u64)] = &[
     ("late", ".lt", "late", "publish", 0),
     ("checkfails", ".cf", "check-fails", "check", 0),
     ("checkwarns", ".cw", "check-warns", "check", 0),
+    ("checksysroot", ".sy", "check-sysroot", "check", 0),
 ];
 
 // A Swan home with only those languages in its tools/modules.json, a repo
@@ -202,9 +203,9 @@ fn a_check_that_did_not_run_is_not_settled() {
     assert!(!s.map.join("broke-seen.tsv").exists(), "a file not asked was remembered");
 }
 
-// While the server says its health is not ok, an error it reports is
-// reported; a file with no error in its set (clean, or warnings only) is not
-// settled, with the server's status as the why.
+// While the server's status says a build script failed, an error it reports
+// is reported; a file with no error in its set (clean, or warnings only) is
+// not settled, with the server's status as the why.
 #[test]
 fn an_unhealthy_server_passes_errors_on_but_no_clean_answer() {
     let s = setup("check-warns");
@@ -220,6 +221,22 @@ fn an_unhealthy_server_passes_errors_on_but_no_clean_answer() {
     assert_eq!((why(&r, 0), why(&r, 1)), (said.to_string(), said.to_string()));
     assert_eq!(r.code, 3);
     assert!(!fs::read_to_string(s.map.join("broke-seen.tsv")).unwrap().contains("b.cw"), "a file not asked was remembered");
+}
+
+// A warning that leaves the check alone (the standard library's sources are
+// not installed) is no refusal: a clean file is asked and clean, and an
+// error is reported.
+#[test]
+fn a_warning_that_leaves_the_check_alone_is_no_refusal() {
+    let s = setup("check-sysroot");
+    fs::write(s.repo.join("b.sy"), "fine\n").unwrap();
+    let r = broke(&s, &["b.sy"], 20000);
+    assert_eq!(files(&r), [("b.sy".to_string(), true, vec![])], "{}", r.json);
+    assert_eq!(r.code, 0);
+    fs::write(s.repo.join("a.sy"), "fine\nan ERROR here\n").unwrap();
+    let r = broke(&s, &["a.sy"], 20000);
+    assert_eq!(files(&r), [planted("a.sy")], "{}", r.json);
+    assert_eq!(r.code, 1);
 }
 
 // A server that never says its piece: not settled inside a short budget,
