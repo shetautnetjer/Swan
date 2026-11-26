@@ -20,6 +20,7 @@
 
 import std;
 import os;
+import dictionary;
 import json;
 import sqlite;
 import .db;
@@ -452,4 +453,217 @@ fn wings_answer(db: i64, map_db: const u8[:], cmd: const u8[:], a: const u8[:], 
     out.append(answer);
     out.push('}');
     return true;
+}
+
+let POSSIBLE_CALLERS_NOTE = "From Spread-Wings, by syntax, not compiler-checked: call sites the compiler index does not cover. how says how each was tied to this definition; by_name means any definition with this name could be the one called. Read each site before relying on it.";
+
+// Distance-1 call sites Spread-Wings ties to the target definition(s) that
+// the compiler index neither put in the exact callers nor resolved to another
+// symbol. Reads wings.db directly after bringing it up to date via
+// wings_graph; runs outside any read snapshot on `db`.
+// Leaves `out` unchanged when Spread-Wings succeeds with 0 sites; appends
+// {"checked":false,"why":"..."} when Spread-Wings is missing or fails.
+fn wings_possible_callers(db: i64, map_db: const u8[:], root: const u8[:], ids: const u8[:],
+                          specs: const u8[:], exact: const u8[:], out: u8[>..]&) {
+    guard out.len > 0 && out[out.len - 1] == '}' else { return; }
+    fn append_unchecked(reason: const u8[:]) {
+        out.pop();
+        out.append(",\"possible_callers\":{\"checked\":false,\"why\":");
+        json::format_string(out, reason);
+        out.append("}}");
+    }
+    var why: u8[>..] = [];
+    guard root.len > 0 else {
+        append_unchecked("the map does not record its repo root; rebuild it with swan map");
+        return;
+    }
+    guard map_db.len > 0 else {
+        append_unchecked("no map path is set for this server");
+        return;
+    }
+    let bin = wings_bin(why);
+    guard bin.len > 0 else { append_unchecked(why); return; }
+    var since: u8[>..] = [];
+    let g = wings_graph(bin, map_db, root, why, since);
+    guard g.len > 0 else { append_unchecked(why); return; }
+    guard specs.len > 0 else { return; }
+
+    var werr: u8[>..] = [];
+    let wdb = sqlite::open_existing(g, werr);
+    guard wdb != 0 else {
+        append_unchecked(str("cannot open Spread-Wings graph: ", werr));
+        return;
+    }
+    sqlite::exec(wdb, "PRAGMA busy_timeout = 5000;", werr);
+    werr.clear();
+
+    // Match each Swan target definition to its symbol id in wings.db.
+    var gids: u8[>..] = [];
+    let find_sym = sqlite::prepare(wdb, """
+        SELECT g.id FROM symbols g JOIN files f ON f.id = g.file_id
+        WHERE f.path = ?1 AND g.name = ?2 AND g.row <= ?3 AND g.end_row >= ?3
+        ORDER BY g.end_row - g.row LIMIT 1
+        """, werr);
+    guard find_sym != 0 else {
+        sqlite::close(wdb);
+        append_unchecked(str("cannot read Spread-Wings graph: ", werr));
+        return;
+    }
+    var read_ok = true;
+    each_split(specs, 0x1e) { rec =>
+        if read_ok && rec.len > 0 {
+            let f = split(rec, 0x1f);
+            if f.len >= 3 {
+                let dline, dl_ok = parse_int(f[2]);
+                if dl_ok {
+                    sqlite::bind_text(find_sym, 1, f[1]);
+                    sqlite::bind_text(find_sym, 2, f[0]);
+                    sqlite::bind_int(find_sym, 3, dline + 1);
+                    let r = sqlite::step(find_sym, werr);
+                    if r == 1 {
+                        if gids.len > 0 { gids.push(','); }
+                        format(gids, sqlite::col_int(find_sym, 0));
+                    } else if r < 0 {
+                        read_ok = false;
+                    }
+                    sqlite::reset(find_sym);
+                }
+            }
+        }
+    };
+    sqlite::finalize(find_sym);
+    guard read_ok else {
+        sqlite::close(wdb);
+        append_unchecked(str("cannot read Spread-Wings graph: ", werr));
+        return;
+    }
+    guard gids.len > 0 else {
+        sqlite::close(wdb);
+        return;
+    }
+
+    // Exact distance-1 sites from the snapshot, keyed by "<file>\x1f<1-based line>".
+    var exact_set = dictionary<const u8[:], bool> {};
+    each_split(exact, '\n') { k => if k.len > 0 { exact_set.insert(k, true); } };
+
+    // Non-compiler edges pointing at the target definition(s), ordered by path
+    // and line (strongest resolution first when a line has more than one edge).
+    var edge_sql: u8[>..] = [];
+    format_replaced(edge_sql, """
+        SELECT f.path, e.row,
+               CASE WHEN COALESCE(cs.container, '') <> '' THEN cs.container || '/' || cs.name
+                    ELSE COALESCE(cs.name, '') END,
+               COALESCE(e.resolution, ''),
+               t.name,
+               (SELECT COUNT(*) FROM calls c
+                WHERE c.file_id = e.file_id AND c.row = e.row AND c.callee = t.name)
+        FROM call_edges e
+        JOIN files f ON f.id = e.file_id
+        JOIN symbols t ON t.id = e.callee
+        LEFT JOIN symbols cs ON cs.id = e.caller
+        WHERE e.callee IN (#GIDS#) AND COALESCE(e.resolution, '') != 'compiler'
+        ORDER BY f.path, e.row,
+                 CASE e.resolution
+                     WHEN 'own_type' THEN 1 WHEN 'type_name' THEN 2 WHEN 'same_file' THEN 3
+                     WHEN 'imported_name' THEN 4 WHEN 'module_alias' THEN 5 WHEN 'imported_file' THEN 6
+                     WHEN 'decided' THEN 7 WHEN 'by_name' THEN 8 ELSE 9 END
+        """, "#GIDS#", gids);
+    let edges = sqlite::prepare(wdb, edge_sql, werr);
+    guard edges != 0 else {
+        sqlite::close(wdb);
+        append_unchecked(str("cannot read Spread-Wings graph: ", werr));
+        return;
+    }
+
+    // Check whether Swan's compiler index already resolved calls of this name
+    // on the same file and line to another symbol (in-repo or external).
+    var other_sql: u8[>..] = [];
+    format_replaced(other_sql, """
+        SELECT COUNT(*) FROM occurrences o JOIN symbols s ON s.id = o.symbol_id
+        WHERE o.file = ?1 AND o.start_line = ?2
+          AND o.is_def = 0 AND o.by_name = 0 AND o.is_import = 0
+          AND s.name = ?3 AND o.symbol_id NOT IN (#IDS#)
+        """, "#IDS#", ids);
+    var derr: u8[>..] = [];
+    let other_st = sqlite::prepare(db, other_sql, derr);
+    guard other_st != 0 else {
+        sqlite::finalize(edges);
+        sqlite::close(wdb);
+        append_unchecked(str("cannot check compiler index: ", derr));
+        return;
+    }
+
+    var sites_json: u8[>..] = [];
+    var total: i64 = 0;
+    var listed: i64 = 0;
+    var prev_path: u8[>..] = [];
+    var prev_row: i64 = -1;
+    var step_r: i32 = 0;
+    loop {
+        step_r = sqlite::step(edges, werr);
+        if step_r != 1 { break; }
+        var path: u8[>..] = [];
+        sqlite::col_text(edges, 0, path);
+        let row = sqlite::col_int(edges, 1);
+        if path == prev_path && row == prev_row { continue; }
+        prev_path.clear();
+        prev_path.append(path);
+        prev_row = row;
+
+        let key = str(path, "\x1f", row);
+        if exact_set.contains(key) { continue; }
+
+        if !is_stale(path) {
+            var tname: u8[>..] = [];
+            sqlite::col_text(edges, 4, tname);
+            let raw_ncalls = sqlite::col_int(edges, 5);
+            let ncalls: i64 = if raw_ncalls > 0 { raw_ncalls } else { 1 };
+
+            sqlite::bind_text(other_st, 1, path);
+            sqlite::bind_int(other_st, 2, row - 1);
+            sqlite::bind_text(other_st, 3, tname);
+            var other_n: i64 = 0;
+            let or_r = sqlite::step(other_st, derr);
+            if or_r == 1 { other_n = sqlite::col_int(other_st, 0); }
+            sqlite::reset(other_st);
+            if or_r < 0 { read_ok = false; werr.clear(); format(werr, "compiler index check failed: ", derr); break; }
+            if other_n >= ncalls { continue; }
+        }
+
+        total++;
+        if listed < 50 {
+            var in_sym: u8[>..] = [];
+            var how: u8[>..] = [];
+            sqlite::col_text(edges, 2, in_sym);
+            sqlite::col_text(edges, 3, how);
+            if listed > 0 { sites_json.push(','); }
+            listed++;
+            sites_json.append("{\"relative_path\":");
+            json::format_string(sites_json, path);
+            sites_json.append(",\"line\":");
+            json::format_int(sites_json, row);
+            sites_json.append(",\"in_symbol\":");
+            json::format_string(sites_json, in_sym);
+            sites_json.append(",\"how\":");
+            json::format_string(sites_json, how);
+            sites_json.push('}');
+        }
+    }
+    sqlite::finalize(other_st);
+    sqlite::finalize(edges);
+    sqlite::close(wdb);
+    if step_r < 0 || !read_ok {
+        append_unchecked(str("cannot read Spread-Wings graph: ", werr));
+        return;
+    }
+    guard total > 0 else { return; }
+
+    out.pop();
+    out.append(",\"possible_callers\":{\"note\":");
+    json::format_string(out, POSSIBLE_CALLERS_NOTE);
+    out.append(",\"total\":");
+    json::format_int(out, total);
+    out.append(",\"sites\":[");
+    out.append(sites_json);
+    out.append("]}}");
 }

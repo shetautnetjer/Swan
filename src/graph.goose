@@ -74,11 +74,14 @@ fn targets(db: i64, pattern: const u8[:], rel: const u8[:], out: u8[>..]&) -> u8
 // Who references the target, and who references those, up to `depth` steps:
 // the impact radius of changing it. Each result has its distance and whether
 // it is test code, and a summary counts the files and lists the test files.
-fn get_callers(db: i64, pattern: const u8[:], rel: const u8[:], depth: i64, limit: i64, out: u8[>..]&) {
+// Returns the SQL id list of the matched target (plus constructors and repo
+// base methods it implements), or "" when nothing matched or the match was
+// ambiguous.
+fn get_callers_exact(db: i64, pattern: const u8[:], rel: const u8[:], depth: i64, limit: i64, out: u8[>..]&) -> u8[>..] {
     out.push('{');
     var ids = targets(db, pattern, rel, out);
-    guard ids.len > 0 else { out.append(",\"callers\":[]}"); return; }
-    if refuse_ambiguous(out) { return; }
+    guard ids.len > 0 else { out.append(",\"callers\":[]}"); return ids; }
+    if refuse_ambiguous(out) { ids.clear(); return ids; }
     // A method that implements or overrides another is also called through
     // it: `s.area()` on a Shape may run Circle.area. So the callers of the
     // repo methods it implements count as its callers, and the answer names
@@ -227,6 +230,47 @@ fn get_callers(db: i64, pattern: const u8[:], rel: const u8[:], depth: i64, limi
     }
     sqlite::finalize(tf);
     out.append("]}}");
+    return ids;
+}
+
+fn get_callers(db: i64, pattern: const u8[:], rel: const u8[:], depth: i64, limit: i64, out: u8[>..]&) {
+    get_callers_exact(db, pattern, rel, depth, limit, out);
+}
+
+// Target definitions and exact distance-1 call sites from the current read
+// snapshot, so Spread-Wings can look up syntax-only callers after the
+// snapshot is released.
+// `specs`: "<name>\x1f<def_file>\x1f<0-based def_line>\x1e" per definition.
+// `exact`: "<file>\x1f<1-based line>\n" per exact distance-1 occurrence.
+fn callers_target_info(db: i64, ids: const u8[:], specs: u8[>..]&, exact: u8[>..]&) {
+    var err: u8[>..] = [];
+    var sym_sql: u8[>..] = [];
+    format_replaced(sym_sql, """
+        SELECT name, def_file, def_line FROM symbols
+        WHERE id IN (#IDS#) AND in_repo = 1 AND name != '<init>'
+          AND def_file IS NOT NULL AND def_line IS NOT NULL
+        """, "#IDS#", ids);
+    let st = prepare_or_die(db, sym_sql);
+    while step_checked(st, err) == 1 {
+        var nm: u8[>..] = [];
+        var df: u8[>..] = [];
+        sqlite::col_text(st, 0, nm);
+        sqlite::col_text(st, 1, df);
+        format(specs, nm, "\x1f", df, "\x1f", sqlite::col_int(st, 2), "\x1e");
+    }
+    sqlite::finalize(st);
+    var occ_sql: u8[>..] = [];
+    format_replaced(occ_sql, """
+        SELECT DISTINCT file, start_line + 1 FROM occurrences
+        WHERE symbol_id IN (#IDS#) AND is_def = 0 AND is_import = 0
+        """, "#IDS#", ids);
+    let os = prepare_or_die(db, occ_sql);
+    while step_checked(os, err) == 1 {
+        var f: u8[>..] = [];
+        sqlite::col_text(os, 0, f);
+        format(exact, f, "\x1f", sqlite::col_int(os, 1), "\n");
+    }
+    sqlite::finalize(os);
 }
 
 // What the target references from inside its own body: the functions it

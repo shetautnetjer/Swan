@@ -94,3 +94,9 @@ that section, and a line on `files_changed`: the broad-map answers follow
 the files, and say which changed and what they reach. The same day the
 trust paragraph was corrected: a project's own virtualenv is read for the
 map without trust.
+
+On 2026-11-26, `get_callers` guidance and the "Broad map" evidence row were
+updated for `possible_callers` (distance-1 syntax call sites from Spread-Wings
+that the compiler index does not cover, kept separate from `callers` and
+`summary`, with `checked: false` when Spread-Wings is unavailable or fails).
+The pattern pack, fixture and self-test are unchanged.

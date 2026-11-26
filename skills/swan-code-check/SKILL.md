@@ -157,7 +157,7 @@ Report every finding with its evidence kind. Never merge them into one
 | Compiler | SCIP indexers: TypeScript/JavaScript, Python, Rust, Java, Kotlin, C, C++, CUDA, C# (only those the map report shows ran) | Resolved by the compiler: exact |
 | Matched by name | Rows marked `by_name: true`; whole syntax-level languages below; Rust uses inside unresolved macros | An identifier with the same name: a lead, not proof. Two things with one name are not told apart |
 | Structural pattern | `search_pattern` on on-disk syntax | Shape of the code only; check `files_searched`, `pattern_does_not_parse_in`, `truncated` |
-| Broad map | `repo_overview`, `what_touches`, `file_neighbors`, and `touches` in a planned `edit_batch` (Spread-Wings, by syntax) | Links matched by import, by the type a call names, and by name: for finding your way and for "what might this reach". Each answer carries `"source":"spread-wings"`; confirm what matters with `find_referencing_symbols` or `get_callers` |
+| Broad map | `repo_overview`, `what_touches`, `file_neighbors`, `touches` in a planned `edit_batch`, and `possible_callers` on `get_callers` (Spread-Wings, by syntax) | Links matched by import, by the type a call names, and by name: for finding your way and for "what might this reach". Broad-map tools carry `"source":"spread-wings"` (`possible_callers` carries its own `note` and per-site `how`); confirm what matters with `find_referencing_symbols`, `get_callers` exact `callers`, or reading the site |
 | Live diagnostics, checks, tests | The language server, checker or test runner actually run | Only what the call returned; "available" is not "passed" |
 
 **Syntax-level languages** (definitions, bodies and references by name, no
@@ -187,8 +187,18 @@ never "clean". If `truncated` is true, raise `max_results` or narrow
 
 - Before changing a shared symbol, use `get_callers` with `name_path` and
   `depth:2`. `summary.files` is the impact radius; `summary.test_files`
-  guide validation. Use `find_implementations` for interfaces and base
-  classes and `get_callees` for dependencies. Disambiguate with an exact
+  guide validation. At distance 1 only, `get_callers` also returns a separate
+  `possible_callers` block (never merged into `callers` or `summary`) with
+  call sites Spread-Wings ties by syntax that the compiler index does not
+  cover (`total` and up to 50 `sites`, each with `how` it was matched;
+  `by_name` means any definition with that name could be the one called).
+  Read each site before relying on it and report `possible_callers` as
+  syntax/Spread-Wings leads separate from compiler-resolved `callers`. The
+  key is omitted when there are none; when Spread-Wings is unavailable or
+  fails, `possible_callers` is `{"checked": false, "why": "..."}`: report
+  that as unchecked, not as zero possible callers. Nothing by syntax is added
+  at distance 2 and beyond. Use `find_implementations` for interfaces and
+  base classes and `get_callees` for dependencies. Disambiguate with an exact
   name path such as `/Store/add` or `relative_path`.
 - After editing, refresh the map, then `get_diagnostics` with
   `relative_path` and `live:true` if supported, or `check_errors`.
