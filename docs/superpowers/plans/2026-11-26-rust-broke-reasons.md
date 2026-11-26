@@ -55,13 +55,13 @@
 - Produces, in `broke.rs`: `type Answer = Result<Vec<Diag>, Refusal>;` and the JSON of a file not asked, keys in this order: `relative_path`, `asked`, `reason`, `why` (Task 2 puts `first_time` between `reason` and `why`).
   Where each reason comes from in `broke_main`: `file_in` refused the argument: `Failed`. `language_of` gave `Ok(None)`: `NoServer`; `Err`: `Failed`. `Live::start`: its `Refusal`. `Diagnosed::Unsettled(why)`: `Unsettled`. `Err` from `diagnostics`: `Failed`. A file never reached ("not asked"): `Failed`.
 
-- [ ] **Step 1: Make the branch**
+- [x] **Step 1: Make the branch**
 
 ```bash
 git checkout rust-live-answers && git pull --ff-only && git checkout -b rust-broke-reasons
 ```
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 In `rust/tests/live.rs`: `swan` gains a sibling that passes extra variables, and `setup` two languages whose server runs the repo's code.
 
@@ -98,21 +98,21 @@ fn a_file_not_asked_has_a_reason() {
 }
 ```
 
-- [ ] **Step 3: Run it to see it fail**
+- [x] **Step 3: Run it to see it fail**
 
 Run: `CARGO_TARGET_DIR=$PWD/build/rust ~/.cargo/bin/cargo test --release --manifest-path rust/Cargo.toml --test live a_file_not_asked_has_a_reason`
 Expected: FAIL at the first `assert_eq!`, left `(3, None)`.
 
-- [ ] **Step 4: Implement the interfaces above**
+- [x] **Step 4: Implement the interfaces above**
 
 `ask` in `live.rs` (behind `lsp-ask`) maps a `Refusal` back to its `why`, so its answers do not change.
 
-- [ ] **Step 5: Run the whole file**
+- [x] **Step 5: Run the whole file**
 
 Run: `CARGO_TARGET_DIR=$PWD/build/rust ~/.cargo/bin/cargo test --release --manifest-path rust/Cargo.toml --test live`
 Expected: 17 passed (16 before), no warnings in the build. `files_outside_the_repo_are_refused_before_a_server_starts` passes unchanged: that is the proof `lsp-ask` and the refusal texts did not move.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add rust/src/modules.rs rust/src/live.rs rust/src/broke.rs rust/tests/live.rs
@@ -140,7 +140,7 @@ The rules, each from `src/broke.goose` on main unless marked:
 6. The seen file is written when its bytes would change, and only then. A write that fails is not an error of the command.
 7. `NOTE` becomes, exactly: `new_errors are errors the language server reports now and did not when this was last asked for the file; on a first look every error counts as new; when asked is false (except no_server), first_time is true the first time the file was not asked for that reason, and false until the reason changes or the file is asked again`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 A helper, `fn seen(s: &Setup) -> String`: the seen file's text, `""` when there is none.
 
@@ -218,30 +218,30 @@ fn a_map_folder_that_cannot_be_written_still_gets_its_answer() {
 
 `a_refusal_to_remember_waits_for_the_lock`: `the_seen_file_waits_for_its_lock` over again with `a.tr` (not trusted) in place of `a.fake`: while the test holds `broke-seen.lock` the child has not ended after 3 s and there is no seen file; once the lock is dropped the child ends with code 3 and `seen(&s)` is `"a.tr\tnot-asked|untrusted|\n"`.
 
-- [ ] **Step 2: Change the four tests that say a refusal is not remembered**
+- [x] **Step 2: Change the four tests that say a refusal is not remembered**
 
 - `a_check_that_did_not_run_is_not_settled`: in place of "no seen file", `assert_eq!(seen(&s), "a.cf\tnot-asked|unsettled|\n");`
 - `an_unhealthy_server_passes_errors_on_but_no_clean_answer`: the seen file holds `"b.cw\tnot-asked|unsettled|\n"` and `"c.cw\tnot-asked|unsettled|\n"`, and holds neither `"b.cw\t\n"` nor `"c.cw\t\n"` (not looked at).
 - `a_silent_server_is_not_settled_in_time`: `assert_eq!(seen(&s), "a.sl\tnot-asked|unsettled|\n");`
 - `errors_are_new_once_and_a_file_not_asked_keeps_its_lines`: after the ask of `b.fake` and `a.sl`, also `after.contains("a.sl\tnot-asked|unsettled|\n")` and `r.json["files"][1]["first_time"] == true`.
 
-- [ ] **Step 3: Run them to see them fail**
+- [x] **Step 3: Run them to see them fail**
 
 Run: `CARGO_TARGET_DIR=$PWD/build/rust ~/.cargo/bin/cargo test --release --manifest-path rust/Cargo.toml --test live`
 Expected: four of the new tests and the four changed ones FAIL (no `first_time`, no `not-asked` line). `what_is_not_remembered_writes_nothing` and `a_name_with_a_tab_is_not_remembered` pass already: they pin what must stay, and step 6 shows they can fail.
 
-- [ ] **Step 4: Implement `Answered`, `remember` and the JSON field by the seven rules; rewrite the paragraph at the top of `broke.rs` that says a file not asked leaves the seen file as it was**
+- [x] **Step 4: Implement `Answered`, `remember` and the JSON field by the seven rules; rewrite the paragraph at the top of `broke.rs` that says a file not asked leaves the seen file as it was**
 
-- [ ] **Step 5: Run the whole file**
+- [x] **Step 5: Run the whole file**
 
 Run: the command of step 3.
 Expected: 23 passed, no warnings.
 
-- [ ] **Step 6: See the two pinning tests fail**
+- [x] **Step 6: See the two pinning tests fail**
 
 Break rule 1 on purpose (remember every refusal, whatever its reason or name), run `what_is_not_remembered_writes_nothing` and `a_name_with_a_tab_is_not_remembered`, see both FAIL, and put the rule back. Run the whole file once more: 23 passed.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add rust/src/broke.rs rust/tests/live.rs
@@ -257,11 +257,11 @@ git commit -m "swan broke in Rust: a file not asked is said once per reason"
 **Interfaces:**
 - Consumes: the JSON of Tasks 1 and 2; `setup(fixture, name)`, `swan(home, args, trusted)`, `not_fetched`, `left_running` of that file.
 
-- [ ] **Step 1: Change `rust_check_that_did_not_run_is_not_clean`**
+- [x] **Step 1: Change `rust_check_that_did_not_run_is_not_clean`**
 
 In its loop over `("cold", ...)` and `("warm", ...)`: `f["reason"] == "unsettled"`; `f["first_time"]` is true for cold and false for warm (the words differ, the reason is the same); the seen file is `"src/lib.rs\tnot-asked|unsettled|\n"` both times. After `build.rs` is removed and the file is asked, the seen file holds no `not-asked` line.
 
-- [ ] **Step 2: Add `rust_not_trusted_is_said_once`**
+- [x] **Step 2: Add `rust_not_trusted_is_said_once`**
 
 ```rust
 // rust-analyzer's check runs the crate's build: without trust the file is
@@ -282,17 +282,17 @@ fn rust_not_trusted_is_said_once() {
 }
 ```
 
-- [ ] **Step 3: Run every test of the crate**
+- [x] **Step 3: Run every test of the crate**
 
 Run: `CARGO_TARGET_DIR=$PWD/build/rust ~/.cargo/bin/cargo test --release --manifest-path rust/Cargo.toml`
 Expected: 55 passed (47 before: 2, 18, 23, 7 and 5), no warnings.
 
-- [ ] **Step 4: The hook, with both builds, on a real repo**
+- [x] **Step 4: The hook, with both builds, on a real repo**
 
 The hook that reads these fields is main's, not this branch's. Put it in the scratch folder (`git show origin/main:scripts/hooks/what-broke-after-edit.py`) and run the lead's `swan-broke-probe` (its header has the usage) with `SWAN_HOOK` naming that copy, on the trial clone of relate (Rust; sealed, not trusted, never `--own`), one of its `.rs` files, a line that does not compile, and two builds: `before=` a home holding the binary of `rust-live-answers`, `after=` a home holding this branch's (a home is `bin/swan` with `bin/eggshell`, `bin/swan-flatten`, `bin/spread-wings` beside it and `tools` and `.tools` linked to the repo's).
 Expected: `before`: the hook says nothing on either run. `after`: the hook's first run prints the note that begins "Swan did not check", with "by its owner's choice"; its second run prints nothing. The words "swan trust" are in neither. Nothing is left running, and `git status --short` in the clone is empty. Keep the probe's table for STATUS.md, then delete the copies it made.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add rust/tests/live_servers.rs
@@ -304,17 +304,17 @@ git commit -m "swan broke in Rust: the reasons with the real rust-analyzer"
 **Files:**
 - Modify: `STATUS.md`, `HANDOFF.md`, `docs/rust-port.md`, `README.md`
 
-- [ ] **Step 1: STATUS.md, a dated entry at the end**
+- [x] **Step 1: STATUS.md, a dated entry at the end**
 
 Heading: `## <time>: the Rust `swan broke` says why a file was not checked, once`. It holds: what was wrong (the hook silent for the Rust program: the probe's `before` row); what changed, in four sentences; the probe's table; the test counts of Task 3, step 3, and which break each new test caught; that the microVM suite was not run and why; the limits: a file outside the repo and a name with a tab are not remembered, which the Goose program does differently, and the hook test with the Rust program waits for main to be merged into this stack.
 
-- [ ] **Step 2: HANDOFF.md**
+- [x] **Step 2: HANDOFF.md**
 
 Title and "Written" line: the branch and this change's time. "Known and small": remove the bullet that begins "The Rust `swan broke` does not yet say what #80 made the Goose one say". "State", row "Live answers": add that `broke` gives `reason` and `first_time` as the program that ships does.
 
-- [ ] **Step 3: docs/rust-port.md, one row in the log; README.md, the line for `rust/src/broke.rs` if it says what the file does with a file not asked**
+- [x] **Step 3: docs/rust-port.md, one row in the log; README.md, the line for `rust/src/broke.rs` if it says what the file does with a file not asked**
 
-- [ ] **Step 4: Commit and push**
+- [x] **Step 4: Commit and push**
 
 ```bash
 git add STATUS.md HANDOFF.md docs/rust-port.md README.md
