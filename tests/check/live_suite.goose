@@ -159,9 +159,37 @@ fn live_suite() {
 
     let code = mcp_close_code();
     check("serve exits cleanly and stops rust-analyzer", code == 0, str("exit ", code));
+    live_rust_unsettled();
     live_java("0");
     live_java("1");
     live_goose();
+}
+
+// A Rust crate whose build script fails: cargo check never runs, so
+// rust-analyzer publishes nothing and reports unhealthy status. Live
+// diagnostics must refuse to call the file clean, answering with a tool
+// error whose message starts with "not settled:".
+fn live_rust_unsettled() {
+    let base = "data/live-rs-broken";
+    let repo = str(base, "/repo");
+    let out = str(base, "/out");
+    rm_rf(base);
+    mkdir_p(base);
+    var o: u8[>..] = [];
+    guard sh(argv(["cp", "-r", "fixtures/tiny-rs", repo]), "", o) else { return; }
+    write_file(str(repo, "/build.rs"), "fn main() { std::process::exit(1); }\n");
+    guard sh(argv(["bin/swan", "map", repo, out]), "", o) else { return; }
+    guard mcp_open(argv(["bin/swan", "serve", str(out, "/swan.db")]), "") else { return; }
+    var bad: u8[>..] = [];
+    let ok = mcp_call("get_diagnostics", """{"relative_path":"src/lib.rs","live":true}""", bad);
+    var d: json::Node[>..] = [];
+    var x: u8[>..] = [];
+    let r, e = json::parse(bad, d, x);
+    let err = jstr(r, "error");
+    let unsettled = starts_with(bad, "not settled:") || starts_with(err, "not settled:");
+    check("rust: a crate whose build.rs fails does not come back clean (not settled)", ok == 0 && unsettled, bad);
+    let code = mcp_close_code();
+    check("rust: serve exits cleanly and stops rust-analyzer after a failed build script", code == 0, str("exit ", code));
 }
 
 // Goose's own language server (tools/modules.json "goose"), sealed. A module
