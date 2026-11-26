@@ -21,13 +21,20 @@ var live_settle: u8[..16];      // its "settle" from modules.json: check or publ
 var live_quiet: i64 = 0;        // its "quiet_ms": silence that means a file has nothing to report
 
 // Starts the server for `lang` unless it is already running; one at a time.
-fn live_start(db: i64, lang: const u8[:], why: u8[>..]&) -> bool {
-    if live_lang.len > 0 && live_lang == lang { return true; }
+// When it cannot start, also returns the class of refusal: "no_server",
+// "untrusted" or "failed".
+fn live_start_why(db: i64, lang: const u8[:], why: u8[>..]&) -> bool, const u8[:] {
+    if live_lang.len > 0 && live_lang == lang { return true, ""; }
     var root: u8[>..] = [];
     var dir: u8[>..] = [];
     meta_value(db, "root", root);
     meta_value(db, "source", dir);
-    return live_start_at(root, dir, lang, why);
+    return live_start_at_why(root, dir, lang, why);
+}
+
+fn live_start(db: i64, lang: const u8[:], why: u8[>..]&) -> bool {
+    let ok, reason = live_start_why(db, lang, why);
+    return ok;
 }
 
 // Whether this process is already inside eggshell's seal (it exports
@@ -40,19 +47,19 @@ fn inside_seal() -> bool {
 
 // The same for a repo and map folder given directly: the map need not exist
 // yet (`swan lsp-index` runs while it is being built).
-fn live_start_at(root: const u8[:], dir: const u8[:], lang: const u8[:], why: u8[>..]&) -> bool {
-    if live_lang.len > 0 && live_lang == lang { return true; }
+fn live_start_at_why(root: const u8[:], dir: const u8[:], lang: const u8[:], why: u8[>..]&) -> bool, const u8[:] {
+    if live_lang.len > 0 && live_lang == lang { return true, ""; }
     live_stop();
-    guard root.len > 0 && dir.len > 0 else { why.append("the map does not record its repo; rebuild it with swan map"); return false; }
+    guard root.len > 0 && dir.len > 0 else { why.append("the map does not record its repo; rebuild it with swan map"); return false, "failed"; }
     let home = swan_home();
     var text: u8[>..] = [];
-    guard read_file(str(home, "/tools/modules.json"), text) else { why.append("tools/modules.json is missing"); return false; }
+    guard read_file(str(home, "/tools/modules.json"), text) else { why.append("tools/modules.json is missing"); return false, "failed"; }
     var doc: json::Node[>..] = [];
     var decoded: u8[>..] = [];
     let mods, perr = json::parse(text, doc, decoded);
-    guard mods else { why.append(str("tools/modules.json: ", perr)); return false; }
+    guard mods else { why.append(str("tools/modules.json: ", perr)); return false, "failed"; }
     let list = json::member(json::member(mods, lang), "lsp");
-    guard list else { format(why, "no live server for ", lang, " in tools/modules.json"); return false; }
+    guard list else { format(why, "no live server for ", lang, " in tools/modules.json"); return false, "no_server"; }
     var l = detect(root);
     if !build_trusted(root, dir) { l.venv.clear(); }    // the repo's virtualenv is its own code
     let c = mod_ctx(root, dir, home, l);
@@ -99,11 +106,20 @@ fn live_start_at(root: const u8[:], dir: const u8[:], lang: const u8[:], why: u8
     if !tried {
         var waits = false;
         json::each(list) { cand => if runs_repo_code(cand) && !c.trusted { waits = true; } };
-        if waits { why.append(untrusted_note(str(" the ", lang, " language server"), root)); }
-        else { format(why, "no live server for ", lang, " applies here"); }
+        if waits {
+            why.append(untrusted_note(str(" the ", lang, " language server"), root));
+            return false, "untrusted";
+        }
+        format(why, "no live server for ", lang, " applies here");
+        return false, "no_server";
     }
-    if started { format(live_lang, lang); }
-    return started;
+    if started { format(live_lang, lang); return true, ""; }
+    return false, "failed";
+}
+
+fn live_start_at(root: const u8[:], dir: const u8[:], lang: const u8[:], why: u8[>..]&) -> bool {
+    let ok, reason = live_start_at_why(root, dir, lang, why);
+    return ok;
 }
 
 fn live_stop() {
@@ -113,16 +129,23 @@ fn live_stop() {
 }
 
 // Asks the running server; the answer is the library's JSON, as is.
-fn live_ask(db: i64, rel: const u8[:], question: const u8[:], out: u8[>..]&) -> bool {
+fn live_ask_why(db: i64, rel: const u8[:], question: const u8[:], out: u8[>..]&) -> bool, const u8[:] {
     let lang = lang_of_path(rel);
-    guard lang.len > 0 else { format(out, "no live server for ", rel); return false; }
+    guard lang.len > 0 else { format(out, "no live server for ", rel); return false, "no_server"; }
     var why: u8[>..] = [];
-    guard live_start(db, lang, why) else { out.append(why); return false; }
+    let started, reason = live_start_why(db, lang, why);
+    guard started else { out.append(why); return false, reason; }
     var a: u8[>..] = [];
     golsp_ask(question, a);
     if find(a, "\"gone\":true") >= 0 { live_lang.clear(); }   // the next question starts it again
     out.append(a);
-    return starts_with(a, "{\"ok\":true");
+    if starts_with(a, "{\"ok\":true") { return true, ""; }
+    return false, "failed";
+}
+
+fn live_ask(db: i64, rel: const u8[:], question: const u8[:], out: u8[>..]&) -> bool {
+    let ok, reason = live_ask_why(db, rel, question, out);
+    return ok;
 }
 
 // Any LSP request about a file (and a 1-based place in it, when line > 0),
@@ -147,18 +170,26 @@ fn live_request(root: const u8[:], dir: const u8[:], rel: const u8[:], method: c
 }
 
 // get_diagnostics with live: what the server reports for one file now.
-fn live_diagnostics(db: i64, rel: const u8[:], out: u8[>..]&) -> bool {
-    guard rel.len > 0 else { out.append("live diagnostics need relative_path (one file)"); return false; }
+fn live_diagnostics_why(db: i64, rel: const u8[:], out: u8[>..]&) -> bool, const u8[:] {
+    guard rel.len > 0 else { out.append("live diagnostics need relative_path (one file)"); return false, "failed"; }
+    let lang = lang_of_path(rel);
+    guard lang.len > 0 else { format(out, "no live server for ", rel); return false, "no_server"; }
     var q: u8[>..] = [];
     var why: u8[>..] = [];
-    guard live_start(db, lang_of_path(rel), why) else { out.append(why); return false; }
+    let started, reason = live_start_why(db, lang, why);
+    guard started else { out.append(why); return false, reason; }
     q.append("{\"op\":\"diagnostics\",\"file\":");
     json::format_string(q, rel);
     q.append(",\"settle\":");
     json::format_string(q, live_settle);
     if live_quiet > 0 { format(q, ",\"quiet_ms\":", live_quiet); }
     q.push('}');
-    return live_ask(db, rel, q, out);
+    return live_ask_why(db, rel, q, out);
+}
+
+fn live_diagnostics(db: i64, rel: const u8[:], out: u8[>..]&) -> bool {
+    let ok, reason = live_diagnostics_why(db, rel, out);
+    return ok;
 }
 
 // find_implementations with live: the server's answer at the symbol's
