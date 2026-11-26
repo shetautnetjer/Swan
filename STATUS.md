@@ -2064,3 +2064,30 @@ Limits:
 - The seen file is written without a lock in this program, as before.
 - This entry is one commit after the tree that was tested; that commit
   changes STATUS.md and DECISIONS.md only.
+
+## 2026-11-26T07:15Z: three points of the automated review taken into the hook
+
+The Graphify review of this pull request listed nine possible faults it
+could not confirm, five of them with their text. Read in the code, three
+were right:
+- Beside errors that are reported, the closing line said "Errors from this
+  edit will not be reported here". It now speaks of the file that was not
+  checked. (One file is asked per edit today, so the two did not meet; the
+  code allowed it.)
+- A reason the hook does not know was said as "its language server did not
+  answer". It is now named as given.
+- An exit code other than 0, 1 or 3 dropped an answer that was there. The
+  hook reads the answer whatever the code, as it did before this branch.
+
+Not taken: output that is not the one JSON object is not a note (the hook
+prints nothing else); and the plugin does not track repeats itself, since
+`swan broke` gives the note once. Its docstring now says so.
+
+Checked: two new Python tests and one changed. `scripts/space-test.sh`
+in the microVM on `2dec374`: 58 checks passed, 0 failed; the cosmetic,
+layer and piece checks passed; 66 Python tests OK; 326 checks passed, 0
+failed. Exit 0.
+
+Limit: the four findings the review did not show in its comment were not
+read. This entry is one commit after the tree that was tested; that commit
+changes STATUS.md only.
