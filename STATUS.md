@@ -2003,6 +2003,64 @@ Checked on `4b22745`:
 Limit: this entry is one commit after the tree that was tested; that
 commit changes STATUS.md and HANDOFF.md only.
 
+## 2026-11-26T07:04Z: a Rust check that did not run is no longer a clean answer
+
+What was wrong: live diagnostics for Rust settle on rust-analyzer's check.
+When the check does not run, the server ends its progress and publishes
+nothing, and the answer was "no errors". On a copy of fixtures/tiny-rs with
+a build.rs that exits 1 and a type error added to src/lib.rs (trusted: our
+own fixture), `swan broke` said `"asked":true` with nothing new, before
+and after the error was added. The post-edit hook passed that on as
+silence.
+
+What changed: the client library (`lsp/`, goose-lsp branch
+`check-health`, `2daeb2c`) keeps the health and message of
+`experimental/serverStatus`. Once a check has settled, a status that says
+the check did not run, with no error in the file's set, answers
+`not settled:` in the server's words; errors that were found are still
+returned. "Did not run" is rust-analyzer's own two sentences for it: "cargo
+check failed to start" and "Failed to run build scripts". Nothing in
+`src/` changed: a refused answer already read `"asked":false`.
+
+| `swan broke` on the crate | before | after |
+|---|---|---|
+| build.rs exits 1, type error added | asked, nothing new | not asked: "not settled: Failed to run build scripts of some packages. …cargo check failed to start…" |
+| healthy | asked, nothing new | the same |
+| healthy, type error added | the error on line 61, new, exit 1 | the same |
+
+What the microVM found: the rule first built was "any health other than
+ok". In the VM rust-analyzer warns that the standard library's sources are
+not installed ("has sysroot errors"), cargo check runs all the same, and
+the two live checks that expect a clean file failed (322 passed, 2
+failed). The rule became the two sentences; that warning does not refuse.
+
+Checked:
+- goose-lsp's own test: 27 answers, 4 of them new. On the client from
+  before, the first new case fails (`{'ok': True, 'diagnostics': []}`);
+  with any warning refusing, the second does.
+- A new check in the live suite maps the crate with the failing build.rs
+  and expects the refusal, and one more that the server is stopped.
+- `scripts/space-test.sh` in the microVM on `fc7c210`: 58 checks
+  passed, 0 failed; the cosmetic, layer and piece checks passed; 56 Python
+  tests OK; 324 checks passed, 0 failed (322 before). Exit 0.
+
+How it was made: an Antigravity swarm (`agy-task --swarm`) wrote the
+change in a copy, from a brief. The rule was corrected by hand after the
+microVM run, and every number above was measured again outside the swarm.
+
+Limits:
+- The two sentences are rust-analyzer's wording (0.3.3089, the pinned
+  one). If a later version words them otherwise the live suite's new check
+  fails; nothing else would say so.
+- For a refusal of this kind `why` in `swan broke` is still the
+  library's whole JSON answer as text, and the exit is still 0; the hook's
+  own pull request changes both.
+- The pin is a commit on goose-lsp's branch. It stays reachable from that
+  repo's main when the pull request there is merged with a merge commit,
+  as its earlier ones were; a squash would need the pin moved.
+- This entry is one commit after the tree that was tested; that commit
+  changes STATUS.md and DECISIONS.md only.
+
 ## 2026-11-26T07:04Z: the post-edit hook says when a file could not be checked
 
 What was wrong: after an edit the hook
