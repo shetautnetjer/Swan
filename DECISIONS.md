@@ -765,3 +765,30 @@ the Goose build's C, so the answers stay the same bytes. docs/rust-port.md
 names crates the port could use for the language-server client at stage 5
 and holds better designs for after the port; each is a change of its own,
 measured.
+
+## 2026-11-26T07:04Z — When a Rust check counts as not run: the server's two sentences, not its health flag
+
+**The owner's word:** asked whether to mend the false "nothing new" for
+Rust in the Swan that ships, he said: "i follow your recommendations,
+using antigravity swarm abilities to attack and fix places you need". The
+recommendation was yes.
+
+**Decided (mine, his to overrule):** a set with no error is refused as an
+answer only when rust-analyzer's status says the check did not judge the
+code: "cargo check failed to start", or "Failed to run build scripts".
+Errors that were found are passed on either way.
+
+**Why not the health flag alone:** that was the rule built first, here and
+in the Rust rebuild (branch rust-live-answers, 2026-11-25). In the microVM
+rust-analyzer's health is "warning" for a reason that leaves cargo check
+alone (no standard library sources), every clean Rust file was refused,
+and two live checks failed. A machine without those sources would never
+hear "clean".
+
+**Why two sentences and not one:** on a first, cold check a failing build
+script leaves only "Failed to run build scripts" in the status; "cargo
+check failed to start" comes with the next check (measured on the Rust
+rebuild, 2026-11-25).
+
+**What it costs:** the rule reads rust-analyzer's wording. The pinned
+version and a check with the real server guard it.
