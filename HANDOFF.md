@@ -235,6 +235,21 @@ So it is not learned again (docs/rust-port.md, "Found while porting"):
   cannot be prepared) and the locked new map (above; the fault is in the
   Rust on main, the mend on this branch) both wait for the owner's word on
   how the Rust on main is brought up to date.
+- The Swan that ships lists no caller where a Python method is called
+  through a parameter with no type annotation, and says nothing of it. On a
+  two-file fixture (`def untyped(paths, args): paths.ensure()` beside the
+  same function with `paths: Paths`) the map holds the typed call and not
+  the other; `get_callers` answers with the one. Spread-Wings and Graphify
+  both link the untyped call by name. Found 2026-11-25 by asking all three
+  who calls thirty functions of a private repo (15 TypeScript, 15 Python),
+  counted as pairs of function and calling file, 93 in all once that one
+  was read in the source: Swan 92, Spread-Wings 87, Graphify 85, and neither
+  of those two named a wrong file. Six pairs both of them missed are a
+  method bound into another class by assignment (`name = Other.name`, read
+  at one site), which Swan has.
+- The Hermes plugin (`integrations/hermes/swan/__init__.py`) runs the same
+  hook and keeps its words only when it exits 2. A change to what the hook
+  says when a file could not be asked has to reach the plugin too.
 
 ## Jev's judgement, 2026-11-22 (evidence, not decisions)
 Asked on the owner's word, one call, of a summary the working agent wrote:
@@ -310,6 +325,11 @@ porting", has the call.
   have the IDE judge the Rust in that window, attach `rust/Cargo.toml`
   there (the Cargo tool window). Until then a copy of `rust/` is opened as
   its own project, beside the trial repos.
+- Callers Swan cannot resolve ("Also open, small": an untyped Python
+  parameter). Add a second list to `get_callers`, marked as matched by
+  name and taken from Spread-Wings' graph, or keep the answer exact and
+  say only that some calls could not be resolved? Either way it is a change
+  to the program that ships, on main, with a check.
 
 ## Held for after the port
 Seen 2026-11-22 while carrying TypeScript, in the Goose program and so in the
