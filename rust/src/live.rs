@@ -24,7 +24,7 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Map, Value};
 
 use crate::lsp::{Client, Heard, LspError, Status};
-use crate::modules::{language_of, Entry, Settle};
+use crate::modules::{language_of, Entry, Refused, Settle};
 use crate::sys;
 use crate::walk::Walk;
 
@@ -50,6 +50,33 @@ pub struct Diag {
     pub severity: &'static str,
     pub code: String,
     pub message: String,
+}
+
+/// Why a file was not asked.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Reason {
+    NoServer,
+    Untrusted,
+    Unsettled,
+    Failed,
+}
+
+impl Reason {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Reason::NoServer => "no_server",
+            Reason::Untrusted => "untrusted",
+            Reason::Unsettled => "unsettled",
+            Reason::Failed => "failed",
+        }
+    }
+}
+
+/// A refusal to ask about a file: its class and the words for it.
+#[derive(Clone, Debug)]
+pub struct Refusal {
+    pub reason: Reason,
+    pub why: String,
 }
 
 pub enum Diagnosed {
@@ -83,14 +110,18 @@ struct Sent {
 impl Live {
     /// Starts lang's live server for repo (its "lsp" entry), the map folder
     /// out holding what it writes and its log.
-    pub fn start(walk: &Walk, repo: &[u8], out: &[u8], lang: &str, entry: &Entry, deadline: Instant) -> Result<Live, String> {
-        let spec = entry.live_server(walk, repo, out, lang.as_bytes()).map_err(|why| lossy(&why))?;
+    pub fn start(walk: &Walk, repo: &[u8], out: &[u8], lang: &str, entry: &Entry, deadline: Instant) -> Result<Live, Refusal> {
+        let spec = entry.live_server(walk, repo, out, lang.as_bytes()).map_err(|r| match r {
+            Refused::NoServer(why) => Refusal { reason: Reason::NoServer, why: lossy(&why) },
+            Refused::Untrusted(why) => Refusal { reason: Reason::Untrusted, why: lossy(&why) },
+            Refused::Broken(why) => Refusal { reason: Reason::Failed, why: lossy(&why) },
+        })?;
         let log = [out, b"/lsp-", lang.as_bytes(), b".log"].concat();
         let left = deadline.saturating_duration_since(Instant::now());
         let client = match Client::start(&spec, repo, repo, out, &log, left) {
             Ok(c) => c,
-            Err(LspError::Timeout(_)) => return Err(format!("the {lang} language server did not start {}; see {}", within(), lossy(&log))),
-            Err(e) => return Err(format!("the {lang} language server did not start: {e}; see {}", lossy(&log))),
+            Err(LspError::Timeout(_)) => return Err(Refusal { reason: Reason::Failed, why: format!("the {lang} language server did not start {}; see {}", within(), lossy(&log)) }),
+            Err(e) => return Err(Refusal { reason: Reason::Failed, why: format!("the {lang} language server did not start: {e}; see {}", lossy(&log)) }),
         };
         Ok(Live { client, lang: lang.to_string(), language_id: spec.language_id, settle: spec.settle, repo: repo.to_vec(), log, deadline, opened: HashMap::new() })
     }
@@ -399,7 +430,7 @@ fn ask(repo: &[u8], out: &[u8], file: &[u8], method: &str, place: Option<(u32, u
     let Some((lang, entry)) = language_of(&rel).map_err(|why| lossy(&why))? else { return Err(format!("no live server for {}", lossy(&rel))) };
     let mut walk = Walk::default();
     walk.load(&repo, &out);
-    let mut live = Live::start(&walk, &repo, &out, &lang, &entry, deadline)?;
+    let mut live = Live::start(&walk, &repo, &out, &lang, &entry, deadline).map_err(|r| r.why)?;
     let answer = live.request(&rel, method, place, more);
     live.stop();
     answer

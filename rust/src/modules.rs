@@ -237,29 +237,46 @@ fn put(text: &mut Vec<u8>, from: &[u8], to: impl FnOnce() -> Vec<u8>) {
     }
 }
 
+/// Why no server could be chosen from tools/modules.json, with the words for it.
+pub enum Refused {
+    NoServer(Vec<u8>),
+    Untrusted(Vec<u8>),
+    Broken(Vec<u8>),
+}
+
+impl Refused {
+    pub fn into_why(self) -> Vec<u8> {
+        match self {
+            Refused::NoServer(w) | Refused::Untrusted(w) | Refused::Broken(w) => w,
+        }
+    }
+}
+
 impl Entry {
     // The server that maps lang here (its "map_lsp" or "lsp" candidates).
     pub fn map_server(&self, walk: &Walk, repo: &[u8], out: &[u8], lang: &[u8]) -> Result<ServerSpec, Vec<u8>> {
-        self.server(self.map_candidates(), Use::Map, walk, repo, out, lang)
+        self.server(self.map_candidates(), Use::Map, walk, repo, out, lang).map_err(Refused::into_why)
     }
 
     // The server that answers live questions about lang here (its "lsp" candidates).
-    pub fn live_server(&self, walk: &Walk, repo: &[u8], out: &[u8], lang: &[u8]) -> Result<ServerSpec, Vec<u8>> {
+    pub fn live_server(&self, walk: &Walk, repo: &[u8], out: &[u8], lang: &[u8]) -> Result<ServerSpec, Refused> {
         self.server(&self.lsp, Use::Live, walk, repo, out, lang)
     }
 
     // The first candidate whose conditions hold, where one that runs the
     // repo's code holds only for a trusted repo, ready to start. Err says
     // why there is none.
-    fn server(&self, cands: &[Candidate], purpose: Use, walk: &Walk, repo: &[u8], out: &[u8], lang: &[u8]) -> Result<ServerSpec, Vec<u8>> {
+    fn server(&self, cands: &[Candidate], purpose: Use, walk: &Walk, repo: &[u8], out: &[u8], lang: &[u8]) -> Result<ServerSpec, Refused> {
         let home = swan_home();
         let lang_name = String::from_utf8_lossy(lang);
         if cands.is_empty() {
-            return Err(match purpose {
-                Use::Map => format!("tools/modules.json names no server to map {lang_name} with"),
-                Use::Live => format!("no live server for {lang_name} in tools/modules.json"),
-            }
-            .into_bytes());
+            return Err(Refused::NoServer(
+                match purpose {
+                    Use::Map => format!("tools/modules.json names no server to map {lang_name} with"),
+                    Use::Live => format!("no live server for {lang_name} in tools/modules.json"),
+                }
+                .into_bytes(),
+            ));
         }
         let trusted = build_trusted(repo);
         let mut l = detect(walk, repo);
@@ -287,29 +304,30 @@ impl Entry {
             })
         };
         let Some(c) = pick(cands, trusted, holds) else {
-            let why = if !trusted && cands.iter().any(|c| c.runs_repo_code) {
-                untrusted_note(format!(" the {lang_name} language server").as_bytes(), repo)
+            return Err(if !trusted && cands.iter().any(|c| c.runs_repo_code) {
+                Refused::Untrusted(untrusted_note(format!(" the {lang_name} language server").as_bytes(), repo))
             } else {
-                match purpose {
-                    Use::Map => format!("no server to map {lang_name} with applies here"),
-                    Use::Live => format!("no live server for {lang_name} applies here"),
-                }
-                .into_bytes()
-            };
-            return Err(why);
+                Refused::NoServer(
+                    match purpose {
+                        Use::Map => format!("no server to map {lang_name} with applies here"),
+                        Use::Live => format!("no live server for {lang_name} applies here"),
+                    }
+                    .into_bytes(),
+                )
+            });
         };
         if c.cmd.is_empty() {
-            return Err(format!("tools/modules.json, {lang_name}: a server with no cmd").into_bytes());
+            return Err(Refused::Broken(format!("tools/modules.json, {lang_name}: a server with no cmd").into_bytes()));
         }
         let init_text = c.init.as_deref().map_or_else(|| b"{}".to_vec(), |s| places.expand(s));
-        let init = serde_json::from_slice(&init_text).map_err(|e| format!("tools/modules.json, {lang_name}: its init is not JSON once filled in: {e}").into_bytes())?;
+        let init = serde_json::from_slice(&init_text).map_err(|e| Refused::Broken(format!("tools/modules.json, {lang_name}: its init is not JSON once filled in: {e}").into_bytes()))?;
         let settle = match c.settle.as_deref() {
             None | Some("publish") => Settle::Publish { quiet: c.quiet_ms.filter(|&ms| ms > 0).map(Duration::from_millis) },
             Some("pull") => Settle::Pull,
             Some("check") => Settle::Check,
             // The map never waits for a settle: a word it does not know is a live refusal only.
             Some(_) if matches!(purpose, Use::Map) => Settle::Publish { quiet: None },
-            Some(other) => return Err(format!("tools/modules.json, {lang_name}: settle \"{other}\" is not publish, pull or check").into_bytes()),
+            Some(other) => return Err(Refused::Broken(format!("tools/modules.json, {lang_name}: settle \"{other}\" is not publish, pull or check").into_bytes())),
         };
         let mut env = base;
         env.extend(c.env.iter().map(|s| places.expand(s)));

@@ -7,17 +7,21 @@
 //
 // What was seen is kept beside the map in broke-seen.tsv, as the Goose
 // program keeps it (src/broke.goose), one "file<TAB>severity|code|message"
-// per line, and a line with an empty key for a file looked at. Lines move as
-// code is edited, so an error is the same one when its file, code and
-// message are; a second error just like one already there is not new.
+// per line, a line with an empty key for a file looked at, and one
+// "file<TAB>not-asked|reason|" line for a file not asked (other than
+// no_server) so hooks report it once per reason. Lines move as code is
+// edited, so an error is the same one when its file, code and message are;
+// a second error just like one already there is not new.
 //
 // Unlike the Goose program: the files are asked about by language, one
 // server per language in turn, so a language that cannot be asked does not
 // hide another's errors. A file not asked (no server, not trusted, not
-// settled, out of time) says why, and its lines in the seen file stay as
-// they were. The seen file is read, compared and written under a lock taken
-// once the servers have answered, so two hooks at once do not lose each
-// other's lines.
+// settled, failed) says why and keeps its earlier error lines; when its
+// reason is not no_server and the file is in the repo with no tab or newline
+// in its name, it records one not-asked line until the reason changes or the
+// file is asked again. The seen file is read, compared and written under a
+// lock taken once the servers have answered, so two hooks at once do not
+// lose each other's lines.
 //
 // Exit: 0 every file asked and nothing new; 1 new errors; 2 usage, or no
 // map; 3 nothing new, but a file could not be asked.
@@ -30,13 +34,13 @@ use std::time::Instant;
 use serde::Serialize;
 
 use crate::db::Db;
-use crate::live::{budget, file_in, Diag, Diagnosed, Live};
+use crate::live::{budget, file_in, Diag, Diagnosed, Live, Reason, Refusal};
 use crate::modules::{language_of, Entry};
 use crate::query::meta_value;
 use crate::sys;
 use crate::walk::Walk;
 
-const NOTE: &str = "new_errors are errors the language server reports now and did not when this was last asked for the file; on a first look every error counts as new";
+const NOTE: &str = "new_errors are errors the language server reports now and did not when this was last asked for the file; on a first look every error counts as new; when asked is false (except no_server), first_time is true the first time the file was not asked for that reason, and false until the reason changes or the file is asked again";
 
 #[derive(Serialize)]
 struct Report {
@@ -49,7 +53,14 @@ struct Report {
 #[serde(untagged)]
 enum FileReport {
     Asked { relative_path: String, asked: bool, first_look: bool, new_errors: Vec<NewError>, errors_already_there: usize, warnings: usize },
-    NotAsked { relative_path: String, asked: bool, why: String },
+    NotAsked {
+        relative_path: String,
+        asked: bool,
+        reason: &'static str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        first_time: Option<bool>,
+        why: String,
+    },
 }
 
 #[derive(Serialize)]
@@ -62,7 +73,13 @@ struct NewError {
 }
 
 /// What a file's server said, or why it was not asked.
-type Answer = Result<Vec<Diag>, String>;
+type Answer = Result<Vec<Diag>, Refusal>;
+
+struct Answered {
+    name: Vec<u8>,
+    in_repo: bool,
+    answer: Answer,
+}
 
 pub fn broke_main(out_arg: &[u8], args: &[Vec<u8>]) -> i32 {
     let deadline = Instant::now() + budget();
@@ -77,17 +94,17 @@ pub fn broke_main(out_arg: &[u8], args: &[Vec<u8>]) -> i32 {
     };
 
     // Each file once, as its path from the repo, or why it cannot be asked.
-    let mut files: Vec<(Vec<u8>, Option<Answer>)> = Vec::new();
+    let mut files: Vec<(Vec<u8>, bool, Option<Answer>)> = Vec::new();
     for arg in args {
         match file_in(&repo, arg) {
-            Ok(rel) if files.iter().any(|(f, _)| *f == rel) => {}
-            Ok(rel) => files.push((rel, None)),
-            Err(why) => files.push((arg.clone(), Some(Err(why)))),
+            Ok(rel) if files.iter().any(|(f, in_repo, _)| *in_repo && *f == rel) => {}
+            Ok(rel) => files.push((rel, true, None)),
+            Err(why) => files.push((arg.clone(), false, Some(Err(Refusal { reason: Reason::Failed, why })))),
         }
     }
     // By language, in the order the files came.
     let mut langs: Vec<(String, Entry, Vec<usize>)> = Vec::new();
-    for (i, (rel, answer)) in files.iter_mut().enumerate() {
+    for (i, (rel, _, answer)) in files.iter_mut().enumerate() {
         if answer.is_some() {
             continue;
         }
@@ -96,8 +113,8 @@ pub fn broke_main(out_arg: &[u8], args: &[Vec<u8>]) -> i32 {
                 Some((_, _, of)) => of.push(i),
                 None => langs.push((lang, entry, vec![i])),
             },
-            Ok(None) => *answer = Some(Err(format!("no live server for {}", lossy(rel)))),
-            Err(why) => *answer = Some(Err(lossy(&why))),
+            Ok(None) => *answer = Some(Err(Refusal { reason: Reason::NoServer, why: format!("no live server for {}", lossy(rel)) })),
+            Err(why) => *answer = Some(Err(Refusal { reason: Reason::Failed, why: lossy(&why) })),
         }
     }
     let mut walk = Walk::default();
@@ -106,57 +123,87 @@ pub fn broke_main(out_arg: &[u8], args: &[Vec<u8>]) -> i32 {
         match Live::start(&walk, &repo, &out, lang, entry, deadline) {
             Ok(mut live) => {
                 for &i in of {
-                    files[i].1 = Some(match live.diagnostics(&files[i].0) {
+                    files[i].2 = Some(match live.diagnostics(&files[i].0) {
                         Ok(Diagnosed::Settled(items)) => Ok(items),
-                        Ok(Diagnosed::Unsettled(why)) => Err(why),
-                        Err(why) => Err(why),
+                        Ok(Diagnosed::Unsettled(why)) => Err(Refusal { reason: Reason::Unsettled, why }),
+                        Err(why) => Err(Refusal { reason: Reason::Failed, why }),
                     });
                 }
                 live.stop();
             }
-            Err(why) => {
+            Err(refusal) => {
                 for &i in of {
-                    files[i].1 = Some(Err(why.clone()));
+                    files[i].2 = Some(Err(refusal.clone()));
                 }
             }
         }
     }
-    let answered: Vec<(Vec<u8>, Answer)> = files.into_iter().map(|(f, a)| (f, a.unwrap_or_else(|| Err("not asked".to_string())))).collect();
+    let answered: Vec<Answered> = files
+        .into_iter()
+        .map(|(name, in_repo, a)| Answered { name, in_repo, answer: a.unwrap_or_else(|| Err(Refusal { reason: Reason::Failed, why: "not asked".to_string() })) })
+        .collect();
     let report = remember(&out, &answered);
     crate::util::print(serde_json::to_string(&report).unwrap_or_default().as_bytes());
     if report.new_errors > 0 {
         1
-    } else if answered.iter().any(|(_, a)| a.is_err()) {
+    } else if answered.iter().any(|a| a.answer.is_err()) {
         3
     } else {
         0
     }
 }
 
-// Compares what the asked files show with what was seen, and keeps what they
-// show now; the lines of every other file stay as they were. When no file
-// was asked nothing is kept, and the map folder is not written to.
-fn remember(out: &[u8], answered: &[(Vec<u8>, Answer)]) -> Report {
-    let _held = answered.iter().any(|(_, a)| a.is_ok()).then(|| lock(out));
+fn remember_refusal(a: &Answered, reason: Reason) -> bool {
+    reason != Reason::NoServer && a.in_repo && !a.name.iter().any(|&c| c == b'\t' || c == b'\n')
+}
+
+// Compares what the asked files show with what was seen, keeps what they
+// show now, and records one not-asked line per file and reason for
+// remembered refusals while keeping any earlier error lines on those files.
+// When nothing is asked or remembered, the map folder is not written to.
+fn remember(out: &[u8], answered: &[Answered]) -> Report {
+    let writes = answered.iter().any(|a| match &a.answer {
+        Ok(_) => true,
+        Err(r) => remember_refusal(a, r.reason),
+    });
+    let _held = writes.then(|| lock(out));
     let seen_path = [out, b"/broke-seen.tsv"].concat();
     let mut seen = Vec::new();
-    sys::read_file(&seen_path, &mut seen);
+    if writes {
+        sys::read_file(&seen_path, &mut seen);
+    }
     let seen_lines: HashSet<&[u8]> = seen.split(|&c| c == b'\n').filter(|l| !l.is_empty()).collect();
     let mut now: Vec<u8> = Vec::new();
+    let mut not_asked_now: Vec<u8> = Vec::new();
     let mut asked: HashSet<&[u8]> = HashSet::new();
+    let mut not_asked_replace: HashSet<&[u8]> = HashSet::new();
     let mut report = Report { new_errors: 0, files: Vec::new(), note: NOTE };
-    for (rel, answer) in answered {
+    for entry in answered {
+        let rel = &entry.name;
         let relative_path = lossy(rel);
-        let items = match answer {
+        let items = match &entry.answer {
             Ok(items) => items,
-            Err(why) => {
-                report.files.push(FileReport::NotAsked { relative_path, asked: false, why: why.clone() });
+            Err(r) => {
+                let first_time = if remember_refusal(entry, r.reason) {
+                    let line = [&rel[..], b"\tnot-asked|", r.reason.as_str().as_bytes(), b"|"].concat();
+                    let is_first = !seen_lines.contains(&line[..]);
+                    if is_first {
+                        not_asked_replace.insert(rel);
+                        not_asked_now.extend_from_slice(&line);
+                        not_asked_now.push(b'\n');
+                    }
+                    Some(is_first)
+                } else {
+                    None
+                };
+                report.files.push(FileReport::NotAsked { relative_path, asked: false, reason: r.reason.as_str(), first_time, why: r.why.clone() });
                 continue;
             }
         };
         asked.insert(rel);
         let prefix = [&rel[..], b"\t"].concat();
-        let first_look = !seen_lines.iter().any(|l| l.starts_with(&prefix));
+        let na_prefix = [&rel[..], b"\tnot-asked|"].concat();
+        let first_look = !seen_lines.iter().any(|l| l.starts_with(&prefix) && !l.starts_with(&na_prefix));
         now.extend_from_slice(&prefix);
         now.push(b'\n');
         let (mut new_errors, mut still, mut warnings) = (Vec::new(), 0, 0);
@@ -177,17 +224,26 @@ fn remember(out: &[u8], answered: &[(Vec<u8>, Answer)]) -> Report {
         report.new_errors += new_errors.len();
         report.files.push(FileReport::Asked { relative_path, asked: true, first_look, new_errors, errors_already_there: still, warnings });
     }
-    if !asked.is_empty() {
+    if writes {
         let mut keep: Vec<u8> = Vec::new();
         for l in seen.split(|&c| c == b'\n').filter(|l| !l.is_empty()) {
-            let file = l.iter().position(|&c| c == b'\t').map(|t| &l[..t]);
-            if !file.is_some_and(|f| asked.contains(f)) {
+            let drop = match l.iter().position(|&c| c == b'\t') {
+                Some(t) => {
+                    let f = &l[..t];
+                    asked.contains(f) || (l[t + 1..].starts_with(b"not-asked|") && not_asked_replace.contains(f))
+                }
+                None => false,
+            };
+            if !drop {
                 keep.extend_from_slice(l);
                 keep.push(b'\n');
             }
         }
         keep.extend_from_slice(&now);
-        sys::write_file_atomic(&seen_path, &keep);
+        keep.extend_from_slice(&not_asked_now);
+        if keep != seen {
+            sys::write_file_atomic(&seen_path, &keep);
+        }
     }
     report
 }

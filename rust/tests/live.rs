@@ -64,6 +64,10 @@ fn setup(name: &str) -> Setup {
         }
         mods[lang] = json!({"match": [ext], "lsp": [c]});
     }
+    for (lang, ext, mode) in [("guarded", ".tr", "publish"), ("guardedquiet", ".tq", "silent")] {
+        let c = json!({"cmd": [python(), "-I", fake, mode], "language_id": lang, "settle": "publish", "env": ["FAKE_PIDS={out}/pids"], "runs_repo_code": true});
+        mods[lang] = json!({"match": [ext], "lsp": [c]});
+    }
     fs::write(home.join("tools/modules.json"), mods.to_string()).unwrap();
     fs::write(repo.join("a.fake"), "fine\nan ERROR here\na WARN here\n").unwrap();
     fs::write(repo.join("b.fake"), "fine\n").unwrap();
@@ -86,14 +90,21 @@ struct Ran {
 }
 
 fn swan(s: &Setup, args: &[&str], budget_ms: u64) -> Ran {
+    swan_with(s, args, budget_ms, &[])
+}
+
+// swan(), with variables set after the two trust switches are removed.
+fn swan_with(s: &Setup, args: &[&str], budget_ms: u64, vars: &[(&str, &str)]) -> Ran {
     let t0 = Instant::now();
-    let out = Command::new(s.home.join("bin/swan"))
-        .args(args)
+    let mut cmd = Command::new(s.home.join("bin/swan"));
+    cmd.args(args)
         .env_remove("SWAN_TRUST_BUILD")
         .env_remove("SWAN_SANDBOX")
-        .env("SWAN_LIVE_BUDGET_MS", budget_ms.to_string())
-        .output()
-        .unwrap();
+        .env("SWAN_LIVE_BUDGET_MS", budget_ms.to_string());
+    for (k, v) in vars {
+        cmd.env(k, v);
+    }
+    let out = cmd.output().unwrap();
     let json = serde_json::from_slice(&out.stdout).unwrap_or(Value::Null);
     Ran { code: out.status.code().unwrap_or(-1), json, took: t0.elapsed() }
 }
@@ -102,6 +113,13 @@ fn broke(s: &Setup, files: &[&str], budget_ms: u64) -> Ran {
     let mut args = vec!["broke", s.map.to_str().unwrap()];
     args.extend(files);
     swan(s, &args, budget_ms)
+}
+
+// broke, with SWAN_TRUST_BUILD=1.
+fn broke_trusted(s: &Setup, files: &[&str], budget_ms: u64) -> Ran {
+    let mut args = vec!["broke", s.map.to_str().unwrap()];
+    args.extend(files);
+    swan_with(s, &args, budget_ms, &[("SWAN_TRUST_BUILD", "1")])
 }
 
 fn ask(s: &Setup, rest: &[&str], budget_ms: u64) -> Ran {
@@ -137,6 +155,11 @@ fn clean(file: &str) -> (String, bool, Vec<String>) {
 // How many servers the runs of this setup started.
 fn starts(s: &Setup) -> usize {
     fs::read_to_string(s.map.join("pids")).map_or(0, |t| t.lines().count())
+}
+
+// The seen file's text, or empty when there is none.
+fn seen(s: &Setup) -> String {
+    fs::read_to_string(s.map.join("broke-seen.tsv")).unwrap_or_default()
 }
 
 // Publish: a set for an older version comes at once and is not the answer;
@@ -189,7 +212,7 @@ fn check_waits_for_the_check_a_save_starts() {
 // Check: a check that ends at once, after which the server says its health
 // is not ok (its check failed to start), is no answer for a file with no
 // error. Not settled, the why is the server's status in its first two lines
-// (not the build log after them), and nothing is remembered.
+// (not the build log after them), and the refusal is remembered.
 #[test]
 fn a_check_that_did_not_run_is_not_settled() {
     let s = setup("check-fails");
@@ -200,7 +223,7 @@ fn a_check_that_did_not_run_is_not_settled() {
                 cargo check failed to start: Cargo watcher failed, the command produced no valid metadata (exit code: 101)";
     assert_eq!(why(&r, 0), said);
     assert_eq!(r.code, 3);
-    assert!(!s.map.join("broke-seen.tsv").exists(), "a file not asked was remembered");
+    assert_eq!(seen(&s), "a.cf\tnot-asked|unsettled|\n");
 }
 
 // While the server's status says a build script failed, an error it reports
@@ -220,7 +243,9 @@ fn an_unhealthy_server_passes_errors_on_but_no_clean_answer() {
     let said = "not settled: Failed to run build scripts of some packages. Please refer to the language server logs for more details on the errors.";
     assert_eq!((why(&r, 0), why(&r, 1)), (said.to_string(), said.to_string()));
     assert_eq!(r.code, 3);
-    assert!(!fs::read_to_string(s.map.join("broke-seen.tsv")).unwrap().contains("b.cw"), "a file not asked was remembered");
+    let after = seen(&s);
+    assert!(after.contains("b.cw\tnot-asked|unsettled|\n") && after.contains("c.cw\tnot-asked|unsettled|\n"), "{after}");
+    assert!(!after.contains("b.cw\t\n") && !after.contains("c.cw\t\n"), "{after}");
 }
 
 // A warning that leaves the check alone (the standard library's sources are
@@ -250,7 +275,7 @@ fn a_silent_server_is_not_settled_in_time() {
     assert!(why(&r, 0).starts_with("not settled"), "{}", r.json);
     assert_eq!(r.code, 3);
     assert!(r.took < Duration::from_secs(6), "{:?}", r.took);
-    assert!(!s.map.join("broke-seen.tsv").exists(), "a file not asked was remembered");
+    assert_eq!(seen(&s), "a.sl\tnot-asked|unsettled|\n");
     let r = ask(&s, &["a.sl", "textDocument/hover", "1", "1"], 1500);
     assert_eq!((r.code, &r.json["ok"]), (1, &json!(false)), "{}", r.json);
     assert!(r.json["error"].as_str().unwrap().starts_with("no answer to textDocument/hover"), "{}", r.json);
@@ -344,7 +369,8 @@ fn errors_are_new_once_and_a_file_not_asked_keeps_its_lines() {
     assert_eq!(files(&r), [clean("b.fake"), ("a.sl".to_string(), false, vec![])], "{}", r.json);
     assert_eq!(r.code, 3);
     let after = fs::read_to_string(s.map.join("broke-seen.tsv")).unwrap();
-    assert!(after.contains(kept) && after.contains("a.fake\terror|E1|planted error\n") && after.contains("b.fake\t\n"), "{after}");
+    assert!(after.contains(kept) && after.contains("a.fake\terror|E1|planted error\n") && after.contains("b.fake\t\n") && after.contains("a.sl\tnot-asked|unsettled|\n"), "{after}");
+    assert_eq!(r.json["files"][1]["first_time"], json!(true), "{}", r.json);
     let r = swan(&s, &["broke", s.map.to_str().unwrap()], 20000);
     assert_eq!(r.code, 2);
     let r = swan(&s, &["broke", s.repo.to_str().unwrap(), "a.fake"], 20000);
@@ -427,4 +453,128 @@ fn a_server_does_not_outlive_a_killed_swan() {
         unsafe { libc::kill(p.parse().unwrap(), libc::SIGKILL) };
     }
     assert!(left.is_empty(), "left running after swan was killed: {left:?}");
+}
+
+// Each way a file is not asked has its own reason; a file that is asked has none.
+#[test]
+fn a_file_not_asked_has_a_reason() {
+    let s = setup("reasons");
+    for (name, text) in [("page.nl", "fine\n"), ("notes.md", "# notes\n"), ("a.sl", "fine\n"), ("a.dd", "fine\n"), ("a.tr", "fine\n")] {
+        fs::write(s.repo.join(name), text).unwrap();
+    }
+    let reason = |file: &str, budget: u64| {
+        let r = broke(&s, &[file], budget);
+        (r.code, r.json["files"][0]["reason"].as_str().map(str::to_string))
+    };
+    assert_eq!(reason("page.nl", 20000), (3, Some("no_server".to_string())));
+    assert_eq!(reason("notes.md", 20000), (3, Some("no_server".to_string())));
+    assert_eq!(reason("a.sl", 1500), (3, Some("unsettled".to_string())));
+    assert_eq!(reason("a.dd", 20000), (3, Some("failed".to_string())));
+    assert_eq!(reason("a.tr", 20000), (3, Some("untrusted".to_string())));
+    assert_eq!(reason("missing.fake", 20000), (3, Some("failed".to_string())));
+    assert_eq!(reason("../outside.fake", 20000), (3, Some("failed".to_string())));
+    let r = broke_trusted(&s, &["a.tr"], 20000);
+    assert_eq!((r.code, files(&r)), (0, vec![clean("a.tr")]), "{}", r.json);
+    assert!(r.json["files"][0].get("reason").is_none(), "{}", r.json);
+}
+
+#[test]
+fn a_file_not_asked_is_said_once_per_reason() {
+    let s = setup("once");
+    fs::write(s.repo.join("a.tr"), "fine\n").unwrap();
+    let first = |r: &Ran| r.json["files"][0]["first_time"].as_bool();
+    let r = broke(&s, &["a.tr"], 20000);
+    assert_eq!((r.code, first(&r)), (3, Some(true)), "{}", r.json);
+    assert_eq!(seen(&s), "a.tr\tnot-asked|untrusted|\n");
+    let r = broke(&s, &["a.tr"], 20000);
+    assert_eq!((r.code, first(&r)), (3, Some(false)), "{}", r.json);
+    assert_eq!(seen(&s), "a.tr\tnot-asked|untrusted|\n");
+    // Asked: the line goes, and it did not count as a look.
+    let r = broke_trusted(&s, &["a.tr"], 20000);
+    assert_eq!((r.code, r.json["files"][0]["first_look"].as_bool()), (0, Some(true)), "{}", r.json);
+    assert_eq!(seen(&s), "a.tr\t\n");
+    // Not asked again: said again, and what was seen of it stays.
+    let r = broke(&s, &["a.tr"], 20000);
+    assert_eq!(first(&r), Some(true), "{}", r.json);
+    assert_eq!(seen(&s), "a.tr\t\na.tr\tnot-asked|untrusted|\n");
+    assert!(r.json["note"].as_str().unwrap().ends_with("false until the reason changes or the file is asked again"));
+}
+
+#[test]
+fn a_changed_reason_is_said_again_and_replaces_the_line() {
+    let s = setup("reason-change");
+    fs::write(s.repo.join("a.tq"), "fine\n").unwrap();
+    assert_eq!(broke(&s, &["a.tq"], 20000).json["files"][0]["reason"], "untrusted");
+    let r = broke_trusted(&s, &["a.tq"], 1500);
+    let f = &r.json["files"][0];
+    assert_eq!((f["reason"].as_str(), f["first_time"].as_bool()), (Some("unsettled"), Some(true)), "{}", r.json);
+    assert_eq!(seen(&s), "a.tq\tnot-asked|unsettled|\n");
+}
+
+#[test]
+fn what_is_not_remembered_writes_nothing() {
+    let s = setup("nothing-kept");
+    fs::write(s.repo.join("page.nl"), "fine\n").unwrap();
+    let r = broke(&s, &["page.nl", "missing.fake"], 20000);
+    assert_eq!(r.code, 3);
+    for i in 0..2 {
+        assert!(r.json["files"][i].get("first_time").is_none(), "{}", r.json);
+    }
+    assert!(!s.map.join("broke-seen.tsv").exists() && !s.map.join("broke-seen.lock").exists(), "the map folder was written to");
+}
+
+#[test]
+fn a_name_with_a_tab_is_not_remembered() {
+    let s = setup("tab");
+    fs::write(s.repo.join("a\tb.tr"), "fine\n").unwrap();
+    fs::write(s.map.join("broke-seen.tsv"), "a.fake\terror|E1|planted error\n").unwrap();
+    let r = broke(&s, &["a\tb.tr"], 20000);
+    assert_eq!((r.code, r.json["files"][0]["reason"].as_str()), (3, Some("untrusted")), "{}", r.json);
+    assert!(r.json["files"][0].get("first_time").is_none(), "{}", r.json);
+    assert_eq!(seen(&s), "a.fake\terror|E1|planted error\n");
+}
+
+#[test]
+fn a_map_folder_that_cannot_be_written_still_gets_its_answer() {
+    use std::os::unix::fs::PermissionsExt;
+    struct Restore<'a>(&'a Path);
+    impl Drop for Restore<'_> {
+        fn drop(&mut self) {
+            let _ = fs::set_permissions(self.0, fs::Permissions::from_mode(0o755));
+        }
+    }
+    let s = setup("read-only");
+    fs::write(s.repo.join("a.tr"), "fine\n").unwrap();
+    fs::set_permissions(&s.map, fs::Permissions::from_mode(0o555)).unwrap();
+    let _restore = Restore(&s.map);
+    for _ in 0..2 {
+        let r = broke(&s, &["a.tr"], 20000);
+        let f = &r.json["files"][0];
+        assert_eq!((r.code, f["reason"].as_str(), f["first_time"].as_bool()), (3, Some("untrusted"), Some(true)), "{}", r.json);
+    }
+}
+
+// A refusal that is remembered takes the seen file's lock, so two hooks at
+// once do not race over the first_time line.
+#[test]
+fn a_refusal_to_remember_waits_for_the_lock() {
+    use std::os::fd::AsRawFd;
+    let s = setup("lock-refusal");
+    fs::write(s.repo.join("a.tr"), "fine\n").unwrap();
+    let lock = fs::OpenOptions::new().create(true).truncate(false).write(true).open(s.map.join("broke-seen.lock")).unwrap();
+    assert_eq!(unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX) }, 0);
+    let mut child = Command::new(s.home.join("bin/swan"))
+        .args(["broke", s.map.to_str().unwrap(), "a.tr"])
+        .env_remove("SWAN_TRUST_BUILD")
+        .env_remove("SWAN_SANDBOX")
+        .env("SWAN_LIVE_BUDGET_MS", "20000")
+        .stdout(Stdio::null())
+        .spawn()
+        .unwrap();
+    std::thread::sleep(Duration::from_secs(3));
+    assert!(child.try_wait().unwrap().is_none(), "broke did not wait for the lock");
+    assert!(!s.map.join("broke-seen.tsv").exists(), "broke wrote the seen file under another's lock");
+    drop(lock);
+    assert_eq!(child.wait().unwrap().code(), Some(3));
+    assert_eq!(seen(&s), "a.tr\tnot-asked|untrusted|\n");
 }
