@@ -2273,3 +2273,33 @@ copy: untrusted map, `swan trust`, map: "trust changed", lsp-index go ran again;
 Limit: Go's module cache is shared by every repo, so once a trusted repo has fetched a module an untrusted repo that
 needs it resolves it too (the second cobra copy had 5,934 references untrusted). Fetching runs none of the repo's code
 and go.sum pins each module.
+
+## 2026-11-27T15:50Z: the verify gate, first version (scripts/swan-verify)
+
+On the owner's word ("build the verify gate next"); spec docs/superpowers/specs/2026-11-27-verify-gate.md, decision
+DECISIONS.md 2026-11-27T15:40Z. `scripts/swan-verify <repo> [--base REF]` packs the base commit (`git archive`) and
+the working tree (tracked and new files, no .git), forks a Cua microVM from swan-test-v4, and runs
+`scripts/verify_guest.py` there: it closes the private networks with blackhole routes (10/8, 172.16/12, 192.168/16,
+169.254/16, 100.64/10, fc00::/7; the guest's own /30 to its resolver stays), finds the languages (Rust, Go,
+TypeScript, Python), and runs each one's build, type check and tests on both trees, the repo trusted. What fails in
+the head and not at base is new (exit 1); a failure at base too is counted, not blamed; what base failed and head
+does not is fixed. Base results are cached per commit on the host.
+
+tests/verify_gate.sh, 8 cases, all pass (26 s for all of them; a tiny repo is judged in about 1 s):
+
+| Case | Result |
+|---|---|
+| Rust type error | new: cargo check, src/lib.rs: mismatched types, line 37 (and cargo test, which no longer builds) |
+| Rust clean tree | pass |
+| Go test that now fails | new: go test, TestOne |
+| Go failure already at base, unrelated change | pass, 1 failing before the change too |
+| Go test fixed | pass, 1 fixed |
+| TypeScript type error | new: tsc, TS2322 |
+| Python test that now fails | new: pytest, test_square |
+| Network | private addresses refused at once by the route; proxy.golang.org reached |
+
+The network case can fail: the same Go test in a fork with no blackhole routes timed out on all four private
+addresses (packets left) and failed; with the routes it passed in 0.008 s.
+
+Not yet: the Claude Code Stop hook and the omp extension that run it at the end of a turn; checkpoints for other
+toolchains; a registry-only allowlist.
