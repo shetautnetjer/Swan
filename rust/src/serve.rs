@@ -20,20 +20,43 @@ use crate::fresh::Fresh;
 use crate::index::SCHEMA_VERSION;
 use crate::query::meta_value;
 use crate::run;
+use crate::serve_forward::{self, ForwardTarget, Forwarder};
 use crate::serve_read;
 use crate::serve_repo::{self, Selected};
 use crate::serve_tools;
+use crate::serve_wings;
+use crate::util::rfind;
+
+// The directory containing `map_path`, or "." when `map_path` has no slash.
+pub(crate) fn map_dir_of(map_path: &[u8]) -> &[u8] {
+    let slash = rfind(map_path, b"/");
+    if slash > 0 {
+        &map_path[..slash as usize]
+    } else if slash == 0 {
+        b"/"
+    } else {
+        b"."
+    }
+}
 
 // Holds one database generation for a read tool. `fresh` owns a prepared
 // statement on `db`, so it is declared first to drop before `db` closes.
 pub(crate) struct MapSnapshot {
     pub(crate) fresh: Fresh,
     pub(crate) db: Db,
+    in_tx: bool,
 }
 
 impl MapSnapshot {
-    pub(crate) fn commit(self) {
-        let _ = self.db.exec(b"COMMIT;");
+    pub(crate) fn end_tx(&mut self) {
+        if self.in_tx {
+            let _ = self.db.exec(b"COMMIT;");
+            self.in_tx = false;
+        }
+    }
+
+    pub(crate) fn commit(mut self) {
+        self.end_tx();
         drop(self.fresh);
         drop(self.db);
     }
@@ -71,7 +94,7 @@ pub(crate) fn open_map_snapshot_for(db_path: &[u8], repo: &[u8]) -> Result<MapSn
         .concat());
     }
     let fresh = Fresh::load(&db);
-    Ok(MapSnapshot { fresh, db })
+    Ok(MapSnapshot { fresh, db, in_tx: true })
 }
 
 pub(crate) fn open_map_snapshot(db_path: &[u8]) -> Result<MapSnapshot, Vec<u8>> {
@@ -79,18 +102,56 @@ pub(crate) fn open_map_snapshot(db_path: &[u8]) -> Result<MapSnapshot, Vec<u8>> 
 }
 
 #[derive(Clone)]
-struct SwanServer {
+pub(crate) struct SwanServer {
     maps_root: Vec<u8>,
     selected: Arc<Mutex<Option<Selected>>>,
+    forward: Arc<Mutex<Forwarder>>,
 }
 
 impl SwanServer {
     fn for_map(maps_root: Vec<u8>, selected: Selected) -> Self {
-        Self { maps_root, selected: Arc::new(Mutex::new(Some(selected))) }
+        let target = ForwardTarget::Map(selected.map.clone());
+        Self {
+            maps_root,
+            selected: Arc::new(Mutex::new(Some(selected))),
+            forward: Arc::new(Mutex::new(Forwarder::new(target))),
+        }
     }
 
     fn for_maps(maps_root: Vec<u8>) -> Self {
-        Self { maps_root, selected: Arc::new(Mutex::new(None)) }
+        let target = ForwardTarget::MapsDir(maps_root.clone());
+        Self {
+            maps_root,
+            selected: Arc::new(Mutex::new(None)),
+            forward: Arc::new(Mutex::new(Forwarder::new(target))),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_map_with_goose_bin(
+        maps_root: Vec<u8>,
+        selected: Selected,
+        bin: Option<std::ffi::OsString>,
+    ) -> Self {
+        let target = ForwardTarget::Map(selected.map.clone());
+        Self {
+            maps_root,
+            selected: Arc::new(Mutex::new(Some(selected))),
+            forward: Arc::new(Mutex::new(Forwarder::with_bin_override(target, bin))),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_maps_with_goose_bin(
+        maps_root: Vec<u8>,
+        bin: Option<std::ffi::OsString>,
+    ) -> Self {
+        let target = ForwardTarget::MapsDir(maps_root.clone());
+        Self {
+            maps_root,
+            selected: Arc::new(Mutex::new(None)),
+            forward: Arc::new(Mutex::new(Forwarder::with_bin_override(target, bin))),
+        }
     }
 
     fn dispatch_tool(&self, name: &str, args: &serde_json::Value) -> CallToolResult {
@@ -118,14 +179,26 @@ impl SwanServer {
                 )]),
             };
         }
-        if !serve_read::is_read_tool(name) {
+        // `live: true` asks a running language server, which the Rust server does not keep yet (step 4): until then
+        // it goes to the Goose server like the tools the Rust one lacks (the owner's decision A, 2026-11-27).
+        let live = (name == "find_implementations" || name == "get_diagnostics")
+            && args.get("live").and_then(serde_json::Value::as_bool) == Some(true);
+        if live || serve_forward::is_forwarded_tool(name) {
+            let mut cur = self.selected.lock().unwrap_or_else(|e| e.into_inner());
+            let mut fwd = self.forward.lock().unwrap_or_else(|e| e.into_inner());
+            return fwd.call(name, args, &self.maps_root, &mut cur);
+        }
+        let is_read = serve_read::is_read_tool(name);
+        let is_broke = name == "what_broke";
+        let is_wings = serve_wings::is_wings_tool(name);
+        if !is_read && !is_broke && !is_wings {
             return CallToolResult::error(vec![ContentBlock::text(format!(
-                "not yet in the Rust server: {name}"
+                "unknown tool: {name}"
             ))]);
         }
         let repo = args.get("repo").and_then(serde_json::Value::as_str).unwrap_or("").as_bytes();
         let mut cur = self.selected.lock().unwrap_or_else(|e| e.into_inner());
-        let snap = if !repo.is_empty() {
+        let mut snap = if !repo.is_empty() {
             match serve_repo::select_open(&self.maps_root, repo, build, false, &mut cur) {
                 Ok((snap, _)) => snap,
                 Err(e) => {
@@ -157,8 +230,41 @@ impl SwanServer {
                 "no repo selected: call use_repo with a path, or pass repo",
             )]);
         };
+        let map_path = cur.as_ref().map(|s| s.map.clone()).unwrap_or_default();
+        drop(cur);
+        if is_broke {
+            let root = meta_value(&snap.db, b"root");
+            snap.commit();
+            return match serve_read::call_what_broke(&map_path, &root, args) {
+                Ok((out, true)) => CallToolResult::success(vec![ContentBlock::text(
+                    String::from_utf8_lossy(&out).into_owned(),
+                )]),
+                Ok((out, false)) => CallToolResult::error(vec![ContentBlock::text(
+                    String::from_utf8_lossy(&out).into_owned(),
+                )]),
+                Err(e) => CallToolResult::error(vec![ContentBlock::text(
+                    String::from_utf8_lossy(&e).into_owned(),
+                )]),
+            };
+        }
+        if is_wings {
+            let root = meta_value(&snap.db, b"root");
+            snap.commit();
+            let mut out = Vec::new();
+            return match serve_wings::call_wings(&map_path, &root, name, args, &mut out) {
+                Some(Ok(())) => CallToolResult::success(vec![ContentBlock::text(
+                    String::from_utf8_lossy(&out).into_owned(),
+                )]),
+                Some(Err(e)) => CallToolResult::error(vec![ContentBlock::text(
+                    String::from_utf8_lossy(&e).into_owned(),
+                )]),
+                None => CallToolResult::error(vec![ContentBlock::text(format!(
+                    "not yet in the Rust server: {name}"
+                ))]),
+            };
+        }
         let mut out = Vec::new();
-        let res = serve_read::call_read(&snap, name, args, &mut out);
+        let res = serve_read::call_read(&mut snap, &map_path, name, args, &mut out);
         snap.commit();
         match res {
             Some(Ok(())) => CallToolResult::success(vec![ContentBlock::text(
@@ -211,12 +317,13 @@ fn write_stderr_line(msg: &[u8]) {
     let _ = err.flush();
 }
 
-async fn serve_io<R, W>(server: SwanServer, reader: R, writer: W) -> i32
+pub(crate) async fn serve_io<R, W>(server: SwanServer, reader: R, writer: W) -> i32
 where
     R: AsyncRead + Send + Unpin + 'static,
     W: AsyncWrite + Send + Unpin + 'static,
 {
-    match serve_server(server, (reader, writer)).await {
+    let forward = server.forward.clone();
+    let code = match serve_server(server, (reader, writer)).await {
         Ok(running) => match running.waiting().await {
             Ok(QuitReason::Closed | QuitReason::Cancelled) => 0,
             Ok(QuitReason::JoinError(e)) => {
@@ -237,7 +344,9 @@ where
             write_stderr_line(format!("swan: serve failed: {e}").as_bytes());
             1
         }
-    }
+    };
+    forward.lock().unwrap_or_else(|e| e.into_inner()).shutdown();
+    code
 }
 
 fn run_server(server: SwanServer) -> i32 {
@@ -282,7 +391,7 @@ mod tests {
     use serde_json::Value;
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
-    const EXPECTED_TOOLS: [&str; 13] = [
+    const EXPECTED_TOOLS: [&str; 28] = [
         "use_repo",
         "find_symbol",
         "find_referencing_symbols",
@@ -293,8 +402,23 @@ mod tests {
         "find_implementations",
         "get_type_hierarchy",
         "find_unused_symbols",
+        "replace_symbol_body",
+        "insert_after_symbol",
+        "insert_before_symbol",
+        "rename_symbol",
         "get_diagnostics",
+        "what_broke",
+        "update_map",
+        "check_errors",
+        "run_tests",
+        "format_file",
         "search_pattern",
+        "rewrite_pattern",
+        "edit_batch",
+        "repo_projects",
+        "repo_overview",
+        "what_touches",
+        "file_neighbors",
         "index_info",
     ];
 
@@ -385,14 +509,14 @@ mod tests {
         let list_reply = recv_json(&mut reader).await;
         assert_eq!(list_reply["id"], 3);
         let tools = list_reply["result"]["tools"].as_array().expect("tools array");
-        assert_eq!(tools.len(), 13);
+        assert_eq!(tools.len(), 28);
 
         drop(client_w);
         assert_eq!(task.await.unwrap(), 0);
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn unimplemented_tool_returns_mcp_error() {
+    async fn unknown_tool_returns_mcp_error() {
         let (mut client_w, server_r) = tokio::io::duplex(64 * 1024);
         let (server_w, client_r) = tokio::io::duplex(64 * 1024);
         let task = tokio::spawn(serve_io(SwanServer::for_maps(Vec::new()), server_r, server_w));
@@ -404,7 +528,7 @@ mod tests {
 
         send_line(
             &mut client_w,
-            r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"rename_symbol","arguments":{}}}"#,
+            r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"no_such_tool","arguments":{}}}"#,
         )
         .await;
         let reply = recv_json(&mut reader).await;
@@ -413,7 +537,7 @@ mod tests {
         assert_eq!(reply["result"]["content"][0]["type"], "text");
         assert_eq!(
             reply["result"]["content"][0]["text"],
-            "not yet in the Rust server: rename_symbol"
+            "unknown tool: no_such_tool"
         );
 
         drop(client_w);
@@ -443,5 +567,37 @@ mod tests {
     fn serve_main_missing_db_returns_nonzero() {
         let code = serve_main(b"/nonexistent/swan-serve-test-db/swan.db");
         assert_ne!(code, 0);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn new_read_tools_require_selected_repo() {
+        let (mut client_w, server_r) = tokio::io::duplex(64 * 1024);
+        let (server_w, client_r) = tokio::io::duplex(64 * 1024);
+        let task = tokio::spawn(serve_io(SwanServer::for_maps(Vec::new()), server_r, server_w));
+
+        let mut reader = BufReader::new(client_r);
+        send_line(&mut client_w, &init_request(1)).await;
+        let _ = recv_json(&mut reader).await;
+        send_line(&mut client_w, r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#).await;
+
+        let mut id = 2;
+        for tool in ["what_broke", "repo_projects", "repo_overview", "what_touches", "file_neighbors"] {
+            let req = format!(
+                r#"{{"jsonrpc":"2.0","id":{id},"method":"tools/call","params":{{"name":"{tool}","arguments":{{}}}}}}"#
+            );
+            send_line(&mut client_w, &req).await;
+            let reply = recv_json(&mut reader).await;
+            assert_eq!(reply["id"], id);
+            assert_eq!(reply["result"]["isError"], true, "{tool}: {reply}");
+            assert_eq!(
+                reply["result"]["content"][0]["text"],
+                "no repo selected: call use_repo with a path, or pass repo",
+                "{tool}: {reply}"
+            );
+            id += 1;
+        }
+
+        drop(client_w);
+        assert_eq!(task.await.unwrap(), 0);
     }
 }

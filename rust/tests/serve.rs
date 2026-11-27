@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
-const EXPECTED_TOOLS: [&str; 13] = [
+const EXPECTED_TOOLS: [&str; 28] = [
     "use_repo",
     "find_symbol",
     "find_referencing_symbols",
@@ -20,8 +20,23 @@ const EXPECTED_TOOLS: [&str; 13] = [
     "find_implementations",
     "get_type_hierarchy",
     "find_unused_symbols",
+    "replace_symbol_body",
+    "insert_after_symbol",
+    "insert_before_symbol",
+    "rename_symbol",
     "get_diagnostics",
+    "what_broke",
+    "update_map",
+    "check_errors",
+    "run_tests",
+    "format_file",
     "search_pattern",
+    "rewrite_pattern",
+    "edit_batch",
+    "repo_projects",
+    "repo_overview",
+    "what_touches",
+    "file_neighbors",
     "index_info",
 ];
 
@@ -83,6 +98,19 @@ struct Server {
 
 impl Server {
     fn start(name: &str, copy_fixture: bool) -> (Self, PathBuf) {
+        Self::start_with_env(name, copy_fixture, &[])
+    }
+
+    fn start_with_env(name: &str, copy_fixture: bool, vars: &[(&str, &str)]) -> (Self, PathBuf) {
+        Self::start_with_env_changes(name, copy_fixture, vars, &[])
+    }
+
+    fn start_with_env_changes(
+        name: &str,
+        copy_fixture: bool,
+        vars: &[(&str, &str)],
+        remove: &[&str],
+    ) -> (Self, PathBuf) {
         let dir = std::env::temp_dir().join(format!("swan-serve-{}-{name}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
@@ -105,14 +133,19 @@ impl Server {
             &[fixture_root.to_str().unwrap()],
         );
 
-        let mut child = Command::new(env!("CARGO_BIN_EXE_swan"))
-            .arg("serve")
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_swan"));
+        cmd.arg("serve")
             .arg(&db)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .expect("spawn swan serve");
+            .stderr(Stdio::piped());
+        for k in remove {
+            cmd.env_remove(k);
+        }
+        for (k, v) in vars {
+            cmd.env(k, v);
+        }
+        let mut child = cmd.spawn().expect("spawn swan serve");
         let stdin = child.stdin.take().unwrap();
         let stdout = BufReader::new(child.stdout.take().unwrap());
 
@@ -120,8 +153,16 @@ impl Server {
         (srv, fixture_root)
     }
 
-    fn start_initialized(name: &str) -> Self {
-        let (mut srv, _) = Self::start(name, false);
+    fn start_initialized_with_env(name: &str, vars: &[(&str, &str)]) -> Self {
+        Self::start_initialized_with_env_changes(name, vars, &[])
+    }
+
+    fn start_initialized_with_env_changes(
+        name: &str,
+        vars: &[(&str, &str)],
+        remove: &[&str],
+    ) -> Self {
+        let (mut srv, _) = Self::start_with_env_changes(name, false, vars, remove);
         let init = srv.rpc(
             "initialize",
             Some(json!({
@@ -133,6 +174,10 @@ impl Server {
         assert_eq!(init["result"]["serverInfo"]["name"], "swan", "init reply: {init}");
         srv.notify("notifications/initialized");
         srv
+    }
+
+    fn start_initialized(name: &str) -> Self {
+        Self::start_initialized_with_env(name, &[])
     }
 
     fn write_json(&mut self, msg: &Value) {
@@ -261,7 +306,7 @@ fn jnum(obj: &Value, key: &str) -> i64 {
     -1
 }
 
-// initialize names the server; tools/list is the 13 names in order; unknown method is a JSON-RPC error
+// initialize names the server; tools/list is the 28 names in order; unknown method is a JSON-RPC error
 #[test]
 fn initialize_tools_list_and_unknown_method() {
     let (mut srv, _) = Server::start("init-list-unknown", false);
@@ -290,7 +335,7 @@ fn initialize_tools_list_and_unknown_method() {
 
     // Server keeps answering after an unknown method.
     let list2 = srv.rpc("tools/list", None);
-    assert_eq!(list2["result"]["tools"].as_array().unwrap().len(), 13, "{list2}");
+    assert_eq!(list2["result"]["tools"].as_array().unwrap().len(), 28, "{list2}");
 
     assert_eq!(srv.close_and_wait(), 0);
 }
@@ -424,13 +469,31 @@ fn index_info_reports_counts() {
     assert!(jnum(&info, "symbols") > 0 && jnum(&info, "occurrences") > 0, "{info}");
 }
 
-// a tool not yet built answers 'not yet in the Rust server: rename_symbol'
+// an unknown tool answers 'unknown tool: <name>' without requiring SWAN_GOOSE_SERVE
 #[test]
-fn tool_not_yet_built_answers_not_yet_in_rust_server() {
-    let mut srv = Server::start_initialized("unimplemented-tool");
-    let (is_error, text) = srv.call_tool_raw("rename_symbol", json!({}));
+fn unknown_tool_answers_unknown_tool() {
+    let mut srv = Server::start_initialized("unknown-tool");
+    let (is_error, text) = srv.call_tool_raw("no_such_tool", json!({}));
     assert!(is_error, "expected MCP tool error, got ok: {text}");
-    assert_eq!(text, "not yet in the Rust server: rename_symbol");
+    assert_eq!(text, "unknown tool: no_such_tool");
+}
+
+// a forwarded tool without SWAN_GOOSE_SERVE (unset or empty) returns an MCP error naming the env var
+#[test]
+fn forwarded_tool_without_swan_goose_serve_returns_error() {
+    let mut srv_unset =
+        Server::start_initialized_with_env_changes("forward-unset-env", &[], &["SWAN_GOOSE_SERVE"]);
+    let (is_error, text) = srv_unset.call_tool_raw("rename_symbol", json!({}));
+    assert!(is_error, "expected MCP tool error when unset, got ok: {text}");
+    assert!(text.contains("SWAN_GOOSE_SERVE"), "{text}");
+    assert_eq!(srv_unset.close_and_wait(), 0);
+
+    let mut srv_empty =
+        Server::start_initialized_with_env("forward-empty-env", &[("SWAN_GOOSE_SERVE", "")]);
+    let (is_error2, text2) = srv_empty.call_tool_raw("update_map", json!({}));
+    assert!(is_error2, "expected MCP tool error when empty, got ok: {text2}");
+    assert!(text2.contains("SWAN_GOOSE_SERVE"), "{text2}");
+    assert_eq!(srv_empty.close_and_wait(), 0);
 }
 
 // get_callers with a name three symbols share sends the question back instead of merging
@@ -530,4 +593,242 @@ fn get_diagnostics_without_loaded_data_returns_error() {
     let (is_error, text) = srv.call_tool_raw("get_diagnostics", json!({}));
     assert!(is_error, "expected error when no diagnostics loaded, got: {text}");
     assert!(text.contains("no diagnostics loaded"), "{text}");
+}
+
+// what_broke requires the files argument
+#[test]
+fn what_broke_missing_files_returns_error() {
+    let mut srv = Server::start_initialized("what-broke-missing-files");
+    let (is_error, text) = srv.call_tool_raw("what_broke", json!({}));
+    assert!(is_error, "expected error, got: {text}");
+    assert!(text.contains("files is required"), "{text}");
+    assert_eq!(srv.close_and_wait(), 0);
+}
+
+// what_broke reports new errors once, remembers them in broke-seen.tsv beside
+// the map, and returns isError:true when no file could be asked.
+#[test]
+fn what_broke_reports_new_errors_once_and_remembers_seen() {
+    let dir = std::env::temp_dir().join(format!("swan-serve-what-broke-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    let home = dir.join("home");
+    let repo = dir.join("repo");
+    let map = dir.join("map");
+    for d in [home.join("bin"), home.join("tools"), repo.clone(), map.clone()] {
+        fs::create_dir_all(d).unwrap();
+    }
+    fs::copy(env!("CARGO_BIN_EXE_swan"), home.join("bin/swan")).unwrap();
+    let fake = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fake_lsp.py");
+    let mods = json!({
+        "nolsp": {"match": [".nl"]},
+        "fake": {
+            "match": [".fake"],
+            "lsp": [{
+                "cmd": [python(), "-I", fake, "publish"],
+                "language_id": "fake",
+                "settle": "publish"
+            }]
+        },
+        "guarded": {
+            "match": [".tr"],
+            "lsp": [{
+                "cmd": [python(), "-I", fake, "publish"],
+                "language_id": "guarded",
+                "settle": "publish",
+                "runs_repo_code": true
+            }]
+        }
+    });
+    fs::write(home.join("tools/modules.json"), mods.to_string()).unwrap();
+    fs::write(repo.join("b.fake"), "fine\n").unwrap();
+    fs::write(repo.join("note.nl"), "plain text\n").unwrap();
+    fs::write(repo.join("a.tr"), "fine\n").unwrap();
+    let repo_real = repo.canonicalize().unwrap();
+    let db = map.join("swan.db");
+    fs::copy(repo_root().join("rust/tests/data/tiny-ts.swan.db"), &db).unwrap();
+    sqlite_exec(
+        &db,
+        "INSERT OR REPLACE INTO meta (key, value) VALUES ('root', ?)",
+        &[repo_real.to_str().unwrap()],
+    );
+
+    let mut child = Command::new(home.join("bin/swan"))
+        .arg("serve")
+        .arg(&db)
+        .env_remove("SWAN_TRUST_BUILD")
+        .env_remove("SWAN_SANDBOX")
+        .env("SWAN_LIVE_BUDGET_MS", "20000")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn swan serve from fake home");
+    let stdin = child.stdin.take().unwrap();
+    let stdout = BufReader::new(child.stdout.take().unwrap());
+    let mut srv = Server { dir, db, child, stdin: Some(stdin), stdout, next_id: 1 };
+    let init = srv.rpc(
+        "initialize",
+        Some(json!({
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": {"name": "swan-smoke", "version": "0"}
+        })),
+    );
+    assert_eq!(init["result"]["serverInfo"]["name"], "swan", "{init}");
+    srv.notify("notifications/initialized");
+
+    // First look on a clean file: asked:true, first_look:true, 0 new errors.
+    let clean = srv.call_tool("what_broke", json!({"files": ["b.fake"]}));
+    assert_eq!(clean["new_errors"], 0, "{clean}");
+    assert_eq!(clean["files"][0]["asked"], true, "{clean}");
+    assert_eq!(clean["files"][0]["first_look"], true, "{clean}");
+    assert!(map.join("broke-seen.tsv").exists());
+
+    // Introduce an error and a warning: reported once with line 2.
+    fs::write(repo_real.join("b.fake"), "fine\nan ERROR here\na WARN here\n").unwrap();
+    let broken = srv.call_tool("what_broke", json!({"files": ["b.fake"]}));
+    assert_eq!(broken["new_errors"], 1, "{broken}");
+    assert_eq!(broken["files"][0]["asked"], true, "{broken}");
+    assert_eq!(broken["files"][0]["first_look"], false, "{broken}");
+    assert_eq!(broken["files"][0]["new_errors"][0]["line"], 2, "{broken}");
+    assert_eq!(broken["files"][0]["errors_already_there"], 0, "{broken}");
+    assert_eq!(broken["files"][0]["warnings"], 1, "{broken}");
+
+    // Asked again: already there, not new.
+    let again = srv.call_tool("what_broke", json!({"files": ["b.fake"]}));
+    assert_eq!(again["new_errors"], 0, "{again}");
+    assert_eq!(again["files"][0]["errors_already_there"], 1, "{again}");
+
+    // No server for .nl alone -> asked == 0 -> isError:true with JSON payload.
+    let (nl_err, nl_text) = srv.call_tool_raw("what_broke", json!({"files": ["note.nl"]}));
+    assert!(nl_err, "expected isError:true when asked == 0: {nl_text}");
+    let nl_json: Value = serde_json::from_str(&nl_text).expect("valid JSON");
+    assert_eq!(nl_json["files"][0]["asked"], false, "{nl_json}");
+    assert_eq!(nl_json["files"][0]["reason"], "no_server", "{nl_json}");
+    assert!(nl_json["files"][0].get("first_time").is_none(), "{nl_json}");
+
+    // Untrusted language alone -> asked == 0 -> isError:true, first_time true then false.
+    let (tr_err1, tr_text1) = srv.call_tool_raw("what_broke", json!({"files": ["a.tr"]}));
+    assert!(tr_err1, "expected isError:true for untrusted file: {tr_text1}");
+    let tr_json1: Value = serde_json::from_str(&tr_text1).expect("valid JSON");
+    assert_eq!(tr_json1["files"][0]["reason"], "untrusted", "{tr_json1}");
+    assert_eq!(tr_json1["files"][0]["first_time"], true, "{tr_json1}");
+
+    let (tr_err2, tr_text2) = srv.call_tool_raw("what_broke", json!({"files": ["a.tr"]}));
+    assert!(tr_err2, "expected isError:true for untrusted file: {tr_text2}");
+    let tr_json2: Value = serde_json::from_str(&tr_text2).expect("valid JSON");
+    assert_eq!(tr_json2["files"][0]["reason"], "untrusted", "{tr_json2}");
+    assert_eq!(tr_json2["files"][0]["first_time"], false, "{tr_json2}");
+
+    // Mixed: one asked file + one unasked file -> asked > 0 -> isError:false.
+    let mixed = srv.call_tool("what_broke", json!({"files": ["b.fake", "note.nl"]}));
+    assert_eq!(mixed["files"][0]["asked"], true, "{mixed}");
+    assert_eq!(mixed["files"][1]["asked"], false, "{mixed}");
+
+    assert_eq!(srv.close_and_wait(), 0);
+}
+
+// The four Spread-Wings tools report where spread-wings was looked for when missing.
+#[test]
+fn wings_tools_missing_spread_wings_return_error() {
+    let mut srv = Server::start_initialized_with_env(
+        "wings-missing",
+        &[("SWAN_SPREAD_WINGS", "/nonexistent/spread-wings")],
+    );
+
+    for (tool, args) in [
+        ("repo_projects", json!({})),
+        ("repo_overview", json!({})),
+        ("what_touches", json!({"name": "Store"})),
+        ("file_neighbors", json!({"relative_path": "src/store.ts"})),
+    ] {
+        let (is_error, text) = srv.call_tool_raw(tool, args);
+        assert!(is_error, "expected error for {tool}, got: {text}");
+        assert!(
+            text.contains("SWAN_SPREAD_WINGS is /nonexistent/spread-wings, which is not there"),
+            "{tool}: {text}"
+        );
+    }
+
+    assert_eq!(srv.close_and_wait(), 0);
+}
+
+// what_touches and file_neighbors validate their required arguments before running Spread-Wings.
+#[test]
+fn wings_tools_validate_required_arguments() {
+    let mut srv = Server::start_initialized_with_env(
+        "wings-args",
+        &[("SWAN_SPREAD_WINGS", "/nonexistent/spread-wings")],
+    );
+
+    let (e1, t1) = srv.call_tool_raw("what_touches", json!({}));
+    assert!(e1, "expected error, got: {t1}");
+    assert!(t1.contains("name is required"), "{t1}");
+
+    let (e2, t2) = srv.call_tool_raw("file_neighbors", json!({}));
+    assert!(e2, "expected error, got: {t2}");
+    assert!(t2.contains("relative_path is required"), "{t2}");
+
+    assert_eq!(srv.close_and_wait(), 0);
+}
+
+// get_callers without spread-wings still returns exact callers and adds
+// possible_callers with checked:false and why; ambiguous targets omit it.
+#[test]
+fn get_callers_possible_callers_without_spread_wings_reports_unchecked() {
+    let mut srv = Server::start_initialized_with_env(
+        "callers-no-wings",
+        &[("SWAN_SPREAD_WINGS", "/nonexistent/spread-wings")],
+    );
+
+    let res = srv.call_tool("get_callers", json!({"name_path": "Store/total"}));
+    assert!(!res["callers"].as_array().unwrap().is_empty(), "{res}");
+    assert!(res["summary"]["symbols"].as_i64().unwrap_or(0) > 0, "{res}");
+    let pc = &res["possible_callers"];
+    assert_eq!(pc["checked"], false, "{res}");
+    assert!(
+        pc["why"]
+            .as_str()
+            .unwrap_or("")
+            .contains("SWAN_SPREAD_WINGS is /nonexistent/spread-wings"),
+        "{res}"
+    );
+    assert!(pc.get("sites").is_none(), "{res}");
+
+    // Ambiguous target returns targets only and omits possible_callers.
+    let amb = srv.call_tool("get_callers", json!({"name_path": "total"}));
+    assert_eq!(amb["ambiguous"], true, "{amb}");
+    assert!(amb.get("possible_callers").is_none(), "{amb}");
+
+    assert_eq!(srv.close_and_wait(), 0);
+}
+
+// End-to-end Spread-Wings tools against real bin/spread-wings and bin/eggshell.
+#[test]
+#[ignore = "requires bin/eggshell and bin/spread-wings not present in this scratch copy"]
+fn wings_tools_end_to_end_with_spread_wings() {
+    let mut srv = Server::start_initialized("wings-e2e");
+    let proj = srv.call_tool("repo_projects", json!({}));
+    assert_eq!(proj["source"], "spread-wings", "{proj}");
+    assert!(proj["in_folders_git_ignores"].is_array(), "{proj}");
+    assert!(proj["result"].is_object(), "{proj}");
+
+    let ov = srv.call_tool("repo_overview", json!({}));
+    assert_eq!(ov["source"], "spread-wings", "{ov}");
+    assert!(ov["evidence"].as_str().unwrap_or("").contains("not resolved by a compiler"), "{ov}");
+    assert!(ov["result"]["communities"].is_array(), "{ov}");
+
+    let tc = srv.call_tool("what_touches", json!({"name": "makeStore"}));
+    assert_eq!(tc["source"], "spread-wings", "{tc}");
+    assert!(tc["result"]["files"].is_array(), "{tc}");
+
+    let nb = srv.call_tool("file_neighbors", json!({"relative_path": "src/main.ts"}));
+    assert_eq!(nb["source"], "spread-wings", "{nb}");
+    assert!(nb["result"].is_object(), "{nb}");
+
+    let (bad_err, bad_text) = srv.call_tool_raw("what_touches", json!({"name": "no_such_name_here"}));
+    assert!(bad_err, "expected error for unknown name: {bad_text}");
+    assert!(bad_text.contains("no definition named"), "{bad_text}");
+
+    assert_eq!(srv.close_and_wait(), 0);
 }

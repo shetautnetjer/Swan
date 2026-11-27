@@ -1,13 +1,15 @@
-// Adapters for the 12 read tools `swan query` already answers, matching
-// call_tool in src/serve.goose for argument names, defaults and errors.
+// Adapters for the 12 read tools `swan query` already answers and `what_broke`,
+// matching call_tool in src/serve.goose for argument names, defaults and errors.
 
 use serde_json::Value;
 
+use crate::broke;
 use crate::diag;
 use crate::graph;
 use crate::query;
-use crate::serve::MapSnapshot;
+use crate::serve::{map_dir_of, MapSnapshot};
 use crate::structural;
+use crate::wings;
 
 fn arg_text<'a>(args: &'a Value, key: &str) -> &'a [u8] {
     args.get(key).and_then(Value::as_str).unwrap_or("").as_bytes()
@@ -42,10 +44,36 @@ pub(crate) fn is_read_tool(name: &str) -> bool {
     )
 }
 
+// Runs `what_broke` outside any SQLite read snapshot. Returns Ok((json, ok))
+// where `ok` is true when at least one file was asked (matching call_tool in
+// src/serve.goose), or Err(reason) when arguments or paths are invalid.
+pub(crate) fn call_what_broke(
+    map_path: &[u8],
+    root: &[u8],
+    args: &Value,
+) -> Result<(Vec<u8>, bool), Vec<u8>> {
+    let Some(fl) = args.get("files") else {
+        return Err(b"files is required: the repo-relative paths you just edited".to_vec());
+    };
+    let mut files: Vec<Vec<u8>> = Vec::new();
+    if let Some(arr) = fl.as_array() {
+        for f in arr {
+            if let Some(s) = f.as_str() {
+                if !s.is_empty() {
+                    files.push(s.as_bytes().to_vec());
+                }
+            }
+        }
+    }
+    let outcome = broke::what_broke(map_dir_of(map_path), root, &files)?;
+    Ok((outcome.json, outcome.asked > 0))
+}
+
 // Runs one of the 12 read tools against `snap` and writes its JSON answer
 // into `out`. Returns None when `name` is not one of those 12 tools.
 pub(crate) fn call_read(
-    snap: &MapSnapshot,
+    snap: &mut MapSnapshot,
+    map_path: &[u8],
     name: &str,
     args: &Value,
     out: &mut Vec<u8>,
@@ -115,7 +143,31 @@ pub(crate) fn call_read(
             let rel = arg_text(args, "relative_path");
             let depth = arg_int(args, "depth", 1).min(5);
             let limit = arg_int(args, "max_results", 200);
-            graph::get_callers(&snap.db, &snap.fresh, pattern, rel, depth, limit, out);
+            let ids = graph::get_callers_exact(&snap.db, &snap.fresh, pattern, rel, depth, limit, out);
+            let (root, specs, exact) = if !ids.is_empty() {
+                let root = query::meta_value(&snap.db, b"root");
+                let mut specs = Vec::new();
+                let mut exact = Vec::new();
+                graph::callers_target_info(&snap.db, &ids, &mut specs, &mut exact);
+                (root, specs, exact)
+            } else {
+                (Vec::new(), Vec::new(), Vec::new())
+            };
+            // Release the read snapshot before Spread-Wings runs a subprocess
+            // that writes beside the map, so swan.db is never held open across it.
+            snap.end_tx();
+            if !ids.is_empty() {
+                wings::wings_possible_callers(
+                    &snap.db,
+                    &snap.fresh,
+                    map_path,
+                    &root,
+                    &ids,
+                    &specs,
+                    &exact,
+                    out,
+                );
+            }
             Some(Ok(()))
         }
         "get_callees" => {

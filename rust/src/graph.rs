@@ -94,15 +94,18 @@ WHERE c.name = '<init>' AND substr(c.scip, 1, length(t.scip)) = t.scip
 // Who references the target, and who references those, up to `depth` steps:
 // the impact radius of changing it. Each result has its distance and whether
 // it is test code, and a summary counts the files and lists the test files.
-pub fn get_callers(db: &Db, fr: &Fresh, pattern: &[u8], rel: &[u8], depth: i64, limit: i64, out: &mut Vec<u8>) {
+// Returns the SQL id list of the matched target (plus constructors and repo
+// base methods it implements), or empty when nothing matched or the match was
+// ambiguous.
+pub fn get_callers_exact(db: &Db, fr: &Fresh, pattern: &[u8], rel: &[u8], depth: i64, limit: i64, out: &mut Vec<u8>) -> Vec<u8> {
     out.push(b'{');
     let (mut ids, matched) = targets(db, fr, pattern, rel, out);
     if ids.is_empty() {
         out.extend_from_slice(b",\"callers\":[]}");
-        return;
+        return Vec::new();
     }
     if refuse_ambiguous(matched, out) {
-        return;
+        return Vec::new();
     }
     // A method that implements or overrides another is also called through
     // it: `s.area()` on a Shape may run Circle.area. So the callers of the
@@ -273,6 +276,58 @@ GROUP BY o.file, o.start_line ORDER BY o.file, o.start_line LIMIT 200
     }
     drop(tf);
     out.extend_from_slice(b"]}}");
+    ids
+}
+
+pub fn get_callers(db: &Db, fr: &Fresh, pattern: &[u8], rel: &[u8], depth: i64, limit: i64, out: &mut Vec<u8>) {
+    let _ = get_callers_exact(db, fr, pattern, rel, depth, limit, out);
+}
+
+// Target definitions and exact distance-1 call sites from the current read
+// snapshot, so Spread-Wings can look up syntax-only callers after the
+// snapshot is released.
+// `specs`: "<name>\x1f<def_file>\x1f<0-based def_line>\x1e" per definition.
+// `exact`: "<file>\x1f<1-based line>\n" per exact distance-1 occurrence.
+pub fn callers_target_info(db: &Db, ids: &[u8], specs: &mut Vec<u8>, exact: &mut Vec<u8>) {
+    let mut sym_sql: Vec<u8> = Vec::new();
+    push_replaced(
+        &mut sym_sql,
+        b"SELECT name, def_file, def_line FROM symbols
+WHERE id IN (#IDS#) AND in_repo = 1 AND name != '<init>'
+  AND def_file IS NOT NULL AND def_line IS NOT NULL
+",
+        b"#IDS#",
+        ids,
+    );
+    let st = db.prepare_or_die(&sym_sql);
+    while st.step_checked() {
+        let nm = st.col_text(0);
+        let df = st.col_text(1);
+        specs.extend_from_slice(&nm);
+        specs.push(0x1f);
+        specs.extend_from_slice(&df);
+        specs.push(0x1f);
+        push_int(specs, st.col_int(2));
+        specs.push(0x1e);
+    }
+    drop(st);
+    let mut occ_sql: Vec<u8> = Vec::new();
+    push_replaced(
+        &mut occ_sql,
+        b"SELECT DISTINCT file, start_line + 1 FROM occurrences
+WHERE symbol_id IN (#IDS#) AND is_def = 0 AND is_import = 0
+",
+        b"#IDS#",
+        ids,
+    );
+    let os = db.prepare_or_die(&occ_sql);
+    while os.step_checked() {
+        let f = os.col_text(0);
+        exact.extend_from_slice(&f);
+        exact.push(0x1f);
+        push_int(exact, os.col_int(1));
+        exact.push(b'\n');
+    }
 }
 
 // A symbol from outside the repo, in place of symbol_json: its name path,

@@ -3322,3 +3322,35 @@ Limits:
   copied to `bin/swan-rs`. Where it lives when installed is step 6.
 - Still not here: what_broke, the four Spread-Wings tools and `possible_callers`, and the forward of the edit
   tools to the Goose server (plan task 4).
+
+## 2026-11-27T14:10Z: the Rust `swan serve` has every tool (step 3, plan task 4)
+
+A third Antigravity swarm added what_broke, the four Spread-Wings tools, `possible_callers` in get_callers, and the
+forward (rust/src/serve_forward.rs): the ten edit tools go unchanged to a Goose `swan serve` child named by
+`SWAN_GOOSE_SERVE`, started on first use with the same target and selected repo. The lead added: `live: true` on
+find_implementations and get_diagnostics is forwarded too until the Rust server keeps language servers (step 4).
+
+Judged in the microVM with every suite that starts a server, the Goose server against the Rust one (a copy of the
+Rust binary in `bin/`, beside Swan's tools; `SWAN_GOOSE_SERVE=bin/swan`):
+
+| Suite | Goose | Rust |
+|---|---|---|
+| mcp | 31 of 31 | 31 of 31 |
+| maps | 27 of 27 | 27 of 27 |
+| edit | 16 of 16 | 16 of 16 |
+| lang | 131 of 131 | 131 of 131 |
+| structural | 31 of 31 | 31 of 31 |
+| trust | 20 of 20 | 20 of 20 |
+| diag | 6 of 7 | 6 of 7 |
+| live | 22 of 28 | 22 of 28 |
+| game | 28 of 36 | 28 of 36 |
+| kotlin | 1 of 6 | 1 of 6 |
+
+The failures are the same checks on both: these suites ran outside `scripts/test.sh` (language servers and trust
+that the test run sets up). `cargo test`: all pass, 6 ignored (need indexers or spread-wings the copy lacks).
+
+Harness: under `SWAN_SERVE_BIN`, `mcp_open` now does MCP's opening handshake. All suites but mcp called tools
+without `initialize`; the Goose server answers anyway, the Rust server (rmcp) answers with -32602 as the protocol
+says. No check was changed. Whether the Rust server should accept calls before the handshake is the owner's.
+
+Limits: the Rust binary must sit beside Swan's tools; live mode is the Goose server's until step 4.

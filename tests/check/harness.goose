@@ -153,13 +153,26 @@ fn serve_args(args: const u8[:]) -> u8[>..] {
     return out;
 }
 
-// Starts the server; stderr stays the runner's own.
+fn judging_other_server() -> bool {
+    var b: u8[>..] = [];
+    return env("SWAN_SERVE_BIN", b) && b.len > 0;
+}
+
+// Starts the server; stderr stays the runner's own. Under SWAN_SERVE_BIN it also does MCP's opening handshake
+// (initialize, then notifications/initialized), as every agent that starts Swan does: the Rust server follows the
+// protocol and answers a call made before it with an error, while the checks were written against the Goose server,
+// which answers anyway. A suite that sends its own initialize still can; a second one is answered.
 fn mcp_open(args: const u8[:], env: const u8[:]) -> bool {
     m_inbox.clear();
     m_id = 1;
     m_h = proc_open(serve_args(args), ".", env, "");
-    if m_h == 0 { check("swan serve starts", false, "proc_open failed"); }
-    return m_h != 0;
+    if m_h == 0 { check("swan serve starts", false, "proc_open failed"); return false; }
+    if judging_other_server() {
+        var t: u8[>..] = [];
+        guard mcp_rpc("initialize", """{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"swan-check","version":"0"}}""", t) else { return false; }
+        mcp_notify("notifications/initialized");
+    }
+    return true;
 }
 
 // The next line the server writes (10 minutes at most: a first call may

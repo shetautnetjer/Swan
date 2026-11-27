@@ -81,16 +81,23 @@ struct Answered {
     answer: Answer,
 }
 
-pub fn broke_main(out_arg: &[u8], args: &[Vec<u8>]) -> i32 {
+pub struct BrokeOutcome {
+    pub json: Vec<u8>,
+    pub new_errors: usize,
+    pub asked: usize,
+    pub not_asked: usize,
+}
+
+// Runs `what_broke` for `args` against a map folder `out_arg` and repo `root`.
+// Returns the JSON report and counts, or an explanation when the map folder or
+// repo is missing.
+pub fn what_broke(out_arg: &[u8], root: &[u8], args: &[Vec<u8>]) -> Result<BrokeOutcome, Vec<u8>> {
     let deadline = Instant::now() + budget();
-    let Some(out) = sys::realpath(out_arg).filter(|o| sys::is_dir(o)) else { return refuse(&format!("no such folder: {}", lossy(out_arg))) };
-    let db_path = [&out[..], b"/swan.db"].concat();
-    let root = match sys::file_exists(&db_path).then(|| Db::open_existing(&db_path)) {
-        Some(Ok(db)) => meta_value(&db, b"root"),
-        _ => return refuse(&format!("no map at {}", lossy(&db_path))),
+    let Some(out) = sys::realpath(out_arg).filter(|o| sys::is_dir(o)) else {
+        return Err(format!("no such folder: {}", lossy(out_arg)).into_bytes());
     };
-    let Some(repo) = sys::realpath(&root).filter(|r| !root.is_empty() && sys::is_dir(r)) else {
-        return refuse(&format!("the map's repo is not there ({}); rebuild the map with swan map", lossy(&root)));
+    let Some(repo) = sys::realpath(root).filter(|r| !root.is_empty() && sys::is_dir(r)) else {
+        return Err(format!("the map's repo is not there ({}); rebuild the map with swan map", lossy(root)).into_bytes());
     };
 
     // Each file once, as its path from the repo, or why it cannot be asked.
@@ -142,11 +149,28 @@ pub fn broke_main(out_arg: &[u8], args: &[Vec<u8>]) -> i32 {
         .into_iter()
         .map(|(name, in_repo, a)| Answered { name, in_repo, answer: a.unwrap_or_else(|| Err(Refusal { reason: Reason::Failed, why: "not asked".to_string() })) })
         .collect();
+    let asked = answered.iter().filter(|a| a.answer.is_ok()).count();
+    let not_asked = answered.len() - asked;
     let report = remember(&out, &answered);
-    crate::util::print(serde_json::to_string(&report).unwrap_or_default().as_bytes());
-    if report.new_errors > 0 {
+    let json = serde_json::to_string(&report).unwrap_or_default().into_bytes();
+    Ok(BrokeOutcome { json, new_errors: report.new_errors, asked, not_asked })
+}
+
+pub fn broke_main(out_arg: &[u8], args: &[Vec<u8>]) -> i32 {
+    let Some(out) = sys::realpath(out_arg).filter(|o| sys::is_dir(o)) else { return refuse(&format!("no such folder: {}", lossy(out_arg))) };
+    let db_path = [&out[..], b"/swan.db"].concat();
+    let root = match sys::file_exists(&db_path).then(|| Db::open_existing(&db_path)) {
+        Some(Ok(db)) => meta_value(&db, b"root"),
+        _ => return refuse(&format!("no map at {}", lossy(&db_path))),
+    };
+    let outcome = match what_broke(&out, &root, args) {
+        Ok(o) => o,
+        Err(why) => return refuse(&lossy(&why)),
+    };
+    crate::util::print(&outcome.json);
+    if outcome.new_errors > 0 {
         1
-    } else if answered.iter().any(|a| a.answer.is_err()) {
+    } else if outcome.not_asked > 0 {
         3
     } else {
         0
