@@ -3,6 +3,7 @@
 // map replacements, refreshes and disk edits are seen on the next call.
 
 use std::io::Write;
+use std::sync::{Arc, Mutex};
 
 use rmcp::{
     ErrorData as McpError, RoleServer, ServerHandler,
@@ -17,7 +18,10 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use crate::db::Db;
 use crate::fresh::Fresh;
 use crate::index::SCHEMA_VERSION;
+use crate::query::meta_value;
+use crate::run;
 use crate::serve_read;
+use crate::serve_repo::{self, Selected};
 use crate::serve_tools;
 
 // Holds one database generation for a read tool. `fresh` owns a prepared
@@ -35,27 +39,18 @@ impl MapSnapshot {
     }
 }
 
-// Reads one meta entry without ending the server on a damaged or foreign file.
-fn meta_try(db: &Db, key: &[u8]) -> Result<Vec<u8>, Vec<u8>> {
-    let st = db.prepare(b"SELECT value FROM meta WHERE key = ?1")?;
-    st.bind_text(1, key);
-    let val = if st.step()? { st.col_text(0) } else { Vec::new() };
-    drop(st);
-    Ok(val)
-}
-
 // Reopens the map path in a read transaction, checks its schema version and
-// loads freshness state for this connection.
-pub(crate) fn open_map_snapshot(db_path: &[u8]) -> Result<MapSnapshot, Vec<u8>> {
+// optional repo coverage, and loads freshness state for this connection.
+pub(crate) fn open_map_snapshot_for(db_path: &[u8], repo: &[u8]) -> Result<MapSnapshot, Vec<u8>> {
     let db = Db::open_existing(db_path)
         .map_err(|e| [b"swan: cannot open map ", db_path, b": ", &e[..]].concat())?;
     db.exec(b"BEGIN;")
         .map_err(|e| [b"swan: cannot start map read: ", &e[..]].concat())?;
-    let version = meta_try(&db, b"schema_version")
+    let version = serve_repo::meta_try(&db, b"schema_version")
         .map_err(|e| [b"swan: cannot read map ", db_path, b": ", &e[..]].concat())?;
-    let _root = meta_try(&db, b"root")
+    let root = serve_repo::meta_try(&db, b"root")
         .map_err(|e| [b"swan: cannot read map ", db_path, b": ", &e[..]].concat())?;
-    let _source = meta_try(&db, b"source")
+    let _source = serve_repo::meta_try(&db, b"source")
         .map_err(|e| [b"swan: cannot read map ", db_path, b": ", &e[..]].concat())?;
     let reads = SCHEMA_VERSION.to_string().into_bytes();
     if version != reads {
@@ -68,38 +63,99 @@ pub(crate) fn open_map_snapshot(db_path: &[u8]) -> Result<MapSnapshot, Vec<u8>> 
         ]
         .concat());
     }
+    if !repo.is_empty() && !serve_repo::map_covers(&root, repo) {
+        return Err([
+            b"swan: map changed during repository selection; retry use_repo for ",
+            repo,
+        ]
+        .concat());
+    }
     let fresh = Fresh::load(&db);
     Ok(MapSnapshot { fresh, db })
 }
 
+pub(crate) fn open_map_snapshot(db_path: &[u8]) -> Result<MapSnapshot, Vec<u8>> {
+    open_map_snapshot_for(db_path, b"")
+}
+
 #[derive(Clone)]
 struct SwanServer {
-    db_path: Vec<u8>,
+    maps_root: Vec<u8>,
+    selected: Arc<Mutex<Option<Selected>>>,
 }
 
 impl SwanServer {
-    fn new(db_path: Vec<u8>) -> Self {
-        Self { db_path }
+    fn for_map(maps_root: Vec<u8>, selected: Selected) -> Self {
+        Self { maps_root, selected: Arc::new(Mutex::new(Some(selected))) }
+    }
+
+    fn for_maps(maps_root: Vec<u8>) -> Self {
+        Self { maps_root, selected: Arc::new(Mutex::new(None)) }
     }
 
     fn dispatch_tool(&self, name: &str, args: &serde_json::Value) -> CallToolResult {
+        // Validate build even without a repo, before selection or reopening.
+        let build = match args.get("build") {
+            None => true,
+            Some(v) => match v.as_bool() {
+                Some(b) => b,
+                None => {
+                    return CallToolResult::error(vec![ContentBlock::text(
+                        "build must be a boolean",
+                    )]);
+                }
+            },
+        };
+        if name == "use_repo" {
+            let path = args.get("path").and_then(serde_json::Value::as_str).unwrap_or("").as_bytes();
+            let mut cur = self.selected.lock().unwrap_or_else(|e| e.into_inner());
+            return match serve_repo::select(&self.maps_root, path, build, &mut cur) {
+                Ok(out) => CallToolResult::success(vec![ContentBlock::text(
+                    String::from_utf8_lossy(&out).into_owned(),
+                )]),
+                Err(e) => CallToolResult::error(vec![ContentBlock::text(
+                    String::from_utf8_lossy(&e).into_owned(),
+                )]),
+            };
+        }
         if !serve_read::is_read_tool(name) {
             return CallToolResult::error(vec![ContentBlock::text(format!(
                 "not yet in the Rust server: {name}"
             ))]);
         }
-        if let Some(build) = args.get("build") {
-            if !build.is_boolean() {
-                return CallToolResult::error(vec![ContentBlock::text("build must be a boolean")]);
+        let repo = args.get("repo").and_then(serde_json::Value::as_str).unwrap_or("").as_bytes();
+        let mut cur = self.selected.lock().unwrap_or_else(|e| e.into_inner());
+        let snap = if !repo.is_empty() {
+            match serve_repo::select_open(&self.maps_root, repo, build, false, &mut cur) {
+                Ok((snap, _)) => snap,
+                Err(e) => {
+                    return CallToolResult::error(vec![ContentBlock::text(
+                        String::from_utf8_lossy(&e).into_owned(),
+                    )]);
+                }
             }
-        }
-        let snap = match open_map_snapshot(&self.db_path) {
-            Ok(snap) => snap,
-            Err(e) => {
-                return CallToolResult::error(vec![ContentBlock::text(
+        } else if let Some(sel) = cur.as_ref() {
+            match open_map_snapshot(&sel.map) {
+                Ok(snap) => snap,
+                Err(e) => {
+                    return CallToolResult::error(vec![ContentBlock::text(
+                        String::from_utf8_lossy(&e).into_owned(),
+                    )]);
+                }
+            }
+        } else if name == "index_info" {
+            return match serve_repo::list_maps(&self.maps_root) {
+                Ok(out) => CallToolResult::success(vec![ContentBlock::text(
+                    String::from_utf8_lossy(&out).into_owned(),
+                )]),
+                Err(e) => CallToolResult::error(vec![ContentBlock::text(
                     String::from_utf8_lossy(&e).into_owned(),
-                )]);
-            }
+                )]),
+            };
+        } else {
+            return CallToolResult::error(vec![ContentBlock::text(
+                "no repo selected: call use_repo with a path, or pass repo",
+            )]);
         };
         let mut out = Vec::new();
         let res = serve_read::call_read(&snap, name, args, &mut out);
@@ -184,16 +240,7 @@ where
     }
 }
 
-pub fn serve_main(target: &[u8]) -> i32 {
-    // Check that the map can be opened and matches our schema before serving,
-    // then close it so every request reopens the path fresh.
-    match open_map_snapshot(target) {
-        Ok(snap) => snap.commit(),
-        Err(e) => {
-            write_stderr_line(&e);
-            return 1;
-        }
-    }
+fn run_server(server: SwanServer) -> i32 {
     let rt = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
         Ok(rt) => rt,
         Err(e) => {
@@ -203,8 +250,30 @@ pub fn serve_main(target: &[u8]) -> i32 {
     };
     rt.block_on(async move {
         let (stdin, stdout) = rmcp::transport::stdio();
-        serve_io(SwanServer::new(target.to_vec()), stdin, stdout).await
+        serve_io(server, stdin, stdout).await
     })
+}
+
+pub fn serve_main(target: &[u8]) -> i32 {
+    // Check that the map can be opened and matches our schema before serving,
+    // then close it so every request reopens the path fresh.
+    let root = match open_map_snapshot(target) {
+        Ok(snap) => {
+            let root = meta_value(&snap.db, b"root");
+            snap.commit();
+            root
+        }
+        Err(e) => {
+            write_stderr_line(&e);
+            return 1;
+        }
+    };
+    let maps_root = [&run::swan_home()[..], b"/data"].concat();
+    run_server(SwanServer::for_map(maps_root, Selected { root, map: target.to_vec() }))
+}
+
+pub fn serve_any(maps_root: &[u8]) -> i32 {
+    run_server(SwanServer::for_maps(serve_repo::normalize_maps_root(maps_root)))
 }
 
 #[cfg(test)]
@@ -213,7 +282,8 @@ mod tests {
     use serde_json::Value;
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
-    const EXPECTED_TOOLS: [&str; 12] = [
+    const EXPECTED_TOOLS: [&str; 13] = [
+        "use_repo",
         "find_symbol",
         "find_referencing_symbols",
         "get_symbol_at",
@@ -251,7 +321,7 @@ mod tests {
     async fn initialize_names_the_server() {
         let (mut client_w, server_r) = tokio::io::duplex(64 * 1024);
         let (server_w, client_r) = tokio::io::duplex(64 * 1024);
-        let task = tokio::spawn(serve_io(SwanServer::new(Vec::new()), server_r, server_w));
+        let task = tokio::spawn(serve_io(SwanServer::for_maps(Vec::new()), server_r, server_w));
 
         let mut reader = BufReader::new(client_r);
         send_line(&mut client_w, &init_request(1)).await;
@@ -268,7 +338,7 @@ mod tests {
     async fn tools_list_is_the_read_tools() {
         let (mut client_w, server_r) = tokio::io::duplex(256 * 1024);
         let (server_w, client_r) = tokio::io::duplex(256 * 1024);
-        let task = tokio::spawn(serve_io(SwanServer::new(Vec::new()), server_r, server_w));
+        let task = tokio::spawn(serve_io(SwanServer::for_maps(Vec::new()), server_r, server_w));
 
         let mut reader = BufReader::new(client_r);
         send_line(&mut client_w, &init_request(1)).await;
@@ -298,7 +368,7 @@ mod tests {
     async fn unknown_method_is_an_error() {
         let (mut client_w, server_r) = tokio::io::duplex(256 * 1024);
         let (server_w, client_r) = tokio::io::duplex(256 * 1024);
-        let task = tokio::spawn(serve_io(SwanServer::new(Vec::new()), server_r, server_w));
+        let task = tokio::spawn(serve_io(SwanServer::for_maps(Vec::new()), server_r, server_w));
 
         let mut reader = BufReader::new(client_r);
         send_line(&mut client_w, &init_request(1)).await;
@@ -315,7 +385,7 @@ mod tests {
         let list_reply = recv_json(&mut reader).await;
         assert_eq!(list_reply["id"], 3);
         let tools = list_reply["result"]["tools"].as_array().expect("tools array");
-        assert_eq!(tools.len(), 12);
+        assert_eq!(tools.len(), 13);
 
         drop(client_w);
         assert_eq!(task.await.unwrap(), 0);
@@ -325,7 +395,7 @@ mod tests {
     async fn unimplemented_tool_returns_mcp_error() {
         let (mut client_w, server_r) = tokio::io::duplex(64 * 1024);
         let (server_w, client_r) = tokio::io::duplex(64 * 1024);
-        let task = tokio::spawn(serve_io(SwanServer::new(Vec::new()), server_r, server_w));
+        let task = tokio::spawn(serve_io(SwanServer::for_maps(Vec::new()), server_r, server_w));
 
         let mut reader = BufReader::new(client_r);
         send_line(&mut client_w, &init_request(1)).await;
@@ -356,12 +426,12 @@ mod tests {
         let (client_w, server_r) = tokio::io::duplex(4096);
         let (server_w, _client_r) = tokio::io::duplex(4096);
         drop(client_w);
-        assert_eq!(serve_io(SwanServer::new(Vec::new()), server_r, server_w).await, 0);
+        assert_eq!(serve_io(SwanServer::for_maps(Vec::new()), server_r, server_w).await, 0);
 
         // EOF after initialize.
         let (mut client_w, server_r) = tokio::io::duplex(4096);
         let (server_w, client_r) = tokio::io::duplex(4096);
-        let task = tokio::spawn(serve_io(SwanServer::new(Vec::new()), server_r, server_w));
+        let task = tokio::spawn(serve_io(SwanServer::for_maps(Vec::new()), server_r, server_w));
         let mut reader = BufReader::new(client_r);
         send_line(&mut client_w, &init_request(1)).await;
         let _ = recv_json(&mut reader).await;

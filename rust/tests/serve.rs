@@ -9,7 +9,8 @@ use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
-const EXPECTED_TOOLS: [&str; 12] = [
+const EXPECTED_TOOLS: [&str; 13] = [
+    "use_repo",
     "find_symbol",
     "find_referencing_symbols",
     "get_symbol_at",
@@ -260,7 +261,7 @@ fn jnum(obj: &Value, key: &str) -> i64 {
     -1
 }
 
-// initialize names the server; tools/list is the 12 names in order; unknown method is a JSON-RPC error
+// initialize names the server; tools/list is the 13 names in order; unknown method is a JSON-RPC error
 #[test]
 fn initialize_tools_list_and_unknown_method() {
     let (mut srv, _) = Server::start("init-list-unknown", false);
@@ -289,7 +290,7 @@ fn initialize_tools_list_and_unknown_method() {
 
     // Server keeps answering after an unknown method.
     let list2 = srv.rpc("tools/list", None);
-    assert_eq!(list2["result"]["tools"].as_array().unwrap().len(), 12, "{list2}");
+    assert_eq!(list2["result"]["tools"].as_array().unwrap().len(), 13, "{list2}");
 
     assert_eq!(srv.close_and_wait(), 0);
 }

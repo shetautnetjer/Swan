@@ -1094,7 +1094,16 @@ fn clean_rows_valid(out: &[u8], report: &mut Vec<u8>) -> bool {
     true
 }
 
+static MAP_HELD: std::sync::Mutex<Vec<u8>> = std::sync::Mutex::new(Vec::new());
+
+// Build-running indexers the last map_main held back for `swan trust`,
+// reported as use_repo's `skipped` field.
+pub fn map_held_indexers() -> Vec<u8> {
+    MAP_HELD.lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
 pub fn map_main(repo_arg: &[u8], out_arg: &[u8], report: &mut Vec<u8>, clean: bool) -> bool {
+    MAP_HELD.lock().unwrap_or_else(|e| e.into_inner()).clear();
     let repo = crate::abs_path(repo_arg);
     let mut ignored: Vec<u8> = Vec::new();
     run_step(b"mkdir", &[b"mkdir", b"-p", out_arg], b"", &[], 10000, &mut ignored);
@@ -2482,8 +2491,11 @@ fn map_main_locked(repo: &[u8], out: &[u8], report: &mut Vec<u8>, clean: bool) -
         syntax_at = Some(jobs.list.len());
         jobs.add_lang(report, b"syntax-index", &[out, b"/index-syntax.scip"].concat(), a, child_env(&l, &[], b""), fp, false, b"", false);
     }
-    // (What waits for trust is also kept for `swan serve` to say, in the
-    // Goose program's `map_held`: that comes with the server.)
+    {
+        let mut held = MAP_HELD.lock().unwrap_or_else(|e| e.into_inner());
+        held.clear();
+        held.extend_from_slice(trim(&skipped));
+    }
     if jobs.list.is_empty() && (l.kt || !l.other.is_empty() || !skipped.is_empty()) {
         // Nothing to index, but the code can still be searched by structure
         // and checked live: an empty map records the repo for search_pattern

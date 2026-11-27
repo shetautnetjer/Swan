@@ -3295,3 +3295,30 @@ Limits:
 - One map per server (`swan serve <map>`); `--maps`, `use_repo` and the `repo` argument are plan task 2. The
   `maps` suite does not pass yet.
 - Each call reopens the map; how long that takes is measured in plan task 5.
+
+## 2026-11-27T12:50Z: the Rust `swan serve` chooses its repo (`--maps`, `use_repo`, `repo`) (step 3, task 2)
+
+`swan serve --maps <dir>` and bare `swan serve` now start with no repo selected; `use_repo` (listed first, as
+in `TOOLS`) and any read tool's `repo` argument select one, finding its map under the data root or building
+it with the Rust `swan map` (`pipeline::map_main`, its trust rules unchanged). What the map held back for
+`swan trust` is passed to use_repo's `skipped`, as the Goose `map_held` does. New: rust/src/serve_repo.rs.
+
+| Judge (microVM, real indexers) | Goose server | Rust server |
+|---|---|---|
+| `maps` suite | 27 of 27 | 26 of 27 |
+| `mcp` suite | 31 of 31 | 31 of 31 |
+| `cargo test` (the copy, no indexers there) | | 28 passed, 5 ignored |
+
+The one `maps` check that fails, "swan serve <db> still answers about its map", sends `tools/call` without
+`initialize` first. The Goose server answers; the Rust server (rmcp) answers with MCP's -32602 error, as the
+protocol requires a client to initialize. Every agent that starts Swan (Claude Code, omp, Hermes)
+initializes first. The check was left as it is; whether the Rust server should be as lenient is the owner's.
+
+How it was made: a second Antigravity swarm (20 minutes) from the plan's task 2. Its 5 ignored tests need
+scip-typescript and rust-analyzer, which its copy lacks; the microVM suite above runs them for real.
+
+Limits:
+- The Rust binary must sit beside Swan's tools (`bin/spread-wings`, `bin/swan-flatten`): in the microVM it was
+  copied to `bin/swan-rs`. Where it lives when installed is step 6.
+- Still not here: what_broke, the four Spread-Wings tools and `possible_callers`, and the forward of the edit
+  tools to the Goose server (plan task 4).

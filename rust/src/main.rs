@@ -33,6 +33,7 @@ mod scip;
 mod seal;
 mod serve;
 mod serve_read;
+mod serve_repo;
 mod serve_tools;
 mod stamp;
 mod structural;
@@ -299,7 +300,12 @@ fn main() {
     } else if cmd == b"serve" && n == 3 {
         exit(serve::serve_main(&a[2]));
     } else if cmd == b"serve" && (n == 2 || (n == 4 && is(2, "--maps"))) {
-        not_carried(cmd, 7);
+        let maps_root = if n == 4 {
+            a[3].clone()
+        } else {
+            [&run::swan_home()[..], b"/data"].concat()
+        };
+        exit(serve::serve_any(&maps_root));
     } else {
         usage();
     }
