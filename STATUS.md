@@ -2214,7 +2214,7 @@ Limit: the four findings the review did not show in its comment were not
 read. This entry is one commit after the tree that was tested; that commit
 changes STATUS.md only.
 
-## 2026-11-27T12:20Z: a Rust symbol's signature is rust-analyzer's, not its doc comment's first line
+## 2026-11-27T12:06Z: a Rust symbol's signature is rust-analyzer's, not its doc comment's first line
 
 Found by Aya while reading the Rust `swan serve` through Swan's own tools: every Rust function on the
 branch came back with an empty `signature`. In SCIP a symbol's signature is `signature_documentation`
@@ -2241,7 +2241,7 @@ Rust symbol's signature was its doc comment's first line, or empty when it had n
 Limits: the flattener is named by its file size, as the TypeScript patch is; two builds of one size
 would look the same. A map's first run with this build reflattens every map once.
 
-## 2026-11-27T15:40Z: `swan-up update` installs main again
+## 2026-11-27T13:21Z: `swan-up update` installs main again
 
 Found by Aya while installing main after #82. Three faults in scripts/swan-up, each seen in that run:
 
@@ -2256,7 +2256,7 @@ The real update from a relative `--repo .` then installed 59755ce (`doctor: read
 Left: a version folder half removed by the old cleanup (be36a5fcfef7) is kept as "the version before", as the
 newest by time; the one to go back to is picked by modification time, which the failed removal had touched.
 
-## 2026-11-27T18:30Z: a change of trust makes the next map remake its indexes
+## 2026-11-27T14:01Z: a change of trust makes the next map remake its indexes
 
 Found by Aya while judging the Rust server on cobra: the copy was mapped untrusted (gopls has no module metadata
 without its dependencies: 0 Go references), then trusted, and the next map said "lsp-index go: reused (no changes)"
