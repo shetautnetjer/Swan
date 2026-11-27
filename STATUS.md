@@ -3354,3 +3354,30 @@ without `initialize`; the Goose server answers anyway, the Rust server (rmcp) an
 says. No check was changed. Whether the Rust server should accept calls before the handshake is the owner's.
 
 Limits: the Rust binary must sit beside Swan's tools; live mode is the Goose server's until step 4.
+
+## 2026-11-27T12:20Z: a Rust symbol's signature is rust-analyzer's, not its doc comment's first line
+
+Found by Aya while reading the Rust `swan serve` through Swan's own tools: every Rust function on the
+branch came back with an empty `signature`. In SCIP a symbol's signature is `signature_documentation`
+(field 7), and its doc comment is `documentation` (field 3). swan-flatten read only field 3 and took its
+first line, which works for scip-typescript (it puts the signature there) but not for rust-analyzer: a
+Rust symbol's signature was its doc comment's first line, or empty when it had none.
+
+| Repo | Rust functions and methods with a signature, before | after |
+|---|---|---|
+| fixtures/tiny-rs | 0 of 7 (all 11 symbols empty) | 11 of 11, e.g. `pub fn new(side: u32) -> Tile` |
+| relate (trial clone, sealed) | 14,724 of 24,930, most of them doc lines | 24,938 of 24,938 |
+| fixtures/tiny-ts | the same rows, byte for byte (sha256 of every symbol's scip, signature, doc) | |
+
+- swan-flatten reads field 7 when it is there, and keeps documentation's first line otherwise.
+- A map made by another swan-flatten is flattened again even when no indexer ran, so the fix reaches
+  maps that already exist: `flattener.txt` in the map folder names the flattener (its size), and both
+  early stops ("nothing changed", "only failed indexers ran") need it to match. An old map remapped by
+  this build got its signatures; the next map said "nothing changed".
+- New check (rust suite): Tile/new's signature is `pub fn new(side: u32) -> Tile`. On main's
+  flattener it fails with `"signature": ""`.
+
+- The whole suite in the microVM: 58 + 334 checks and 66 Python tests, 0 failed (main: 333 checks; +1 new).
+
+Limits: the flattener is named by its file size, as the TypeScript patch is; two builds of one size
+would look the same. A map's first run with this build reflattens every map once.
