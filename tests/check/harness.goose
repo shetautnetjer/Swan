@@ -137,11 +137,27 @@ var m_inbox: u8[>..];
 var m_chunk: u8[65536];
 var m_id: i64 = 1;
 
+// The server a suite starts is `bin/swan serve ...`, or SWAN_SERVE_BIN's program with the same arguments when that
+// is set: how the Rust `swan serve` is judged by the same checks (step 3,
+// docs/superpowers/plans/2026-11-26-rust-serve-read-tools.md).
+fn serve_args(args: const u8[:]) -> u8[>..] {
+    var out: u8[>..] = [];
+    var b: u8[>..] = [];
+    let head = "bin/swan\0serve\0";
+    if env("SWAN_SERVE_BIN", b) && b.len > 0 && args.len >= head.len && args[..head.len] == head {
+        a1(out, b);
+        out.append(args[9..]);   // from "serve", past "bin/swan" and its NUL
+        return out;
+    }
+    out.append(args);
+    return out;
+}
+
 // Starts the server; stderr stays the runner's own.
 fn mcp_open(args: const u8[:], env: const u8[:]) -> bool {
     m_inbox.clear();
     m_id = 1;
-    m_h = proc_open(args, ".", env, "");
+    m_h = proc_open(serve_args(args), ".", env, "");
     if m_h == 0 { check("swan serve starts", false, "proc_open failed"); }
     return m_h != 0;
 }
