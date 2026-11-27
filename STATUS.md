@@ -3265,3 +3265,33 @@ suite runs the Goose `bin/swan` in the microVM, so it waits for the Rust
 binary to be there (step 3's first task). The plan for step 3 is
 docs/superpowers/plans/2026-11-26-rust-serve-read-tools.md, for the owner
 to read before any swarm starts.
+
+## 2026-11-27T11:55Z: `swan serve` in Rust answers the 12 tools `swan query` already knew (step 3, first part)
+
+The Rust program now has `swan serve <map>`: an MCP server on stdin and stdout, on the `rmcp` crate, with
+find_symbol, find_referencing_symbols, get_symbol_at, get_symbols_overview, get_callers, get_callees,
+find_implementations, get_type_hierarchy, find_unused_symbols, get_diagnostics, search_pattern and
+index_info. Each tool reads its arguments as `call_tool` in src/serve.goose does and answers through the
+functions `swan query` uses. Any other tool answers "not yet in the Rust server: <name>". The checks' harness
+now starts the program named by `SWAN_SERVE_BIN` when it is set, so the same checks judge both servers.
+
+| Judge | Goose server | Rust server |
+|---|---|---|
+| `mcp` suite in the microVM (tiny-ts) | 31 of 31 | 31 of 31 |
+| the same with `SWAN_SERVE_BIN` naming a missing program | | 0 of 1 (so the switch is real) |
+| `cargo test --release` | | 78 passed, no warnings (55 before) |
+
+How it was made: written by one Antigravity swarm from the plan
+(docs/superpowers/plans/2026-11-26-rust-serve-read-tools.md, tasks 1 and 3) in 19 minutes, with a map of
+tiny-ts made by the Goose program to test against (now rust/tests/data/). Its tests were seen failing before
+its code. The lead moved the map into the tree, ran the tests again and ran the suite.
+
+Limits:
+- `get_callers` gives no `possible_callers`, though its description (copied from the Goose server) promises
+  them: that part runs Spread-Wings and comes with the Spread-Wings tools (plan task 4).
+- `live: true` on find_implementations and get_diagnostics answers "live mode is not yet in the Rust server".
+- A line that is not JSON is dropped by `rmcp`; the Goose server answers it with -32700.
+- `inputSchema` keys come out in sorted order (rmcp stores them in a sorted map): the same JSON, another order.
+- One map per server (`swan serve <map>`); `--maps`, `use_repo` and the `repo` argument are plan task 2. The
+  `maps` suite does not pass yet.
+- Each call reopens the map; how long that takes is measured in plan task 5.

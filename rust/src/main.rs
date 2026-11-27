@@ -31,6 +31,9 @@ mod run;
 mod rustproj;
 mod scip;
 mod seal;
+mod serve;
+mod serve_read;
+mod serve_tools;
 mod stamp;
 mod structural;
 mod survey;
@@ -294,7 +297,7 @@ fn main() {
     } else if cmd == b"diagnostics" && n == 4 {
         not_carried(cmd, 6);
     } else if cmd == b"serve" && n == 3 {
-        not_carried(cmd, 7);
+        exit(serve::serve_main(&a[2]));
     } else if cmd == b"serve" && (n == 2 || (n == 4 && is(2, "--maps"))) {
         not_carried(cmd, 7);
     } else {
