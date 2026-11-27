@@ -12,7 +12,7 @@ stays running and is told of edits" (HANDOFF.md, "The work, in order", item 2, f
   for its whole life (`deadline`), every file sent once as version 1, and a file whose text changed since it was sent
   is refused ("which is not told of changes: ask again in a new command"). `current()` takes only version 1.
 - The Rust `swan serve` (rust/src/serve.rs) forwards `live: true` on find_implementations and get_diagnostics to a
-  Goose `swan serve` child (rust/src/serve_forward.rs), with the ten edit tools (decision A, 2026-11-27T00:30Z).
+  Goose `swan serve` child (rust/src/serve_forward.rs), with the ten edit tools (decision A, 2026-11-27T11:25Z).
 - The Goose server (src/serve.goose, src/live.goose) keeps one live server at a time (`live_lang`): a question in
   another language stops it and starts that language's. goose-lsp re-sends a file whose text changed. `live_warm`
   starts a server when `SWAN_WARM` is set. `live_implementations` answers at the symbol's definition.
@@ -69,6 +69,6 @@ rust/tests/serve.rs.
 
 In the microVM, with the Rust binary beside Swan's tools: the live, game, kotlin, trust and diag suites with
 `SWAN_SERVE_BIN` and `SWAN_GOOSE_SERVE=/nonexistent` (no live answer may come from Goose), against the Goose server's
-counts in STATUS.md (2026-11-27T14:10Z: live 22 of 28, game 28 of 36, kotlin 1 of 6, trust 20 of 20, diag 6 of 7, run
+counts in STATUS.md (2026-11-27T13:07Z: live 22 of 28, game 28 of 36, kotlin 1 of 6, trust 20 of 20, diag 6 of 7, run
 outside scripts/test.sh); the mcp, maps, edit, lang and structural suites as before; the whole suite; `cargo test`.
 Then STATUS.md, HANDOFF.md, a pull request on `rust-serve`.

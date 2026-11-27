@@ -3455,7 +3455,7 @@ The judge was fixed twice on the way, and its relate numbers do not change (Rust
 GoLand's documentation opens with a table ("| Package: |"), so the symbol's key is now the first two lines that are
 not table markup; and a name path matches every symbol whose path ends with it, so only the symbol asked is scored.
 
-## 2026-11-27T20:30Z: the Rust `swan serve` keeps its language server and is told of edits (step 4)
+## 2026-11-27T15:07Z: the Rust `swan serve` keeps its language server and is told of edits (step 4)
 
 Plan: docs/superpowers/plans/2026-11-27-rust-serve-live.md, tasks 1 and 2 by an Antigravity swarm, task 3 and the
 fixes below by Aya.

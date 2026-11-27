@@ -95,7 +95,7 @@ plan (docs/superpowers/plans/), and the lead checks it outside the swarm.
    Not judged: cobra (its Go dependencies are fetched only for a trusted repo; the owner's call).
 4. The server that stays running and is told of edits ("The work, in
    order", item 2). **Done** on branch `rust-serve-live` (STATUS.md,
-   2026-11-27T20:30Z); Java, Kotlin and C# live diagnostics still Goose's.
+   2026-11-27T15:07Z); Java, Kotlin and C# live diagnostics still Goose's.
 5. The tools that edit and check.
 6. Ship it: the installer packages the Rust program; the Goose one goes
    when the suite passes against the Rust one.
