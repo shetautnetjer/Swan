@@ -89,7 +89,7 @@ plan (docs/superpowers/plans/), and the lead checks it outside the swarm.
    each on his word.
 3. **`swan serve` in Rust, the tools that read first** (find, references,
    callers with `possible_callers`, overview, diagnostics, what_broke).
-   **Done** on branch `rust-serve` (STATUS.md, 2026-11-27T14:10Z and 16:40Z): all 28 tools, the
+   **Done** on branch `rust-serve` (STATUS.md, 2026-11-27T13:07Z and 13:35Z): all 28 tools, the
    edit tools and `live: true` forwarded to the Goose server (the owner's decision A); every suite
    that starts a server gives the Goose server's result; RustRover agrees on relate (20 questions).
    Not judged: cobra (its Go dependencies are fetched only for a trusted repo; the owner's call).
