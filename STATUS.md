@@ -2273,3 +2273,56 @@ copy: untrusted map, `swan trust`, map: "trust changed", lsp-index go ran again;
 Limit: Go's module cache is shared by every repo, so once a trusted repo has fetched a module an untrusted repo that
 needs it resolves it too (the second cobra copy had 5,934 references untrusted). Fetching runs none of the repo's code
 and go.sum pins each module.
+
+## 2026-11-27T15:50Z: the verify gate, first version (scripts/swan-verify)
+
+On the owner's word ("build the verify gate next"); spec docs/superpowers/specs/2026-11-27-verify-gate.md, decision
+DECISIONS.md 2026-11-27T15:40Z. `scripts/swan-verify <repo> [--base REF]` packs the base commit (`git archive`) and
+the working tree (tracked and new files, no .git), forks a Cua microVM from swan-test-v4, and runs
+`scripts/verify_guest.py` there: it closes the private networks with blackhole routes (10/8, 172.16/12, 192.168/16,
+169.254/16, 100.64/10, fc00::/7; the guest's own /30 to its resolver stays), finds the languages (Rust, Go,
+TypeScript, Python), and runs each one's build, type check and tests on both trees, the repo trusted. What fails in
+the head and not at base is new (exit 1); a failure at base too is counted, not blamed; what base failed and head
+does not is fixed. Base results are cached per commit on the host.
+
+tests/verify_gate.sh, 8 cases, all pass (26 s for all of them; a tiny repo is judged in about 1 s):
+
+| Case | Result |
+|---|---|
+| Rust type error | new: cargo check, src/lib.rs: mismatched types, line 37 (and cargo test, which no longer builds) |
+| Rust clean tree | pass |
+| Go test that now fails | new: go test, TestOne |
+| Go failure already at base, unrelated change | pass, 1 failing before the change too |
+| Go test fixed | pass, 1 fixed |
+| TypeScript type error | new: tsc, TS2322 |
+| Python test that now fails | new: pytest, test_square |
+| Network | private addresses refused at once by the route; proxy.golang.org reached |
+
+The network case can fail: the same Go test in a fork with no blackhole routes timed out on all four private
+addresses (packets left) and failed; with the routes it passed in 0.008 s.
+
+The Claude Code Stop hook, scripts/hooks/verify-before-stop.py: when the session's repo has changes the gate has not
+judged, it runs the gate; new failures block the stop and go to the agent as the reason. Each set of changes is judged
+once, at most 3 blocks per session and repo, and a gate that cannot judge lets the turn end. tests/test_verify_stop_hook.py,
+6 tests with a stand-in gate, pass; with the real gate on tiny-rs and a planted type error it blocked, naming
+"cargo check: src/lib.rs: mismatched types (line 37)".
+
+Not yet: the omp extension that does the same at the end of a turn; checkpoints for other toolchains; a registry-only
+allowlist.
+
+## 2026-11-27T16:49Z: the verify gate on a large Rust workspace (relate), and a false pass fixed
+
+Found by mining the four-arm experiment's tasks from relate (0 of 87 judged candidates were usable):
+- The checkpoint's toolchains are root-owned in /opt/rust, so rustup could not install relate's pinned Rust: the
+  guest gives them to its user first. A fork has about 8 GB free; Swan's .tools (6 GB, unused by the gate) goes, and
+  both trees share one cargo target folder.
+- A Rust workspace is judged by the crates the change touches (`-p <crate> --all-features`), as relate's own CI tests
+  one crate at a time; the whole workspace when no crate holds a change. A cached base is reused only for the same crates.
+- **A false pass, fixed:** with the shared target folder, cargo judged the head tree by file times older than the base
+  build and rebuilt nothing, so a planted type error passed (tests/verify_gate.sh caught it). Every head file is now
+  made newer after the base build.
+- A language none of whose steps could run in either tree makes the verdict "error" (it named relate's Rust while
+  its Python helper scripts type checked), instead of a pass from the other language.
+- pyright's keys use paths relative to the tree, so base and head agree.
+
+tests/verify_gate.sh: 8 of 8. relate: still "could not judge rust" at the commit itself; not yet usable for tasks.

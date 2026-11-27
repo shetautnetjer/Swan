@@ -837,3 +837,24 @@ breaks.
 **Second opinion:** the Hermes `architect` profile said the same shape,
 and named what not to build: distance beyond 1, any ranking or score, a
 switch per language.
+
+## 2026-11-27T15:40Z — A verify gate in a microVM, with the repo trusted there; then a four-arm experiment
+
+**The owner, 2026-11-27:** "build the verify gate next and run the four arm experiment after". Asked before that
+whether agents should get a tool that removes trust prompts, an IDE inside a microVM, or an agent development
+interface, he took Aya's recommendation: Swan's tools over MCP plus a gate that builds, type checks and tests the
+agent's changes in a throwaway microVM.
+
+**Why this first.** In "When do language servers help coding agents?" (Barber, github.com/ianbarber/lsps-for-llms)
+a type checker gating submission took correct outcomes from 1 to 11 of 12 seeded defects, while language-server
+tools that were only available changed nothing. SWE-agent (arXiv 2405.15793) lost 18.0% to 15.0% resolved without
+lint on edit. A second opinion (2026-11-27) agreed the gate goes before mapping strangers' repos in a VM.
+
+**What changes in the trust rule.** Inside the gate's VM the repo is trusted with no human step: it builds, fetches its
+dependencies and runs its tests there, because the VM is thrown away, holds no secret and reaches no host or private
+network (docs/superpowers/specs/2026-11-27-verify-gate.md has the network rule and how it was measured). On the host
+nothing changes: build files run only after `swan trust`. The `swan` binary does not need a VM.
+
+**The experiment.** 30 real changes on relate (Rust) and cobra (Go), each with tests that must pass; the same agent and
+model in four arms: shell only; plus Swan's read tools; plus the verify gate; both. Each arm three times. Measured:
+tasks whose hidden tests pass, tokens, wall time, human interventions (target 0).

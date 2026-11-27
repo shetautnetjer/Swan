@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# The verify gate (docs/superpowers/specs/2026-11-27-verify-gate.md): the changes in a repo's working tree are built,
+# type checked and tested in a throwaway Cua microVM, against the same at a base commit, and what newly fails is the
+# answer. The repo's code never runs on this machine. Inside the VM it is trusted (its build scripts run, its
+# dependencies are fetched), the private networks are closed, and no secret is there: the trees go in without .git.
+#
+#   scripts/swan-verify <repo> [--base REF] [--timeout SECONDS] [--keep] [--no-cache]
+#
+# --base       the commit to compare with (default HEAD: the working tree's uncommitted changes)
+# --timeout    the time limit of each step (default 600)
+# --keep       keep the VM to look around (cua sb rm -f <name> deletes it)
+# --no-cache   judge the base again even if a result for its commit is saved
+# Prints one JSON object (verdict pass|fail|error, new failures, fixed ones, steps) and a short summary on stderr.
+# Exit 0: nothing new fails. 1: something new fails. 2: the gate could not judge (it says why).
+# Base results are saved per commit in ${XDG_CACHE_HOME:-~/.cache}/swan-verify/. Needs the `cua` CLI and a checkpoint
+# with the toolchains (SWAN_VERIFY_CHECKPOINT, default swan-test-v4, made by scripts/space-base.sh).
+set -euo pipefail
+case ${1:-} in -h|--help|help|"") sed -n '2,/^set -euo/{/^set -euo/d;s/^# \{0,1\}//;p}' "$0"; exit 0;; esac
+die() { echo "swan-verify: $*" >&2; jq -nc --arg why "$*" '{verdict: "error", why: $why}'; exit 2; }
+here=$(cd "$(dirname "$0")" && pwd)
+repo=$(cd "$1" 2>/dev/null && pwd) || die "no folder $1"; shift
+base=HEAD timeout=600 keep="" cache=1
+while [ $# -gt 0 ]; do case $1 in
+  --base) base=${2:?--base needs a ref}; shift 2;;
+  --timeout) timeout=${2:?--timeout needs seconds}; shift 2;;
+  --keep) keep=1; shift;;
+  --no-cache) cache=""; shift;;
+  *) die "unknown option $1";; esac; done
+command -v cua >/dev/null || die "the cua CLI is not installed"
+git -C "$repo" rev-parse --git-dir >/dev/null 2>&1 || die "$repo is not a git repository"
+rev=$(git -C "$repo" rev-parse --verify "$base^{commit}" 2>/dev/null) || die "unknown base $base"
+checkpoint=${SWAN_VERIFY_CHECKPOINT:-swan-test-v4}
+cua sb checkpoints 2>/dev/null | grep -qw "$checkpoint" || die "no checkpoint $checkpoint (scripts/space-base.sh makes one)"
+
+cache_dir=${XDG_CACHE_HOME:-$HOME/.cache}/swan-verify
+cached="$cache_dir/$rev.json"
+work=$(mktemp -d)
+name="swan-verify-$(date +%H%M%S)-$$"
+cleanup() {
+  rm -rf "$work"
+  if [ -n "$keep" ]; then echo "swan-verify: kept $name (cua sb rm -f $name)" >&2; else cua sb rm -f "$name" >/dev/null 2>&1 || true; fi
+}
+trap cleanup EXIT
+
+# Two plain trees, no .git (it can hold remotes and credentials): the base as committed, the head as it is on disk
+# (tracked and new files, not ignored ones, minus deleted ones).
+git -C "$repo" archive --format=tar "$rev" | gzip > "$work/base.tgz"
+( cd "$repo" && { git ls-files -z; git ls-files -z -o --exclude-standard; } |
+  while IFS= read -r -d '' f; do [ -e "$f" ] && printf '%s\0' "$f"; done | tar --null -T - -czf "$work/head.tgz" )
+
+t0=$(date +%s)
+cua sb fork "$checkpoint" "$name" >/dev/null || die "could not fork $checkpoint"
+cua sb cp "$work/base.tgz" "$name:/tmp/base.tgz" >/dev/null
+cua sb cp "$work/head.tgz" "$name:/tmp/head.tgz" >/dev/null
+cua sb cp "$here/verify_guest.py" "$name:/tmp/verify_guest.py" >/dev/null
+skip=""
+if [ -n "$cache" ] && [ -f "$cached" ]; then cua sb cp "$cached" "$name:/tmp/base-result.json" >/dev/null; skip="--skip-base /tmp/base-result.json"; fi
+cua sb exec "$name" --timeout 120 -- "mkdir -p /tmp/v/base /tmp/v/head && tar -xzf /tmp/base.tgz -C /tmp/v/base && tar -xzf /tmp/head.tgz -C /tmp/v/head" >/dev/null
+set +e
+cua sb exec "$name" --timeout 0 -- "export PATH=\$HOME/.cargo/bin:/usr/local/go/bin:\$PATH; python3 /tmp/verify_guest.py /tmp/v/base /tmp/v/head --timeout $timeout $skip" > "$work/out.json" 2> "$work/err.txt"
+code=$?
+set -e
+result=$(grep -m1 '^{' "$work/out.json" || true)
+[ -n "$result" ] || die "the guest gave no answer (exit $code): $(tail -3 "$work/err.txt" | tr '\n' ' ')"
+if [ -n "$cache" ] && [ -z "$skip" ]; then mkdir -p "$cache_dir"; jq -c '.base_result' <<<"$result" > "$cached"; fi
+jq -c 'del(.base_result)' <<<"$result"
+jq -r --arg s "$(( $(date +%s) - t0 ))" '
+  "swan-verify: \(.verdict) in \($s) s (\(.languages // [] | join(", ")))"
+  + (if (.new // []) | length > 0 then "\n  new: " + ([.new[] | "\(.step): \(.key)\(if .line then " (line \(.line))" else "" end)"] | join("\n  new: ")) else "" end)
+  + (if (.fixed // []) | length > 0 then "\n  fixed: \(.fixed | length)" else "" end)
+  + (if (.already_failing // 0) > 0 then "\n  failing before the change too: \(.already_failing)" else "" end)
+  + (if .why then "\n  \(.why)" else "" end)' <<<"$result" >&2
+exit "$code"
