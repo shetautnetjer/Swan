@@ -2309,3 +2309,20 @@ once, at most 3 blocks per session and repo, and a gate that cannot judge lets t
 
 Not yet: the omp extension that does the same at the end of a turn; checkpoints for other toolchains; a registry-only
 allowlist.
+
+## 2026-11-27T16:49Z: the verify gate on a large Rust workspace (relate), and a false pass fixed
+
+Found by mining the four-arm experiment's tasks from relate (0 of 87 judged candidates were usable):
+- The checkpoint's toolchains are root-owned in /opt/rust, so rustup could not install relate's pinned Rust: the
+  guest gives them to its user first. A fork has about 8 GB free; Swan's .tools (6 GB, unused by the gate) goes, and
+  both trees share one cargo target folder.
+- A Rust workspace is judged by the crates the change touches (`-p <crate> --all-features`), as relate's own CI tests
+  one crate at a time; the whole workspace when no crate holds a change. A cached base is reused only for the same crates.
+- **A false pass, fixed:** with the shared target folder, cargo judged the head tree by file times older than the base
+  build and rebuilt nothing, so a planted type error passed (tests/verify_gate.sh caught it). Every head file is now
+  made newer after the base build.
+- A language none of whose steps could run in either tree makes the verdict "error" (it named relate's Rust while
+  its Python helper scripts type checked), instead of a pass from the other language.
+- pyright's keys use paths relative to the tree, so base and head agree.
+
+tests/verify_gate.sh: 8 of 8. relate: still "could not judge rust" at the commit itself; not yet usable for tasks.

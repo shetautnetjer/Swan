@@ -103,15 +103,19 @@ def ts_errors(out: str):
         yield "error", f"{m.group(1)}: {m.group(3)} {m.group(4)}", int(m.group(2)), m.group(0)
 
 
-def pyright_errors(out: str):
-    try:
-        diags = json.loads(out[out.index("{"):]).get("generalDiagnostics", [])
-    except ValueError:
-        return
-    for d in diags:
-        if d.get("severity") == "error":
-            f = d.get("file", "")
-            yield "error", f"{f}: {d.get('message', '')}", (d.get("range", {}).get("start", {}).get("line", -1) + 1), d.get("message", "")
+def pyright_errors(tree: Path):
+    """pyright names files by absolute path; the key takes them relative to the tree, so base and head agree."""
+    def parse(out: str):
+        try:
+            diags = json.loads(out[out.index("{"):]).get("generalDiagnostics", [])
+        except ValueError:
+            return
+        for d in diags:
+            if d.get("severity") == "error":
+                f = d.get("file", "")
+                f = os.path.relpath(f, tree) if os.path.isabs(f) else f
+                yield "error", f"{f}: {d.get('message', '')}", (d.get("range", {}).get("start", {}).get("line", -1) + 1), d.get("message", "")
+    return parse
 
 
 def pytest_failures(out: str):
@@ -131,10 +135,45 @@ def test_output(out: str, name: str) -> str:
     return out[i:i + 800] if i >= 0 else ""
 
 
-def steps_for(lang: str, tree: Path):
+def changed_files(base: Path, head: Path) -> list[str]:
+    """Files that differ between the two trees (added, removed or changed), relative to them."""
+    r = subprocess.run(["diff", "-rq", str(base), str(head)], capture_output=True, text=True)
+    out = []
+    for line in r.stdout.splitlines():
+        m = re.match(r"^Files (.+) and (.+) differ$", line) or re.match(r"^Only in (.+): (.+)$", line)
+        if not m:
+            continue
+        p = m.group(1) if line.startswith("Files") else os.path.join(m.group(1), m.group(2))
+        for root in (str(base), str(head)):
+            if p.startswith(root + "/") or p == root:
+                out.append(os.path.relpath(p, root))
+    return out
+
+
+def rust_packages(tree: Path, changed: list[str]) -> list[str]:
+    """The workspace packages that hold a changed file: the nearest Cargo.toml above it with a [package] name. Empty
+    means a single-package repo or a change outside every package: then the whole workspace is judged."""
+    names = set()
+    for f in changed:
+        d = (tree / f).parent
+        while d != tree.parent:
+            toml = d / "Cargo.toml"
+            if toml.exists():
+                m = re.search(r'^\[package\][^\[]*?^name\s*=\s*"([^"]+)"', toml.read_text(errors="replace"), re.M | re.S)
+                if m:
+                    names.add(m.group(1))
+                    break
+            d = d.parent
+    return sorted(names)
+
+
+def steps_for(lang: str, tree: Path, packages: list[str] = ()):
     if lang == "rust":
-        return [("cargo check", ["cargo", "check", "--all-targets", "--message-format=json"], rust_check, False),
-                ("cargo test", ["cargo", "test", "--no-fail-fast"], rust_test, True)]
+        # A workspace's crates can need features the others do not (relate tests each crate on its own), so only the
+        # crates the change touches are built and tested, each with every feature it defines.
+        scope = [a for p in packages for a in ("-p", p)] + ["--all-features"] if packages else ["--workspace"]
+        return [("cargo check", ["cargo", "check", *scope, "--all-targets", "--message-format=json"], rust_check, False),
+                ("cargo test", ["cargo", "test", *scope, "--no-fail-fast"], rust_test, True)]
     if lang == "go":
         return [("go build", ["go", "build", "./..."], go_errors, False),
                 ("go vet", ["go", "vet", "./..."], go_errors, False),
@@ -149,13 +188,19 @@ def steps_for(lang: str, tree: Path):
         return out
     if lang == "python":
         pyright = SWAN / "tools/node_modules/.bin/pyright"
-        return [("pyright", [str(pyright), "--outputjson", "."], pyright_errors, False),
+        return [("pyright", [str(pyright), "--outputjson", "."], pyright_errors(tree), False),
                 ("pytest", ["/tmp/verify-venv/bin/python", "-m", "pytest", "-q", "-rfE"], pytest_failures, True)]
     return []
 
 
 def prepare(lang: str, tree: Path, timeout: int) -> str | None:
     """Fetch what the repo needs (trusted: this is the throwaway VM). A message when it could not."""
+    if lang == "rust":
+        # The checkpoint's toolchains live in root-owned /opt/rust: the repo's pinned one (rust-toolchain.toml) is
+        # installed by rustup on first use, so the folders go to this user first (a throwaway VM).
+        for d in ("/opt/rust/rustup", "/opt/rust/cargo"):
+            if os.path.isdir(d) and not os.access(d, os.W_OK):
+                subprocess.run(["sudo", "-n", "chown", "-R", f"{os.getuid()}:{os.getgid()}", d], capture_output=True)
     if lang == "typescript" and (tree / "package.json").exists() and not (tree / "node_modules").exists():
         code, out, _ = run(["npm", "install", "--no-audit", "--no-fund", "--silent"], tree, timeout)
         if code != 0:
@@ -172,19 +217,19 @@ def prepare(lang: str, tree: Path, timeout: int) -> str | None:
     return None
 
 
-def judge(tree: Path, langs: list[str], timeout: int) -> dict:
+def judge(tree: Path, langs: list[str], timeout: int, packages: list[str] = ()) -> dict:
     """Every step's result in one tree: its failures by key, and how it ended."""
     result = {"steps": {}, "failures": {}}
     for lang in langs:
         note = prepare(lang, tree, timeout)
-        for name, cmd, parse, is_test in steps_for(lang, tree):
+        for name, cmd, parse, is_test in steps_for(lang, tree, packages):
             code, out, secs = run(cmd, tree, timeout)
             fails = list(parse(out)) if code is not None else []
             ended = "timeout" if code is None else "ok" if code == 0 else "failed"
             if code not in (None, 0) and not fails:
                 # It failed and named nothing the parser knows: one failure for the whole step, with its last lines.
                 fails = [("step", name, None, "\n".join(out.strip().splitlines()[-15:]))]
-            result["steps"][name] = {"ended": ended, "exit": code, "seconds": round(secs, 1), **({"note": note} if note else {})}
+            result["steps"][name] = {"lang": lang, "ended": ended, "exit": code, "seconds": round(secs, 1), **({"note": note} if note else {})}
             for kind, key, line, text in fails:
                 result["failures"][f"{name}\t{key}"] = {"step": name, "kind": kind, "key": key, "line": line, "text": text[:1500]}
     return result
@@ -196,19 +241,44 @@ def main() -> int:
     skip_base = args[args.index("--skip-base") + 1] if "--skip-base" in args else None
     base, head = Path(args[0]), Path(args[1])
     closed = close_private_networks()
+    # Room for a large repo's two builds (a fork has about 8 GB free): Swan's own .tools (6 GB of indexers and language
+    # servers the gate does not use; tsc and pyright come from tools/node_modules) goes, and both trees share one cargo
+    # target folder, so the second build compiles only what differs. Both are safe in a throwaway VM.
+    shutil.rmtree(SWAN / ".tools", ignore_errors=True)
+    os.environ.setdefault("CARGO_TARGET_DIR", "/tmp/v-cargo-target")
     langs = languages(head)
     if not langs:
         print(json.dumps({"verdict": "error", "why": "no language the gate knows (Rust, Go, TypeScript, Python) in this tree"}))
         return 2
-    base_r = json.loads(Path(skip_base).read_text()) if skip_base else judge(base, langs, timeout)
-    head_r = judge(head, langs, timeout)
+    packages = rust_packages(head, changed_files(base, head)) if "rust" in langs else []
+    base_r = json.loads(Path(skip_base).read_text()) if skip_base else None
+    if base_r is None or base_r.get("packages", []) != packages:  # a cached base judged other crates
+        base_r = judge(base, langs, timeout, packages)
+    base_r["packages"] = packages
+    # Both trees share one cargo target folder, and cargo decides what to rebuild by file times: so every head file
+    # is made newer than the base build just finished. Without it a type error passed (2026-11-27). Dependencies,
+    # fingerprinted by content, stay compiled.
+    now = time.time()
+    for p in head.rglob("*"):
+        if p.is_file() and not p.is_symlink():
+            os.utime(p, (now, now))
+    head_r = judge(head, langs, timeout, packages)
     new = [v for k, v in head_r["failures"].items() if k not in base_r["failures"]]
     fixed = [v for k, v in base_r["failures"].items() if k not in head_r["failures"]]
     timed_out = [s for s, v in head_r["steps"].items() if v["ended"] == "timeout"]
-    verdict = "fail" if new else "error" if timed_out else "pass"
+    # A step that failed in both trees and named nothing (it could not run: a toolchain, a dependency) judged
+    # nothing. It is reported; the verdict is an error only when no step judged anything.
+    unjudged = sorted({v["step"] for k, v in head_r["failures"].items() if v["kind"] == "step" and k in base_r["failures"]})
+    # A language none of whose steps judged anything is one the gate cannot vouch for: the verdict says so, even when
+    # another language passed (relate's Rust could not build while its Python helper scripts type checked).
+    blind = sorted({v["lang"] for v in head_r["steps"].values()} - {v["lang"] for s, v in head_r["steps"].items()
+                                                                  if s not in unjudged and s not in timed_out})
+    verdict = "fail" if new else "error" if timed_out or blind else "pass"
+    why = f"could not judge {', '.join(blind) or 'it'}: {', '.join(timed_out + unjudged)} did not run in either tree" if verdict == "error" else None
     print(json.dumps({"verdict": verdict, "languages": langs, "new": new, "fixed": fixed,
                       "already_failing": len(set(base_r["failures"]) & set(head_r["failures"])),
-                      "timed_out": timed_out, "steps": {"base": base_r["steps"], "head": head_r["steps"]},
+                      "timed_out": timed_out, "unjudged": unjudged, **({"why": why} if why else {}),
+                      "steps": {"base": base_r["steps"], "head": head_r["steps"]},
                       "closed_networks": closed, "base_result": base_r}))
     return 1 if verdict == "fail" else 2 if verdict == "error" else 0
 
