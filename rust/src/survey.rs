@@ -11,15 +11,14 @@
 // Without Spread-Wings, or when the survey fails, a map goes on as before
 // and says so.
 //
-// Carried over from src/survey.goose so far: running the survey, what the
-// report says of it, the folders of its projects of one kind, and the
-// virtualenvs of its Python projects. survey_left_out comes with the
-// server.
+// Carried over from src/survey.goose: running the survey, what the report
+// says of it, the folders of its projects of one kind, the virtualenvs of
+// its Python projects, and projects left out because git ignores their folder.
 
 use crate::json;
 use crate::seal::sealed_run;
 use crate::sys;
-use crate::util::{find, push_int, starts_with, trim};
+use crate::util::{find, json_string, push_int, starts_with, trim};
 use crate::wings::wings_bin;
 
 // Runs the survey and keeps it as <out>/survey.json. The JSON text, or ""
@@ -206,5 +205,41 @@ pub fn survey_report(survey: &[u8], ignored: &[u8], report: &mut Vec<u8>) {
         report.extend_from_slice(b" of ");
         push_int(report, node);
         report.extend_from_slice(b" projects (no node_modules): what they import from packages is not in the map\n");
+    }
+}
+
+// The survey's project folders that sit in folders git ignores, as a JSON
+// list: the map leaves them out.
+pub fn survey_left_out(survey: &[u8], ignored: &[u8]) -> Vec<u8> {
+    let mut out: Vec<u8> = vec![b'['];
+    if let Some(doc) = json::parse(survey) {
+        if let Some(list) = doc.member(doc.root(), b"projects") {
+            for p in doc.each(list) {
+                if let Some(at) = doc.as_string(doc.member(Some(p), b"path")) {
+                    if in_ignored(ignored, at) {
+                        if out.len() > 1 {
+                            out.push(b',');
+                        }
+                        json_string(&mut out, at);
+                    }
+                }
+            }
+        }
+    }
+    out.push(b']');
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn survey_left_out_lists_only_git_ignored_project_folders() {
+        let survey = br#"{"projects":[{"path":"."},{"path":"vendor"},{"path":"vendor/sub"},{"path":"vendor2"},{"path":"build/app"}]}"#;
+        let ignored = b"vendor\nbuild\n";
+        let got = survey_left_out(survey, ignored);
+        assert_eq!(String::from_utf8_lossy(&got), r#"["vendor","vendor/sub","build/app"]"#);
+        assert_eq!(survey_left_out(b"not json", ignored), b"[]");
     }
 }

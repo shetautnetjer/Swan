@@ -137,13 +137,42 @@ var m_inbox: u8[>..];
 var m_chunk: u8[65536];
 var m_id: i64 = 1;
 
-// Starts the server; stderr stays the runner's own.
+// The server a suite starts is `bin/swan serve ...`, or SWAN_SERVE_BIN's program with the same arguments when that
+// is set: how the Rust `swan serve` is judged by the same checks (step 3,
+// docs/superpowers/plans/2026-11-26-rust-serve-read-tools.md).
+fn serve_args(args: const u8[:]) -> u8[>..] {
+    var out: u8[>..] = [];
+    var b: u8[>..] = [];
+    let head = "bin/swan\0serve\0";
+    if env("SWAN_SERVE_BIN", b) && b.len > 0 && args.len >= head.len && args[..head.len] == head {
+        a1(out, b);
+        out.append(args[9..]);   // from "serve", past "bin/swan" and its NUL
+        return out;
+    }
+    out.append(args);
+    return out;
+}
+
+fn judging_other_server() -> bool {
+    var b: u8[>..] = [];
+    return env("SWAN_SERVE_BIN", b) && b.len > 0;
+}
+
+// Starts the server; stderr stays the runner's own. Under SWAN_SERVE_BIN it also does MCP's opening handshake
+// (initialize, then notifications/initialized), as every agent that starts Swan does: the Rust server follows the
+// protocol and answers a call made before it with an error, while the checks were written against the Goose server,
+// which answers anyway. A suite that sends its own initialize still can; a second one is answered.
 fn mcp_open(args: const u8[:], env: const u8[:]) -> bool {
     m_inbox.clear();
     m_id = 1;
-    m_h = proc_open(args, ".", env, "");
-    if m_h == 0 { check("swan serve starts", false, "proc_open failed"); }
-    return m_h != 0;
+    m_h = proc_open(serve_args(args), ".", env, "");
+    if m_h == 0 { check("swan serve starts", false, "proc_open failed"); return false; }
+    if judging_other_server() {
+        var t: u8[>..] = [];
+        guard mcp_rpc("initialize", """{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"swan-check","version":"0"}}""", t) else { return false; }
+        mcp_notify("notifications/initialized");
+    }
+    return true;
 }
 
 // The next line the server writes (10 minutes at most: a first call may

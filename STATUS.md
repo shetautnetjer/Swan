@@ -3265,3 +3265,192 @@ suite runs the Goose `bin/swan` in the microVM, so it waits for the Rust
 binary to be there (step 3's first task). The plan for step 3 is
 docs/superpowers/plans/2026-11-26-rust-serve-read-tools.md, for the owner
 to read before any swarm starts.
+
+## 2026-11-27T11:51Z: `swan serve` in Rust answers the 12 tools `swan query` already knew (step 3, first part)
+
+The Rust program now has `swan serve <map>`: an MCP server on stdin and stdout, on the `rmcp` crate, with
+find_symbol, find_referencing_symbols, get_symbol_at, get_symbols_overview, get_callers, get_callees,
+find_implementations, get_type_hierarchy, find_unused_symbols, get_diagnostics, search_pattern and
+index_info. Each tool reads its arguments as `call_tool` in src/serve.goose does and answers through the
+functions `swan query` uses. Any other tool answers "not yet in the Rust server: <name>". The checks' harness
+now starts the program named by `SWAN_SERVE_BIN` when it is set, so the same checks judge both servers.
+
+| Judge | Goose server | Rust server |
+|---|---|---|
+| `mcp` suite in the microVM (tiny-ts) | 31 of 31 | 31 of 31 |
+| the same with `SWAN_SERVE_BIN` naming a missing program | | 0 of 1 (so the switch is real) |
+| `cargo test --release` | | 78 passed, no warnings (55 before) |
+
+How it was made: written by one Antigravity swarm from the plan
+(docs/superpowers/plans/2026-11-26-rust-serve-read-tools.md, tasks 1 and 3) in 19 minutes, with a map of
+tiny-ts made by the Goose program to test against (now rust/tests/data/). Its tests were seen failing before
+its code. The lead moved the map into the tree, ran the tests again and ran the suite.
+
+Limits:
+- `get_callers` gives no `possible_callers`, though its description (copied from the Goose server) promises
+  them: that part runs Spread-Wings and comes with the Spread-Wings tools (plan task 4).
+- `live: true` on find_implementations and get_diagnostics answers "live mode is not yet in the Rust server".
+- A line that is not JSON is dropped by `rmcp`; the Goose server answers it with -32700.
+- `inputSchema` keys come out in sorted order (rmcp stores them in a sorted map): the same JSON, another order.
+- One map per server (`swan serve <map>`); `--maps`, `use_repo` and the `repo` argument are plan task 2. The
+  `maps` suite does not pass yet.
+- Each call reopens the map; how long that takes is measured in plan task 5.
+
+## 2026-11-27T12:17Z: the Rust `swan serve` chooses its repo (`--maps`, `use_repo`, `repo`) (step 3, task 2)
+
+`swan serve --maps <dir>` and bare `swan serve` now start with no repo selected; `use_repo` (listed first, as
+in `TOOLS`) and any read tool's `repo` argument select one, finding its map under the data root or building
+it with the Rust `swan map` (`pipeline::map_main`, its trust rules unchanged). What the map held back for
+`swan trust` is passed to use_repo's `skipped`, as the Goose `map_held` does. New: rust/src/serve_repo.rs.
+
+| Judge (microVM, real indexers) | Goose server | Rust server |
+|---|---|---|
+| `maps` suite | 27 of 27 | 26 of 27 |
+| `mcp` suite | 31 of 31 | 31 of 31 |
+| `cargo test` (the copy, no indexers there) | | 28 passed, 5 ignored |
+
+The one `maps` check that fails, "swan serve <db> still answers about its map", sends `tools/call` without
+`initialize` first. The Goose server answers; the Rust server (rmcp) answers with MCP's -32602 error, as the
+protocol requires a client to initialize. Every agent that starts Swan (Claude Code, omp, Hermes)
+initializes first. The check was left as it is; whether the Rust server should be as lenient is the owner's.
+
+How it was made: a second Antigravity swarm (20 minutes) from the plan's task 2. Its 5 ignored tests need
+scip-typescript and rust-analyzer, which its copy lacks; the microVM suite above runs them for real.
+
+Limits:
+- The Rust binary must sit beside Swan's tools (`bin/spread-wings`, `bin/swan-flatten`): in the microVM it was
+  copied to `bin/swan-rs`. Where it lives when installed is step 6.
+- Still not here: what_broke, the four Spread-Wings tools and `possible_callers`, and the forward of the edit
+  tools to the Goose server (plan task 4).
+
+## 2026-11-27T13:07Z: the Rust `swan serve` has every tool (step 3, plan task 4)
+
+A third Antigravity swarm added what_broke, the four Spread-Wings tools, `possible_callers` in get_callers, and the
+forward (rust/src/serve_forward.rs): the ten edit tools go unchanged to a Goose `swan serve` child named by
+`SWAN_GOOSE_SERVE`, started on first use with the same target and selected repo. The lead added: `live: true` on
+find_implementations and get_diagnostics is forwarded too until the Rust server keeps language servers (step 4).
+
+Judged in the microVM with every suite that starts a server, the Goose server against the Rust one (a copy of the
+Rust binary in `bin/`, beside Swan's tools; `SWAN_GOOSE_SERVE=bin/swan`):
+
+| Suite | Goose | Rust |
+|---|---|---|
+| mcp | 31 of 31 | 31 of 31 |
+| maps | 27 of 27 | 27 of 27 |
+| edit | 16 of 16 | 16 of 16 |
+| lang | 131 of 131 | 131 of 131 |
+| structural | 31 of 31 | 31 of 31 |
+| trust | 20 of 20 | 20 of 20 |
+| diag | 6 of 7 | 6 of 7 |
+| live | 22 of 28 | 22 of 28 |
+| game | 28 of 36 | 28 of 36 |
+| kotlin | 1 of 6 | 1 of 6 |
+
+The failures are the same checks on both: these suites ran outside `scripts/test.sh` (language servers and trust
+that the test run sets up). `cargo test`: all pass, 6 ignored (need indexers or spread-wings the copy lacks).
+
+Harness: under `SWAN_SERVE_BIN`, `mcp_open` now does MCP's opening handshake. All suites but mcp called tools
+without `initialize`; the Goose server answers anyway, the Rust server (rmcp) answers with -32602 as the protocol
+says. No check was changed. Whether the Rust server should accept calls before the handshake is the owner's.
+
+Limits: the Rust binary must sit beside Swan's tools; live mode is the Goose server's until step 4.
+
+## 2026-11-27T12:06Z: a Rust symbol's signature is rust-analyzer's, not its doc comment's first line
+
+Found by Aya while reading the Rust `swan serve` through Swan's own tools: every Rust function on the
+branch came back with an empty `signature`. In SCIP a symbol's signature is `signature_documentation`
+(field 7), and its doc comment is `documentation` (field 3). swan-flatten read only field 3 and took its
+first line, which works for scip-typescript (it puts the signature there) but not for rust-analyzer: a
+Rust symbol's signature was its doc comment's first line, or empty when it had none.
+
+| Repo | Rust functions and methods with a signature, before | after |
+|---|---|---|
+| fixtures/tiny-rs | 0 of 7 (all 11 symbols empty) | 11 of 11, e.g. `pub fn new(side: u32) -> Tile` |
+| relate (trial clone, sealed) | 14,724 of 24,930, most of them doc lines | 24,938 of 24,938 |
+| fixtures/tiny-ts | the same rows, byte for byte (sha256 of every symbol's scip, signature, doc) | |
+
+- swan-flatten reads field 7 when it is there, and keeps documentation's first line otherwise.
+- A map made by another swan-flatten is flattened again even when no indexer ran, so the fix reaches
+  maps that already exist: `flattener.txt` in the map folder names the flattener (its size), and both
+  early stops ("nothing changed", "only failed indexers ran") need it to match. An old map remapped by
+  this build got its signatures; the next map said "nothing changed".
+- New check (rust suite): Tile/new's signature is `pub fn new(side: u32) -> Tile`. On main's
+  flattener it fails with `"signature": ""`.
+
+- The whole suite in the microVM: 58 + 334 checks and 66 Python tests, 0 failed (main: 333 checks; +1 new).
+
+Limits: the flattener is named by its file size, as the TypeScript patch is; two builds of one size
+would look the same. A map's first run with this build reflattens every map once.
+
+## 2026-11-27T13:35Z: the Rust `swan serve` judged by an IDE and timed (step 3, plan task 5)
+
+The branch with main merged in (59755ce, the signature fix): the whole suite in the microVM, 58 + 334 checks and 66
+Python tests, 0 failed; every suite that starts a server gives the Goose server's result (the table at 13:07Z, run
+again on this tree, the same). `cargo test` in the microVM: all pass but one, `a_server_does_not_outlive_a_killed_swan`
+(tests/live.rs): it fails there 3 of 3 here and 2 of 2 on `rust-broke-reasons` (249f7cb) too, and passes on the host;
+it came with that branch and is not this one's.
+
+### RustRover against the Rust server, relate
+
+`scripts/ide-judge.py` (new): 20 functions and methods of relate's Rust, picked by a fixed order from the map, whose
+name appears as a word in at most 150 places. The IDE's answer to a question is every one of those places its
+`get_symbol_info` resolves to the same symbol as the definition. A fresh copy of the trial clone at 2e47f55, mapped
+by the Swan installed from main; RustRover read it, nothing was edited.
+
+| Tool | Agrees with the IDE |
+|---|---|
+| find_referencing_symbols, references in code (file and line) | 71 of 71; none the IDE does not have |
+| get_callers, call sites at distance 1 | 62 of 62 are places the IDE confirms |
+| get_symbol_at, at each place the IDE confirms | 71 of 71 |
+| references in doc comments (`[name]` links) | the IDE counts 3, the map none: rust-analyzer's index does not |
+
+RustRover's `analyze_calls` found no Rust function by any name form tried (`crate::module::f`, `module::f`, `f`,
+`Type::method`), so the call hierarchy was not used: get_callers is judged by its call sites.
+
+Not judged: cobra (Go). Mapped as an untrusted repo, gopls has no package metadata (its dependencies are fetched only
+into a trusted repo's module cache), so the map has 0 references and there is nothing to compare. Trusting a trial
+folder, or filling the module cache by hand, is the owner's call.
+
+### Time, the Goose server against the Rust one, relate
+
+The same 20 questions, each 5 times, one server per tool and run (ms per call, as the client sees it):
+
+| Tool | Goose median | Goose p90 | Rust median | Rust p90 |
+|---|---|---|---|---|
+| find_symbol | 0.2 | 8.6 | 0.2 | 8.8 |
+| find_referencing_symbols | 0.5 | 7.3 | 0.4 | 6.9 |
+| get_symbol_at | 0.1 | 0.1 | 0.1 | 0.1 |
+| get_callers (with `possible_callers`, Spread-Wings) | 107.1 | 113.7 | 108.0 | 113.5 |
+| start, initialize and the first find_symbol | 1 | | 1 | |
+| start, initialize and the first get_callers | 108 | | 108 | |
+
+The first get_callers on a map builds Spread-Wings' graph once (6.6 s on relate, cached after). The two are as fast
+as each other: the switch is not held up by speed.
+
+### What is not done
+
+- The 10 edit tools and `live: true` are the Goose server's (decision A), until steps 4 and 5.
+- The Rust binary must sit beside Swan's tools (bin/spread-wings, bin/swan-flatten); packaging is step 6.
+- No agent's `swan serve` entry points at the Rust binary yet: that waits for the owner's word.
+
+## 2026-11-27T13:48Z: GoLand against the Rust server, cobra (step 3, plan task 5, the Go half)
+
+On the owner's word the cobra copy was trusted (`swan trust`), so its Go dependencies were fetched and gopls loaded
+its packages: 5,934 references where the untrusted map had 0. The same judge, 20 functions and methods of cobra
+(adbc881):
+
+| Tool | Agrees with GoLand |
+|---|---|
+| find_referencing_symbols, references in code | 52 of 52; 31 more, all of one symbol (below) |
+| get_callers, call sites at distance 1 | 49 of 49 outside that symbol |
+| get_symbol_at, at each place the IDE confirms | 52 of 52 |
+| references in doc comments | the IDE counts 12, the map none |
+
+The one difference: `flagCompError/Error`. gopls counts the 31 calls of `err.Error()` on the `error` interface as
+references to every method that implements it; GoLand counts none. The answer is gopls's, through the map, and the
+Goose server gives the same; for an agent asking who calls this method it is 31 lines of calls through the interface.
+Telling those apart (a reference "through the interface") is a possible next change to the map, not to the server.
+
+The judge was fixed twice on the way, and its relate numbers do not change (RustRover's documentation has no table):
+GoLand's documentation opens with a table ("| Package: |"), so the symbol's key is now the first two lines that are
+not table markup; and a name path matches every symbol whose path ends with it, so only the symbol asked is scored.
