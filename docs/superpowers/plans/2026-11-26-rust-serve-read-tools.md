@@ -19,7 +19,7 @@
 - `cargo test` passes with no warnings.
 - Public repo: no home paths, usernames or private repo names in code, docs or records.
 
-## Decision for the owner before Task 4
+## Decision for the owner before Task 4 (decided 2026-11-27: A, forward)
 
 The Goose server has 28 tools; 18 read, 10 edit or run (`replace_symbol_body`, `insert_after_symbol`, `insert_before_symbol`, `rename_symbol`, `update_map`, `check_errors`, `run_tests`, `format_file`, `rewrite_pattern`, `edit_batch`). Step 3 builds the 18. Two ways for the other 10 until step 5:
 
@@ -42,7 +42,7 @@ Tasks 1 to 3 do not depend on this. Task 4 is written for A; under B it shrinks 
 
 **Files:**
 - Modify: `tests/check/harness.goose` (`mcp_open` callers), `tests/check/mcp_suite.goose:14`, `tests/check/maps_suite.goose` (each `argv(["bin/swan", "serve", ...])`)
-- Modify: `Cargo.toml` of `rust/` (add `rmcp` 3.11 with the features its docs name for a stdio server, and the `tokio` runtime it needs; check both against the crate docs before writing them)
+- Modify: `Cargo.toml` of `rust/` (`rmcp` 3.12 with `server`, `transport-io` and `macros`, and `tokio` with `rt`, `macros`, `io-std`: added on the branch before the first swarm, so the copy builds offline)
 - Create: `rust/src/serve.rs`, `rust/src/serve_tools.rs`
 - Modify: `rust/src/main.rs` (dispatch `serve`)
 - Test: `rust/src/serve.rs` (`#[cfg(test)]`), the `mcp` suite's first and last checks

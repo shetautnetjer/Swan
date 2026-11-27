@@ -1075,3 +1075,14 @@ writes the records.
 because an agent can switch to the Rust server for looking while it still
 edits through the Goose one; and the suite's own server checks are tried
 as the judge before any new judge is written.
+
+## 2026-11-27T00:30Z — The Rust server forwards the tools it does not have yet to the Goose server
+
+Step 3 builds the 18 tools that read in the Rust `swan serve`. The other 10
+(the edit, run and rewrite tools) are passed unchanged to a Goose `swan
+serve` the Rust server starts on the same maps, until step 5 rebuilds them.
+So an agent can switch its server to the Rust program now and lose no tool.
+The owner chose this over a read-only Rust server on 2026-11-27 (option A
+in docs/superpowers/plans/2026-11-26-rust-serve-read-tools.md). Each
+forwarded tool is removed from the forward when its Rust version passes
+the suite.

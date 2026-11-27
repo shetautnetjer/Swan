@@ -22,6 +22,10 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # The SCIP index that swan lsp-index writes.
 scip = "0.10"
+# swan serve's MCP server (step 3): the official Rust SDK on stdin/stdout, and the
+# runtime it needs. Chosen in docs/rust-port.md's crate table.
+rmcp = { version = "3.12", default-features = false, features = ["server", "transport-io", "macros"] }
+tokio = { version = "1", features = ["rt", "macros", "io-std"] }
 
 [build-dependencies]
 # Builds tree-sitter and the grammars from goose-treesitter's own C (build.rs).
