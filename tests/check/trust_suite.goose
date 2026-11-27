@@ -152,6 +152,17 @@ fn trust_checks(trust_file: const u8[:]) {
             read_file(str(out, "/diagnostics.tsv"), after);
             check("untrusted Rust: cargo check is skipped and says so", find(report, "not run: cargo check") >= 0, report);
             check("untrusted Rust: the saved cargo diagnostics are kept", find(after, "a saved cargo error") >= 0, after);
+            // An index made sealed and offline is not reused once the repo is trusted: what it may fetch and run
+            // differs (a trusted Go repo's dependencies; found 2026-11-27, where cobra kept 0 Go references).
+            var tt: u8[>..] = [];
+            tr_stdout(TR_UNTRUSTED, ["trust", repo], tt);
+            var m2: u8[>..] = [];
+            tr_swan(TR_UNTRUSTED, ["map", repo, out], m2);
+            check("after swan trust the Rust map is made again, not reused",
+                  find(m2, "trust changed since the last map (untrusted to trusted)") >= 0 && find(m2, "rust-analyzer scip: reused") < 0, m2);
+            var m3: u8[>..] = [];
+            tr_swan(TR_UNTRUSTED, ["map", repo, out], m3);
+            check("the map after that reuses it", find(m3, "trust changed") < 0 && find(m3, "rust-analyzer scip: reused") >= 0, m3);
         }
     }
 
