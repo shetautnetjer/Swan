@@ -11,7 +11,9 @@ use rmcp::{
         CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, Implementation,
         ListToolsResult, PaginatedRequestParams, ProtocolVersion, ServerCapabilities, ServerConfig,
     },
-    service::{QuitReason, RequestContext, ServerInitializeError, serve_server},
+    service::{
+        NotificationContext, QuitReason, RequestContext, ServerInitializeError, serve_server,
+    },
 };
 use tokio::io::{AsyncRead, AsyncWrite};
 
@@ -21,6 +23,7 @@ use crate::index::SCHEMA_VERSION;
 use crate::query::meta_value;
 use crate::run;
 use crate::serve_forward::{self, ForwardTarget, Forwarder};
+use crate::serve_live::{self, LiveManager};
 use crate::serve_read;
 use crate::serve_repo::{self, Selected};
 use crate::serve_tools;
@@ -106,6 +109,7 @@ pub(crate) struct SwanServer {
     maps_root: Vec<u8>,
     selected: Arc<Mutex<Option<Selected>>>,
     forward: Arc<Mutex<Forwarder>>,
+    live: Arc<Mutex<LiveManager>>,
 }
 
 impl SwanServer {
@@ -115,6 +119,7 @@ impl SwanServer {
             maps_root,
             selected: Arc::new(Mutex::new(Some(selected))),
             forward: Arc::new(Mutex::new(Forwarder::new(target))),
+            live: Arc::new(Mutex::new(LiveManager::new(true))),
         }
     }
 
@@ -124,6 +129,7 @@ impl SwanServer {
             maps_root,
             selected: Arc::new(Mutex::new(None)),
             forward: Arc::new(Mutex::new(Forwarder::new(target))),
+            live: Arc::new(Mutex::new(LiveManager::new(false))),
         }
     }
 
@@ -138,6 +144,7 @@ impl SwanServer {
             maps_root,
             selected: Arc::new(Mutex::new(Some(selected))),
             forward: Arc::new(Mutex::new(Forwarder::with_bin_override(target, bin))),
+            live: Arc::new(Mutex::new(LiveManager::new(true))),
         }
     }
 
@@ -151,6 +158,7 @@ impl SwanServer {
             maps_root,
             selected: Arc::new(Mutex::new(None)),
             forward: Arc::new(Mutex::new(Forwarder::with_bin_override(target, bin))),
+            live: Arc::new(Mutex::new(LiveManager::new(false))),
         }
     }
 
@@ -170,7 +178,14 @@ impl SwanServer {
         if name == "use_repo" {
             let path = args.get("path").and_then(serde_json::Value::as_str).unwrap_or("").as_bytes();
             let mut cur = self.selected.lock().unwrap_or_else(|e| e.into_inner());
-            return match serve_repo::select(&self.maps_root, path, build, &mut cur) {
+            let prev = cur.clone();
+            let res = serve_repo::select(&self.maps_root, path, build, &mut cur);
+            let next = cur.clone();
+            drop(cur);
+            if res.is_ok() && prev != next {
+                self.live.lock().unwrap_or_else(|e| e.into_inner()).on_repo_switch();
+            }
+            return match res {
                 Ok(out) => CallToolResult::success(vec![ContentBlock::text(
                     String::from_utf8_lossy(&out).into_owned(),
                 )]),
@@ -179,18 +194,33 @@ impl SwanServer {
                 )]),
             };
         }
-        // `live: true` asks a running language server, which the Rust server does not keep yet (step 4): until then
-        // it goes to the Goose server like the tools the Rust one lacks (the owner's decision A, 2026-11-27).
-        let live = (name == "find_implementations" || name == "get_diagnostics")
-            && args.get("live").and_then(serde_json::Value::as_bool) == Some(true);
-        if live || serve_forward::is_forwarded_tool(name) {
+        // Live diagnostics for Java, Kotlin and C# stay the Goose server's (decision A): the Rust `Live` has never run
+        // their servers (HANDOFF.md: Java's entry needs {java_source_paths}, Kotlin the wait for its Gradle import).
+        let goose_live = name == "get_diagnostics"
+            && args.get("live").and_then(serde_json::Value::as_bool) == Some(true)
+            && args
+                .get("relative_path")
+                .and_then(serde_json::Value::as_str)
+                .and_then(|p| serve_live::lang_of_file(p.as_bytes()))
+                .is_some_and(|l| matches!(l, "java" | "kotlin" | "csharp"));
+        if goose_live || serve_forward::is_forwarded_tool(name) {
             let mut cur = self.selected.lock().unwrap_or_else(|e| e.into_inner());
+            let prev = cur.clone();
             let mut fwd = self.forward.lock().unwrap_or_else(|e| e.into_inner());
-            return fwd.call(name, args, &self.maps_root, &mut cur);
+            let res = fwd.call(name, args, &self.maps_root, &mut cur);
+            let next = cur.clone();
+            drop(fwd);
+            drop(cur);
+            if prev != next {
+                self.live.lock().unwrap_or_else(|e| e.into_inner()).on_repo_switch();
+            }
+            return res;
         }
         let is_read = serve_read::is_read_tool(name);
         let is_broke = name == "what_broke";
         let is_wings = serve_wings::is_wings_tool(name);
+        let is_live = (name == "find_implementations" || name == "get_diagnostics")
+            && args.get("live").and_then(serde_json::Value::as_bool) == Some(true);
         if !is_read && !is_broke && !is_wings {
             return CallToolResult::error(vec![ContentBlock::text(format!(
                 "unknown tool: {name}"
@@ -198,6 +228,7 @@ impl SwanServer {
         }
         let repo = args.get("repo").and_then(serde_json::Value::as_str).unwrap_or("").as_bytes();
         let mut cur = self.selected.lock().unwrap_or_else(|e| e.into_inner());
+        let prev = cur.clone();
         let mut snap = if !repo.is_empty() {
             match serve_repo::select_open(&self.maps_root, repo, build, false, &mut cur) {
                 Ok((snap, _)) => snap,
@@ -230,8 +261,47 @@ impl SwanServer {
                 "no repo selected: call use_repo with a path, or pass repo",
             )]);
         };
-        let map_path = cur.as_ref().map(|s| s.map.clone()).unwrap_or_default();
+        let sel = cur.clone();
+        let map_path = sel.as_ref().map(|s| s.map.clone()).unwrap_or_default();
         drop(cur);
+        if prev != sel {
+            self.live.lock().unwrap_or_else(|e| e.into_inner()).on_repo_switch();
+        }
+        if let Some(ref selected) = sel {
+            // Release the read snapshot before warming starts a language server.
+            let should_warm = self.live.lock().unwrap_or_else(|e| e.into_inner()).will_warm();
+            if should_warm {
+                snap.commit();
+                self.live.lock().unwrap_or_else(|e| e.into_inner()).warm_if_needed(selected);
+                snap = match open_map_snapshot(&selected.map) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        return CallToolResult::error(vec![ContentBlock::text(
+                            String::from_utf8_lossy(&e).into_owned(),
+                        )]);
+                    }
+                };
+            }
+        }
+        if is_live {
+            let res = if name == "get_diagnostics" {
+                let root = meta_value(&snap.db, b"root");
+                snap.commit();
+                let mut mgr = self.live.lock().unwrap_or_else(|e| e.into_inner());
+                serve_live::call_live_diagnostics(&mut mgr, &root, &map_path, args)
+            } else {
+                let mut mgr = self.live.lock().unwrap_or_else(|e| e.into_inner());
+                serve_live::call_live_implementations(&mut mgr, snap, &map_path, args)
+            };
+            return match res {
+                Ok(out) => CallToolResult::success(vec![ContentBlock::text(
+                    String::from_utf8_lossy(&out).into_owned(),
+                )]),
+                Err(e) => CallToolResult::error(vec![ContentBlock::text(
+                    String::from_utf8_lossy(&e).into_owned(),
+                )]),
+            };
+        }
         if is_broke {
             let root = meta_value(&snap.db, b"root");
             snap.commit();
@@ -292,6 +362,13 @@ impl ServerHandler for SwanServer {
         .with_server_info(Implementation::new("swan", env!("CARGO_PKG_VERSION")))
     }
 
+    async fn on_initialized(&self, _context: NotificationContext<RoleServer>) {
+        let sel = self.selected.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        if let Some(sel) = sel {
+            self.live.lock().unwrap_or_else(|e| e.into_inner()).warm_if_needed(&sel);
+        }
+    }
+
     async fn list_tools(
         &self,
         _request: Option<PaginatedRequestParams>,
@@ -323,6 +400,7 @@ where
     W: AsyncWrite + Send + Unpin + 'static,
 {
     let forward = server.forward.clone();
+    let live = server.live.clone();
     let code = match serve_server(server, (reader, writer)).await {
         Ok(running) => match running.waiting().await {
             Ok(QuitReason::Closed | QuitReason::Cancelled) => 0,
@@ -345,6 +423,7 @@ where
             1
         }
     };
+    live.lock().unwrap_or_else(|e| e.into_inner()).stop();
     forward.lock().unwrap_or_else(|e| e.into_inner()).shutdown();
     code
 }

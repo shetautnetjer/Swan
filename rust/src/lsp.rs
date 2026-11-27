@@ -20,7 +20,7 @@ use std::io::{BufReader, ErrorKind, Write};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::process::CommandExt;
 use std::process::{Child, Command, Stdio};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};
 use std::time::{Duration, Instant};
 
 use lsp_server::{Message, Notification, Request, RequestId, Response};
@@ -147,6 +147,7 @@ pub struct Client {
     root_uri: String,
     log: File,
     heard: Heard,
+    closed: bool,
 }
 
 impl Client {
@@ -212,7 +213,7 @@ impl Client {
         });
         let root_uri = file_uri(workspace);
         let watcher = watch(group);
-        let mut client = Client { child, watcher, group: Some(group), input: Some(input), output, next_id: 1, settings: spec.init.clone(), root_uri, log, heard: Heard::new() };
+        let mut client = Client { child, watcher, group: Some(group), input: Some(input), output, next_id: 1, settings: spec.init.clone(), root_uri, log, heard: Heard::new(), closed: false };
         let init = json!({
             "processId": null,
             "rootUri": client.root_uri,
@@ -267,7 +268,10 @@ impl Client {
                     _ => {}
                 },
                 Err(RecvTimeoutError::Timeout) => {}
-                Err(RecvTimeoutError::Disconnected) => return Err(LspError::Closed),
+                Err(RecvTimeoutError::Disconnected) => {
+                    self.closed = true;
+                    return Err(LspError::Closed);
+                }
             }
         }
     }
@@ -290,9 +294,38 @@ impl Client {
                     self.read(m)?;
                 }
                 Err(RecvTimeoutError::Timeout) => {}
-                Err(RecvTimeoutError::Disconnected) => return Err(LspError::Closed),
+                Err(RecvTimeoutError::Disconnected) => {
+                    self.closed = true;
+                    return Err(LspError::Closed);
+                }
             }
         }
+    }
+
+    /// Reads any messages the server has already sent without blocking, so
+    /// Heard reflects notifications received while the client sat idle.
+    pub fn drain(&mut self) -> Result<(), LspError> {
+        loop {
+            match self.output.try_recv() {
+                Ok(m) => {
+                    let _ = self.read(m)?;
+                }
+                Err(TryRecvError::Empty) => return Ok(()),
+                Err(TryRecvError::Disconnected) => {
+                    self.closed = true;
+                    return Err(LspError::Closed);
+                }
+            }
+        }
+    }
+
+    /// Whether the server process is still running and its channel is open.
+    pub fn is_alive(&mut self) -> bool {
+        if self.closed || self.group.is_none_or(exited) {
+            self.closed = true;
+            return false;
+        }
+        self.drain().is_ok()
     }
 
     pub fn heard(&self) -> &Heard {
@@ -321,12 +354,13 @@ impl Client {
     }
 
     /// The same, giving the server up to t to answer and as long again (at
-    /// most 3 s) to exit.
+    /// most 3 s) to exit once it answered.
     pub fn shutdown_within(mut self, t: Duration) {
         // A server that does not take part is killed all the same.
-        let _ = self.request("shutdown", Value::Null, t);
+        let answered = self.request("shutdown", Value::Null, t).is_ok();
         let _ = self.notify("exit", Value::Null);
-        self.stop(t.min(Duration::from_secs(3)));
+        let grace = if answered { t.min(Duration::from_secs(3)) } else { Duration::ZERO };
+        self.stop(grace);
     }
 
     // workspace/configuration is answered from the settings, item by item;
@@ -340,11 +374,15 @@ impl Client {
     fn send(&mut self, msg: Message) -> Result<(), LspError> {
         let mut bytes = Vec::new();
         if msg.write(&mut bytes).is_err() {
+            self.closed = true;
             return Err(LspError::Closed);
         }
         match &self.input {
             Some(input) if input.send(bytes).is_ok() => Ok(()),
-            _ => Err(LspError::Closed),
+            _ => {
+                self.closed = true;
+                Err(LspError::Closed)
+            }
         }
     }
 
@@ -355,6 +393,7 @@ impl Client {
     // Closes the server's input, gives it grace to exit, then kills its
     // whole group (what it started too) and reaps it. Once only.
     fn stop(&mut self, grace: Duration) {
+        self.closed = true;
         let Some(group) = self.group.take() else { return };
         self.input = None;
         let until = Instant::now() + grace;
@@ -374,9 +413,11 @@ impl Client {
 // however it ended (a hook kills swan broke with SIGKILL at its timeout, and
 // no Drop runs then), that end is closed and the watcher kills the group:
 // the server and what it started. A sealed server's group is eggshell's
-// unshare, whose --kill-child takes the whole seal with it.
+// unshare, whose --kill-child takes the whole seal with it. `kill -s KILL`,
+// not `kill -KILL`: dash, /bin/sh on Debian and Ubuntu, refuses `-KILL --
+// -<group>` ("Illegal number"), and the group outlived swan (2026-11-27).
 fn watch(group: i32) -> Option<Child> {
-    let kill = "read _; kill -KILL -- \"-$1\"";
+    let kill = "read _; kill -s KILL -- \"-$1\"";
     let mut cmd = Command::new("/bin/sh");
     cmd.args(["-c", kill, "swan-watcher", &group.to_string()]).stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::null()).process_group(group);
     cmd.spawn().ok()

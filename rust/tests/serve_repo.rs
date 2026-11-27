@@ -2,6 +2,8 @@
 // `use_repo`, and the per-call `repo` argument over stdin and stdout,
 // porting all 27 checks from tests/check/maps_suite.goose.
 
+mod common;
+
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
@@ -200,7 +202,7 @@ struct Server {
 
 impl Server {
     fn spawn(args: &[&str], trust_build: bool) -> Self {
-        let mut cmd = Command::new(env!("CARGO_BIN_EXE_swan"));
+        let mut cmd = Command::new(common::swan_beside_tools());
         cmd.args(args)
             .current_dir(repo_root())
             .stdin(Stdio::piped())
