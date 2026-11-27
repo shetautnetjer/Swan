@@ -2301,5 +2301,11 @@ tests/verify_gate.sh, 8 cases, all pass (26 s for all of them; a tiny repo is ju
 The network case can fail: the same Go test in a fork with no blackhole routes timed out on all four private
 addresses (packets left) and failed; with the routes it passed in 0.008 s.
 
-Not yet: the Claude Code Stop hook and the omp extension that run it at the end of a turn; checkpoints for other
-toolchains; a registry-only allowlist.
+The Claude Code Stop hook, scripts/hooks/verify-before-stop.py: when the session's repo has changes the gate has not
+judged, it runs the gate; new failures block the stop and go to the agent as the reason. Each set of changes is judged
+once, at most 3 blocks per session and repo, and a gate that cannot judge lets the turn end. tests/test_verify_stop_hook.py,
+6 tests with a stand-in gate, pass; with the real gate on tiny-rs and a planted type error it blocked, naming
+"cargo check: src/lib.rs: mismatched types (line 37)".
+
+Not yet: the omp extension that does the same at the end of a turn; checkpoints for other toolchains; a registry-only
+allowlist.
