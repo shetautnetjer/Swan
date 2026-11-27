@@ -935,6 +935,19 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
             for f in ["/swan.db", "/index-manifest.tsv", "/python-pieces.tsv", "/python-files.tsv"] { delete_file(str(out, f)); }
         }
     }
+    // What an indexer may run and fetch depends on trust (a trusted Go repo's dependencies, a Rust build script, a
+    // virtualenv), so output made under the other trust is not reused: a trusted cobra kept the untrusted map's 0 Go
+    // references until --clean (found 2026-11-27). A map with no record is taken as untrusted.
+    let reuse_caches = ["index-manifest.tsv", "tsc-files.txt", "tsc-program.txt", "tsc-projects.txt", "typescript-chunks.txt",
+                        "typescript-shared.txt", "typescript-files.tsv", "typescript-layers.txt",
+                        "python-files.tsv", "python-pieces.tsv"];
+    let trust_now = if trusted { "trusted" } else { "untrusted" };
+    var trust_was: u8[>..] = [];
+    if !read_file(str(out, "/trust.txt"), trust_was) { trust_was.append("untrusted"); }
+    if !clean && file_exists(old_db) && trust_was != trust_now {
+        format(report, "trust changed since the last map (", trust_was, " to ", trust_now, "): the indexes are made again\n");
+        for name in reuse_caches { delete_file(str(out, "/", name)); }
+    }
     // Invalidate reuse metadata under the same stable writer lock. Never remove
     // the database or its lock: readers keep their snapshot until atomic publish.
     // Defer replacement metadata until publication, so failure/interruption
@@ -945,9 +958,7 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
         else { write_file(str(out, "/", name), contents); }
     }
     if clean {
-        for name in ["index-manifest.tsv", "tsc-files.txt", "tsc-program.txt", "tsc-projects.txt", "typescript-chunks.txt",
-                     "typescript-shared.txt", "typescript-files.tsv", "typescript-layers.txt",
-                     "python-files.tsv", "python-pieces.tsv"] {
+        for name in reuse_caches {
             let path = str(out, "/", name);
             guard !file_exists(path) || delete_file(path) else {
                 format(report, "cannot invalidate clean rebuild cache: ", path); return false;
@@ -2421,6 +2432,7 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
     index_main_locked(out, db, repo, !clean && file_exists(db), report);
     write_file(flat_marker, scips);
     write_file(str(out, "/flattener.txt"), flat_id);
+    write_file(str(out, "/trust.txt"), trust_now);
     var docs: u8[>..] = [];
     read_file(str(out, "/documents.tsv"), docs);
     note_indexed(docs);

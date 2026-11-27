@@ -2255,3 +2255,21 @@ The real update from a relative `--repo .` then installed 59755ce (`doctor: read
 
 Left: a version folder half removed by the old cleanup (be36a5fcfef7) is kept as "the version before", as the
 newest by time; the one to go back to is picked by modification time, which the failed removal had touched.
+
+## 2026-11-27T18:30Z: a change of trust makes the next map remake its indexes
+
+Found by Aya while judging the Rust server on cobra: the copy was mapped untrusted (gopls has no module metadata
+without its dependencies: 0 Go references), then trusted, and the next map said "lsp-index go: reused (no changes)"
+and kept 0 references; only `--clean` gave the 5,934. An index's fingerprint is its files, and trust is not a file.
+
+Now a map records its trust (`trust.txt` in the map folder; none recorded is taken as untrusted). When it differs, the
+map says "trust changed since the last map (untrusted to trusted): the indexes are made again" and drops the reuse
+files `--clean` drops (the index manifest and the TypeScript and Python piece lists); the database stays until the
+new one is published. The map after that reuses as before.
+
+Checked: two new trust checks (tiny-rs: after `swan trust` the map is made again; the next one reuses it); the first fails on main's pipeline. The whole suite in the microVM: 58 + 336 checks and 66 Python tests, 0 failed. A first map says nothing of trust (there is nothing to remake). On a cobra
+copy: untrusted map, `swan trust`, map: "trust changed", lsp-index go ran again; next map: "nothing changed".
+
+Limit: Go's module cache is shared by every repo, so once a trusted repo has fetched a module an untrusted repo that
+needs it resolves it too (the second cobra copy had 5,934 references untrusted). Fetching runs none of the repo's code
+and go.sum pins each module.
