@@ -1076,7 +1076,7 @@ because an agent can switch to the Rust server for looking while it still
 edits through the Goose one; and the suite's own server checks are tried
 as the judge before any new judge is written.
 
-## 2026-11-27T00:30Z — The Rust server forwards the tools it does not have yet to the Goose server
+## 2026-11-27T11:25Z — The Rust server forwards the tools it does not have yet to the Goose server
 
 Step 3 builds the 18 tools that read in the Rust `swan serve`. The other 10
 (the edit, run and rewrite tools) are passed unchanged to a Goose `swan
@@ -1087,7 +1087,7 @@ in docs/superpowers/plans/2026-11-26-rust-serve-read-tools.md). Each
 forwarded tool is removed from the forward when its Rust version passes
 the suite.
 
-## 2026-11-27T15:00Z — The Rust server keeps to the MCP protocol: a call carries a handshake or its own protocol metadata
+## 2026-11-27T13:17Z — The Rust server keeps to the MCP protocol: a call carries a handshake or its own protocol metadata
 
 The question (owner, 2026-11-27): the Goose server answers `tools/call` sent before any `initialize`; the Rust
 server (rmcp 3.12) answers it with -32602. Should the Rust server be as lenient? The owner asked for the answer

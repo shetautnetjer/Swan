@@ -3266,7 +3266,7 @@ binary to be there (step 3's first task). The plan for step 3 is
 docs/superpowers/plans/2026-11-26-rust-serve-read-tools.md, for the owner
 to read before any swarm starts.
 
-## 2026-11-27T11:55Z: `swan serve` in Rust answers the 12 tools `swan query` already knew (step 3, first part)
+## 2026-11-27T11:51Z: `swan serve` in Rust answers the 12 tools `swan query` already knew (step 3, first part)
 
 The Rust program now has `swan serve <map>`: an MCP server on stdin and stdout, on the `rmcp` crate, with
 find_symbol, find_referencing_symbols, get_symbol_at, get_symbols_overview, get_callers, get_callees,
@@ -3296,7 +3296,7 @@ Limits:
   `maps` suite does not pass yet.
 - Each call reopens the map; how long that takes is measured in plan task 5.
 
-## 2026-11-27T12:50Z: the Rust `swan serve` chooses its repo (`--maps`, `use_repo`, `repo`) (step 3, task 2)
+## 2026-11-27T12:17Z: the Rust `swan serve` chooses its repo (`--maps`, `use_repo`, `repo`) (step 3, task 2)
 
 `swan serve --maps <dir>` and bare `swan serve` now start with no repo selected; `use_repo` (listed first, as
 in `TOOLS`) and any read tool's `repo` argument select one, finding its map under the data root or building
@@ -3323,7 +3323,7 @@ Limits:
 - Still not here: what_broke, the four Spread-Wings tools and `possible_callers`, and the forward of the edit
   tools to the Goose server (plan task 4).
 
-## 2026-11-27T14:10Z: the Rust `swan serve` has every tool (step 3, plan task 4)
+## 2026-11-27T13:07Z: the Rust `swan serve` has every tool (step 3, plan task 4)
 
 A third Antigravity swarm added what_broke, the four Spread-Wings tools, `possible_callers` in get_callers, and the
 forward (rust/src/serve_forward.rs): the ten edit tools go unchanged to a Goose `swan serve` child named by
@@ -3355,7 +3355,7 @@ says. No check was changed. Whether the Rust server should accept calls before t
 
 Limits: the Rust binary must sit beside Swan's tools; live mode is the Goose server's until step 4.
 
-## 2026-11-27T12:20Z: a Rust symbol's signature is rust-analyzer's, not its doc comment's first line
+## 2026-11-27T12:06Z: a Rust symbol's signature is rust-analyzer's, not its doc comment's first line
 
 Found by Aya while reading the Rust `swan serve` through Swan's own tools: every Rust function on the
 branch came back with an empty `signature`. In SCIP a symbol's signature is `signature_documentation`
@@ -3382,10 +3382,10 @@ Rust symbol's signature was its doc comment's first line, or empty when it had n
 Limits: the flattener is named by its file size, as the TypeScript patch is; two builds of one size
 would look the same. A map's first run with this build reflattens every map once.
 
-## 2026-11-27T16:40Z: the Rust `swan serve` judged by an IDE and timed (step 3, plan task 5)
+## 2026-11-27T13:35Z: the Rust `swan serve` judged by an IDE and timed (step 3, plan task 5)
 
 The branch with main merged in (59755ce, the signature fix): the whole suite in the microVM, 58 + 334 checks and 66
-Python tests, 0 failed; every suite that starts a server gives the Goose server's result (the table at 14:10Z, run
+Python tests, 0 failed; every suite that starts a server gives the Goose server's result (the table at 13:07Z, run
 again on this tree, the same). `cargo test` in the microVM: all pass but one, `a_server_does_not_outlive_a_killed_swan`
 (tests/live.rs): it fails there 3 of 3 here and 2 of 2 on `rust-broke-reasons` (249f7cb) too, and passes on the host;
 it came with that branch and is not this one's.
@@ -3433,7 +3433,7 @@ as each other: the switch is not held up by speed.
 - The Rust binary must sit beside Swan's tools (bin/spread-wings, bin/swan-flatten); packaging is step 6.
 - No agent's `swan serve` entry points at the Rust binary yet: that waits for the owner's word.
 
-## 2026-11-27T18:10Z: GoLand against the Rust server, cobra (step 3, plan task 5, the Go half)
+## 2026-11-27T13:48Z: GoLand against the Rust server, cobra (step 3, plan task 5, the Go half)
 
 On the owner's word the cobra copy was trusted (`swan trust`), so its Go dependencies were fetched and gopls loaded
 its packages: 5,934 references where the untrusted map had 0. The same judge, 20 functions and methods of cobra
