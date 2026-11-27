@@ -2320,7 +2320,12 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
         }
     }
     write_file(str(out, "/content-stamps.tsv"), stamp_lines);
-    if !clean && reused_all && file_exists(db) && file_exists(str(out, "/occurrences.tsv")) {
+    // The rows are the flattener's reading of the indexes, so a map made by another swan-flatten is flattened
+    // again even when no indexer ran (2026-11-27: a fix to Rust signatures otherwise never reached a reused map).
+    let flat_id = str("swan-flatten\t", swan_file_size(str(home, "/bin/swan-flatten")), "\n");
+    var flat_was: u8[>..] = [];
+    let same_flattener = read_file(str(out, "/flattener.txt"), flat_was) && flat_was == flat_id;
+    if !clean && reused_all && same_flattener && file_exists(db) && file_exists(str(out, "/occurrences.tsv")) {
         // No indexer ran, but files edited only in comments or layout still
         // need their rows moved.
         idx_new.append(idx_prev);
@@ -2354,7 +2359,7 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
     // after the rows are in the database, and removed before a flatten.
     let flat_marker = str(out, "/flattened-inputs.txt");
     var flat_prev: u8[>..] = [];
-    if !clean && fresh_scips.len == 0 && file_exists(db) && file_exists(str(out, "/occurrences.tsv")) &&
+    if !clean && same_flattener && fresh_scips.len == 0 && file_exists(db) && file_exists(str(out, "/occurrences.tsv")) &&
        read_file(flat_marker, flat_prev) && flat_prev == scips {
         idx_new.append(idx_prev);
         finish_cosmetic(false);
@@ -2415,6 +2420,7 @@ fn map_main_locked(repo: const u8[:], out: const u8[:], report: u8[>..]&, clean:
     }
     index_main_locked(out, db, repo, !clean && file_exists(db), report);
     write_file(flat_marker, scips);
+    write_file(str(out, "/flattener.txt"), flat_id);
     var docs: u8[>..] = [];
     read_file(str(out, "/documents.tsv"), docs);
     note_indexed(docs);
