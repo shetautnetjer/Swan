@@ -29,6 +29,9 @@
 # Turn it off: point the agent back at another binary (claude mcp add ...) or
 # remove the MCP entry; versions/<rev> folders can be deleted once unused.
 set -euo pipefail
+# `update` runs pack inside $(...): without this a failed build there was not the end of pack, which went on to
+# package nothing and named the wrong cause (2026-11-27).
+shopt -s inherit_errexit
 
 die() { echo "swan-up: $*" >&2; exit 1; }
 say() { echo "swan-up: $*"; }
@@ -41,6 +44,8 @@ cmd_pack() {
     --repo) repo="$2"; shift 2;; --ref) ref="$2"; shift 2;; --out) out="$2"; shift 2;;
     *) die "pack: unknown option $1";; esac; done
   [ -n "$repo" ] || repo="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+  # Absolute: the build runs in its own worktree, where a relative path to the Goose compiler points nowhere.
+  repo="$(cd "$repo" && pwd)" || die "pack: no folder $repo"
   local goose="${GOOSE:-$repo/.tools/goose/goose-v2026.3-linux-x64/goose}"
   [ -x "$goose" ] || die "pack needs the Goose compiler (set GOOSE=...); not found at $goose"
   local rev; rev="$(git -C "$repo" rev-parse --verify "$ref^{commit}")" || die "unknown ref $ref"
@@ -375,6 +380,7 @@ cmd_update() {
     --maps) maps="$2"; shift 2;; --keep) keep="$2"; shift 2;; --dry-run) dry=1; shift;;
     *) die "update: unknown option $1";; esac; done
   [ -n "$repo" ] || repo="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+  repo="$(cd "$repo" && pwd)" || die "update: no folder $repo"
   git -C "$repo" rev-parse --git-dir >/dev/null 2>&1 || die "update runs from a Swan checkout (or pass --repo DIR)"
   case "$keep" in ''|*[!0-9]*) die "update: --keep takes a number";; esac
   root="$(mkdir -p "$root" && cd "$root" && pwd)"
@@ -405,7 +411,8 @@ cmd_update() {
     case "$v" in "$root"/versions/?*) ;; *) die "refusing to remove $v";; esac
     size="$(du -sm "$v" 2>/dev/null | cut -f1)"; size="${size:-0}"
     if [ -n "$dry" ]; then say "would remove $name ($size MB)"
-    else rm -rf -- "${v:?}"; say "removed $name ($size MB)"; fi
+    # Go keeps its module cache (.tools/go-mod) read-only, which rm -rf cannot remove: write access first.
+    else chmod -R u+w -- "${v:?}" && rm -rf -- "${v:?}"; say "removed $name ($size MB)"; fi
     freed=$((freed + size))
   done
   [ "$freed" -gt 0 ] && say "$([ -n "$dry" ] && echo "would free" || echo "freed") $freed MB"

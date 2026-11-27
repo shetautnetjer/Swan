@@ -2240,3 +2240,18 @@ Rust symbol's signature was its doc comment's first line, or empty when it had n
 
 Limits: the flattener is named by its file size, as the TypeScript patch is; two builds of one size
 would look the same. A map's first run with this build reflattens every map once.
+
+## 2026-11-27T15:40Z: `swan-up update` installs main again
+
+Found by Aya while installing main after #82. Three faults in scripts/swan-up, each seen in that run:
+
+| Fault | What it did | Now |
+|---|---|---|
+| `--repo .` (relative) | the Goose compiler's path was relative to the checkout, and the build runs in its own worktree: "goose: No such file" | `--repo` is made absolute first, in pack and in update |
+| a failed build inside `update` | pack runs in `$(...)`, where bash does not keep `set -e`: it went on and failed in package.py with "--flatten is required", hiding the cause | `shopt -s inherit_errexit`: it stops at "swan-up: build failed", exit 1, nothing installed (tried with GOOSE=/bin/false) |
+| removing an old version | Go's module cache (`.tools/go-mod`) is read-only: `rm -rf` failed and `update` ended with exit 1 after installing | write access first, then remove: two old versions removed, 3,786 MB, exit 0 |
+
+The real update from a relative `--repo .` then installed 59755ce (`doctor: ready`).
+
+Left: a version folder half removed by the old cleanup (be36a5fcfef7) is kept as "the version before", as the
+newest by time; the one to go back to is picked by modification time, which the failed removal had touched.
