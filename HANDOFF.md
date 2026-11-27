@@ -89,8 +89,10 @@ plan (docs/superpowers/plans/), and the lead checks it outside the swarm.
    each on his word.
 3. **`swan serve` in Rust, the tools that read first** (find, references,
    callers with `possible_callers`, overview, diagnostics, what_broke).
-   The suite's 58 checks of the server speak to it over its protocol: try
-   them against the Rust server as its judge before writing a new one.
+   **Done** on branch `rust-serve` (STATUS.md, 2026-11-27T14:10Z and 16:40Z): all 28 tools, the
+   edit tools and `live: true` forwarded to the Goose server (the owner's decision A); every suite
+   that starts a server gives the Goose server's result; RustRover agrees on relate (20 questions).
+   Not judged: cobra (its Go dependencies are fetched only for a trusted repo; the owner's call).
 4. The server that stays running and is told of edits ("The work, in
    order", item 2).
 5. The tools that edit and check.

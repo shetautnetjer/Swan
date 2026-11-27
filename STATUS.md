@@ -3381,3 +3381,54 @@ Rust symbol's signature was its doc comment's first line, or empty when it had n
 
 Limits: the flattener is named by its file size, as the TypeScript patch is; two builds of one size
 would look the same. A map's first run with this build reflattens every map once.
+
+## 2026-11-27T16:40Z: the Rust `swan serve` judged by an IDE and timed (step 3, plan task 5)
+
+The branch with main merged in (59755ce, the signature fix): the whole suite in the microVM, 58 + 334 checks and 66
+Python tests, 0 failed; every suite that starts a server gives the Goose server's result (the table at 14:10Z, run
+again on this tree, the same). `cargo test` in the microVM: all pass but one, `a_server_does_not_outlive_a_killed_swan`
+(tests/live.rs): it fails there 3 of 3 here and 2 of 2 on `rust-broke-reasons` (249f7cb) too, and passes on the host;
+it came with that branch and is not this one's.
+
+### RustRover against the Rust server, relate
+
+`scripts/ide-judge.py` (new): 20 functions and methods of relate's Rust, picked by a fixed order from the map, whose
+name appears as a word in at most 150 places. The IDE's answer to a question is every one of those places its
+`get_symbol_info` resolves to the same symbol as the definition. A fresh copy of the trial clone at 2e47f55, mapped
+by the Swan installed from main; RustRover read it, nothing was edited.
+
+| Tool | Agrees with the IDE |
+|---|---|
+| find_referencing_symbols, references in code (file and line) | 71 of 71; none the IDE does not have |
+| get_callers, call sites at distance 1 | 62 of 62 are places the IDE confirms |
+| get_symbol_at, at each place the IDE confirms | 71 of 71 |
+| references in doc comments (`[name]` links) | the IDE counts 3, the map none: rust-analyzer's index does not |
+
+RustRover's `analyze_calls` found no Rust function by any name form tried (`crate::module::f`, `module::f`, `f`,
+`Type::method`), so the call hierarchy was not used: get_callers is judged by its call sites.
+
+Not judged: cobra (Go). Mapped as an untrusted repo, gopls has no package metadata (its dependencies are fetched only
+into a trusted repo's module cache), so the map has 0 references and there is nothing to compare. Trusting a trial
+folder, or filling the module cache by hand, is the owner's call.
+
+### Time, the Goose server against the Rust one, relate
+
+The same 20 questions, each 5 times, one server per tool and run (ms per call, as the client sees it):
+
+| Tool | Goose median | Goose p90 | Rust median | Rust p90 |
+|---|---|---|---|---|
+| find_symbol | 0.2 | 8.6 | 0.2 | 8.8 |
+| find_referencing_symbols | 0.5 | 7.3 | 0.4 | 6.9 |
+| get_symbol_at | 0.1 | 0.1 | 0.1 | 0.1 |
+| get_callers (with `possible_callers`, Spread-Wings) | 107.1 | 113.7 | 108.0 | 113.5 |
+| start, initialize and the first find_symbol | 1 | | 1 | |
+| start, initialize and the first get_callers | 108 | | 108 | |
+
+The first get_callers on a map builds Spread-Wings' graph once (6.6 s on relate, cached after). The two are as fast
+as each other: the switch is not held up by speed.
+
+### What is not done
+
+- The 10 edit tools and `live: true` are the Goose server's (decision A), until steps 4 and 5.
+- The Rust binary must sit beside Swan's tools (bin/spread-wings, bin/swan-flatten); packaging is step 6.
+- No agent's `swan serve` entry points at the Rust binary yet: that waits for the owner's word.
