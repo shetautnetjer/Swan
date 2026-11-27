@@ -3432,3 +3432,25 @@ as each other: the switch is not held up by speed.
 - The 10 edit tools and `live: true` are the Goose server's (decision A), until steps 4 and 5.
 - The Rust binary must sit beside Swan's tools (bin/spread-wings, bin/swan-flatten); packaging is step 6.
 - No agent's `swan serve` entry points at the Rust binary yet: that waits for the owner's word.
+
+## 2026-11-27T18:10Z: GoLand against the Rust server, cobra (step 3, plan task 5, the Go half)
+
+On the owner's word the cobra copy was trusted (`swan trust`), so its Go dependencies were fetched and gopls loaded
+its packages: 5,934 references where the untrusted map had 0. The same judge, 20 functions and methods of cobra
+(adbc881):
+
+| Tool | Agrees with GoLand |
+|---|---|
+| find_referencing_symbols, references in code | 52 of 52; 31 more, all of one symbol (below) |
+| get_callers, call sites at distance 1 | 49 of 49 outside that symbol |
+| get_symbol_at, at each place the IDE confirms | 52 of 52 |
+| references in doc comments | the IDE counts 12, the map none |
+
+The one difference: `flagCompError/Error`. gopls counts the 31 calls of `err.Error()` on the `error` interface as
+references to every method that implements it; GoLand counts none. The answer is gopls's, through the map, and the
+Goose server gives the same; for an agent asking who calls this method it is 31 lines of calls through the interface.
+Telling those apart (a reference "through the interface") is a possible next change to the map, not to the server.
+
+The judge was fixed twice on the way, and its relate numbers do not change (RustRover's documentation has no table):
+GoLand's documentation opens with a table ("| Package: |"), so the symbol's key is now the first two lines that are
+not table markup; and a name path matches every symbol whose path ends with it, so only the symbol asked is scored.

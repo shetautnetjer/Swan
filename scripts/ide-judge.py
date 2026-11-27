@@ -36,7 +36,11 @@ def ide_key(path, line, col):
     if doc is None:
         try: doc = json.loads(((res.get("content") or [{}])[0]).get("text", "{}")).get("documentation")
         except Exception: doc = None
-    return "\n".join(doc.splitlines()[:2]) if doc else None
+    # The symbol's container and signature: the first two lines that are not table markup. GoLand opens its
+    # documentation with a table ("| Package: |"), which alone would make unrelated symbols look the same.
+    if not doc: return None
+    lines = [l.strip() for l in doc.splitlines() if l.strip() and not re.fullmatch(r"[|\- ]*(Package:)?[|\- ]*", l.strip())]
+    return "\n".join(lines[:2])
 
 # --- the swan server (stdio MCP) ---
 p = subprocess.Popen([swan, "serve", db], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
@@ -86,7 +90,9 @@ for name, np, f, line, col, hits in qs:
     refs_txt = swan_call("find_referencing_symbols", {"name_path": np, "relative_path": f})
     try: refs = json.loads(refs_txt)
     except Exception: refs = []
-    swan_refs = {(r["relative_path"], r["line"]) for e in refs for r in e.get("references", [])}
+    # A name path matches every symbol whose path ends with it (a method and a function of one name): score the one asked.
+    swan_refs = {(r["relative_path"], r["line"]) for e in refs if e.get("symbol", {}).get("name_path") == np
+                 for r in e.get("references", [])}
     callers_txt = swan_call("get_callers", {"name_path": np, "relative_path": f})
     try: callers = json.loads(callers_txt).get("callers", [])
     except Exception: callers = []
