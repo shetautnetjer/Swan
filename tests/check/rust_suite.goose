@@ -138,6 +138,15 @@ fn rust_suite() {
     var out: u8[>..] = [];
     guard sh(argv(["scripts/index-repo.sh", "fixtures/tiny-rs", "data/tiny-rs"]), "", out) else { return; }
 
+    // rust-analyzer gives a symbol's signature in SCIP's signature_documentation, not its documentation: the map
+    // used to take the doc comment's first line, so Tile/new (no doc comment) had none.
+    var sg: u8[>..] = [];
+    guard sh(argv(["bin/swan", "query", "data/tiny-rs/swan.db", "symbol", "Tile/new"]), "", sg) else { return; }
+    var dsg: json::Node[>..] = []; var xsg: u8[>..] = [];
+    let rsg, esg = json::parse(sg, dsg, xsg);
+    check("a Rust function's signature is rust-analyzer's: Tile/new is `pub fn new(side: u32) -> Tile`",
+          jstr(nth(rsg, 0), "signature") == "pub fn new(side: u32) -> Tile", sg);
+
     var t1: u8[>..] = [];
     guard sh(argv(["bin/swan", "query", "data/tiny-rs/swan.db", "impls", "Area"]), "", t1) else { return; }
     var d1: json::Node[>..] = []; var x1: u8[>..] = [];

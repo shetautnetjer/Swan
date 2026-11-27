@@ -758,6 +758,11 @@ fn symbol_info(r: &mut Reader, path: &str, syms: &mut Vec<(String, String)>, rel
     let mut enclosing = String::new();
     let mut doc = String::new();
     let mut prose = String::new();
+    // SCIP's signature_documentation (field 7, a Document whose text is field 5). rust-analyzer puts a symbol's
+    // signature there and only its doc comment in documentation (field 3), so without this a Rust symbol's
+    // signature was its doc comment's first line, or empty. Indexers that leave field 7 out (scip-typescript puts
+    // the signature at the top of documentation) keep the first documentation line.
+    let mut sig_doc = String::new();
     let mut related: Vec<(String, String)> = Vec::new();
     r.fields(|f, wt, s| match f {
         1 => symbol = clean(&s.string()),
@@ -779,6 +784,11 @@ fn symbol_info(r: &mut Reader, path: &str, syms: &mut Vec<(String, String)>, rel
         5 if wt == 0 => kind = s.varint(),
         6 => display = s.string().into_owned(),
         8 => enclosing = s.string().into_owned(),
+        7 => s.fields(|df, _, x| {
+            if df == 5 {
+                sig_doc = x.string().split('\n').map(js_trim).filter(|l| !l.is_empty()).collect::<Vec<_>>().join(" ");
+            }
+        }),
         4 => {
             let mut other = String::new();
             let mut flags: Vec<&str> = Vec::new();
@@ -805,7 +815,7 @@ fn symbol_info(r: &mut Reader, path: &str, syms: &mut Vec<(String, String)>, rel
         row.push('\t');
         row.push_str(&enclosing);
         row.push('\t');
-        row.push_str(&slice16(&clean(&doc), 200));
+        row.push_str(&slice16(&clean(if sig_doc.is_empty() { &doc } else { &sig_doc }), 200));
         row.push('\t');
         row.push_str(&slice16(&clean(&prose), 600));
         if !path.is_empty() {
