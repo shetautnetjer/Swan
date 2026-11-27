@@ -1086,3 +1086,34 @@ The owner chose this over a read-only Rust server on 2026-11-27 (option A
 in docs/superpowers/plans/2026-11-26-rust-serve-read-tools.md). Each
 forwarded tool is removed from the forward when its Rust version passes
 the suite.
+
+## 2026-11-27T15:00Z — The Rust server keeps to the MCP protocol: a call carries a handshake or its own protocol metadata
+
+The question (owner, 2026-11-27): the Goose server answers `tools/call` sent before any `initialize`; the Rust
+server (rmcp 3.12) answers it with -32602. Should the Rust server be as lenient? The owner asked for the answer
+from what agents need, researched first.
+
+What MCP is now: the 2026-07-28 revision retired the `initialize` handshake. A modern client sends a
+`server/discover` probe, or nothing, and every request carries its protocol version, client capabilities and
+client info in `params._meta`; a client that finds a pre-2026 server falls back to the handshake
+(https://py.sdk.modelcontextprotocol.io/protocol-versions/). The revisions before it require the handshake first
+(https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle).
+
+Measured on tiny-ts:
+
+| Request | Goose server | Rust server |
+|---|---|---|
+| `initialize`, then `tools/call` (every pre-2026 client) | answers | answers |
+| `server/discover` (a 2026-07-28 client's probe) | -32601 method not found | answers: versions 2024-11-05 to 2026-07-28 |
+| `tools/call` with 2026-07-28 `_meta`, no handshake | answers | answers |
+| `tools/call` with neither | answers | -32602, naming the missing `_meta` fields |
+
+Decided: strict, as rmcp is. Being lenient would only add an answer to the last row, a request that is neither
+version of the protocol: the server would have to guess the client's version and capabilities, which the 2026
+revision reads per request (to decide, for one, whether it may answer `input_required`). The known clients that
+skip the handshake do it when resuming an HTTP/SSE session after a server restart (python-sdk issues #423, #2579,
+Claude Code among them); Swan is served over stdio, one process per agent session, which the client starts and
+initializes itself. The refusal is immediate and names what is missing, so a client that gets it wrong learns why
+rather than hanging. The Rust server is also the one of the two that a current client reaches in one round trip.
+
+The checks are unchanged: under SWAN_SERVE_BIN the harness's `mcp_open` does the handshake a client does.
