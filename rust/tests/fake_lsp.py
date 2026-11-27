@@ -44,8 +44,17 @@ mode = sys.argv[1]
 out = sys.stdout.buffer
 lock = threading.Lock()
 texts = {}
+versions = {}
 state = {"busy": True, "loading": mode == "pull", "pending": [], "late": False}
 root = ""
+events = os.environ.get("FAKE_EVENTS")
+
+
+def record(method, params):
+    if events:
+        with lock:
+            with open(events, "a") as f:
+                f.write(json.dumps({"method": method, "params": params}) + "\n")
 
 
 def send(obj):
@@ -77,7 +86,10 @@ def found(text):
 
 
 def publish(uri, items, version: "int | None" = 1):
-    notify("textDocument/publishDiagnostics", {"uri": uri, "version": version, "diagnostics": items})
+    params = {"uri": uri, "diagnostics": items}
+    if version is not None:
+        params["version"] = version
+    notify("textDocument/publishDiagnostics", params)
 
 
 BUILD_SCRIPTS = "Failed to run build scripts of some packages.\n\nPlease refer to the language server logs for more details on the errors."
@@ -101,7 +113,8 @@ def check(uri):
         return
 
     def done():
-        publish(uri, found(texts[uri]))
+        if uri in texts:
+            publish(uri, found(texts[uri]), version=versions.get(uri, 1))
         notify("$/progress", {"token": token, "value": {"kind": "end"}})
     later(0.5, done)
 
@@ -109,7 +122,9 @@ def check(uri):
 def ready():
     state["busy"] = False
     status(BUILD_SCRIPTS if mode == "check-warns" else SYSROOT if mode == "check-sysroot" else None)
-    for uri in state["pending"]:
+    pending = list(state["pending"])
+    state["pending"].clear()
+    for uri in pending:
         check(uri)
 
 
@@ -162,18 +177,26 @@ def main():
                 later(0.6, ready)
             continue
         if method == "textDocument/didOpen":
+            record(method, params)
             doc = params["textDocument"]
             uri = doc["uri"]
+            ver = doc.get("version", 1)
             texts[uri] = doc["text"]
+            versions[uri] = ver
             if mode == "publish":
-                publish(uri, [], version=0)
-                later(0.5, lambda: publish(uri, found(texts[uri])))
+                publish(uri, [], version=ver - 1)
+                later(0.5, lambda u=uri, v=ver: publish(u, found(texts[u]), version=v) if versions.get(u) == v else None)
+            elif mode == "publish-noversion":
+                later(0.2, lambda u=uri, v=ver: publish(u, found(texts[u]), version=None) if versions.get(u) == v else None)
+            elif mode == "idle-publish":
+                later(0.1, lambda u=uri, v=ver: publish(u, found(texts[u]), version=None) if versions.get(u) == v else None)
+                later(0.6, lambda u=uri, v=ver: publish(u, found(texts[u]), version=None) if versions.get(u) == v else None)
             elif mode == "quiet":
                 if found(doc["text"]):
-                    later(0.5, lambda: publish(uri, found(texts[uri]), version=None))
+                    later(0.5, lambda u=uri, v=ver: publish(u, found(texts[u]), version=None) if versions.get(u) == v else None)
                 later(0.7, lambda: notify("window/logMessage", {"type": 3, "message": "still here"}))
             elif mode.startswith("check"):
-                publish(uri, [])
+                publish(uri, [], version=ver)
             elif mode == "die":
                 later(0.3, lambda: os._exit(3))
             elif mode == "late":
@@ -181,13 +204,42 @@ def main():
                 later(0.05, lambda: work(True))
                 later(0.55, lambda: work(False))
             continue
+        if method == "textDocument/didChange":
+            record(method, params)
+            doc = params["textDocument"]
+            uri = doc["uri"]
+            ver = doc.get("version", versions.get(uri, 0) + 1)
+            old_text = texts.get(uri, "")
+            changes = params.get("contentChanges") or []
+            if changes:
+                texts[uri] = changes[-1].get("text", "")
+            versions[uri] = ver
+            if mode == "publish":
+                publish(uri, found(old_text), version=ver - 1)
+                later(0.5, lambda u=uri, v=ver: publish(u, found(texts[u]), version=v) if versions.get(u) == v else None)
+            elif mode == "publish-noversion":
+                later(0.2, lambda u=uri, v=ver: publish(u, found(texts[u]), version=None) if versions.get(u) == v else None)
+            elif mode == "idle-publish":
+                later(0.5, lambda u=uri, v=ver: publish(u, found(texts[u]), version=None) if versions.get(u) == v else None)
+            elif mode == "quiet":
+                if found(texts[uri]):
+                    later(0.5, lambda u=uri, v=ver: publish(u, found(texts[u]), version=None) if versions.get(u) == v else None)
+                later(0.7, lambda: notify("window/logMessage", {"type": 3, "message": "still here"}))
+            continue
         if method == "textDocument/didSave":
+            record(method, params)
             uri = params["textDocument"]["uri"]
             if mode.startswith("check"):
                 if state["busy"]:
                     state["pending"].append(uri)
                 else:
                     check(uri)
+            continue
+        if method == "textDocument/didClose":
+            record(method, params)
+            uri = params["textDocument"]["uri"]
+            texts.pop(uri, None)
+            versions.pop(uri, None)
             continue
         if ident is None:
             continue
@@ -211,7 +263,7 @@ def main():
             send({"jsonrpc": "2.0", "id": ident, "result": {"kind": "full", "items": items}})
         elif method == "textDocument/definition" and state["late"]:
             send({"jsonrpc": "2.0", "id": ident, "result": []})
-        elif method == "textDocument/definition":
+        elif method in ("textDocument/definition", "textDocument/implementation"):
             rng = {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 1}}
             send({"jsonrpc": "2.0", "id": ident, "result": [{"uri": root + "/b.fake", "range": rng}]})
         else:

@@ -33,6 +33,7 @@ mod scip;
 mod seal;
 mod serve;
 mod serve_forward;
+mod serve_live;
 mod serve_read;
 mod serve_repo;
 mod serve_tools;

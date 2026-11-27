@@ -5,18 +5,17 @@
 // lessons are carried here with their reasons.
 //
 // The contract: the file on disk is the truth. A question reads the file,
-// opens it in the server (didOpen) with that text, and asks. The server is
-// never told that a file changed (didChange): each command asks about a
-// file once, so nothing here could use it, and a scripted server would not
-// prove it. A second question about a file whose text on disk is no longer
-// the text sent is refused, plainly, rather than answered from the old
-// text. Whoever keeps a server running across edits builds the re-sync,
-// with a real server's test.
+// opens it in the server (didOpen) on first use, or sends the whole new text
+// (didChange, version + 1) followed by didSave when its text on disk differs
+// from what was last sent. A file deleted since it was sent gets didClose
+// before the read error is returned.
 //
-// Every wait of a command shares one deadline, its budget (100 s, or
-// SWAN_LIVE_BUDGET_MS), so the command ends on its own before the hook that
-// runs swan broke kills it at 120 s. A settle that does not happen by then is
-// not settled, and never a clean answer.
+// Each one-shot command (swan lsp-ask, swan broke) shares one deadline, its
+// budget (100 s, or SWAN_LIVE_BUDGET_MS), so the command ends on its own
+// before the hook that runs swan broke kills it at 120 s. A long-lived caller
+// (swan serve) calls begin(deadline) before each question so every question
+// has its own budget. A settle that does not happen by then is not settled,
+// and never a clean answer.
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -95,6 +94,7 @@ pub struct Live {
     repo: Vec<u8>,
     log: Vec<u8>,
     deadline: Instant,
+    per_question: bool,
     opened: HashMap<Vec<u8>, Sent>,
 }
 
@@ -102,6 +102,7 @@ pub struct Live {
 struct Sent {
     text: String,
     uri: String,
+    version: i64,
     at: Instant,
     publishes: u64,
     checks: u64,
@@ -123,7 +124,18 @@ impl Live {
             Err(LspError::Timeout(_)) => return Err(Refusal { reason: Reason::Failed, why: format!("the {lang} language server did not start {}; see {}", within(), lossy(&log)) }),
             Err(e) => return Err(Refusal { reason: Reason::Failed, why: format!("the {lang} language server did not start: {e}; see {}", lossy(&log)) }),
         };
-        Ok(Live { client, lang: lang.to_string(), language_id: spec.language_id, settle: spec.settle, repo: repo.to_vec(), log, deadline, opened: HashMap::new() })
+        Ok(Live { client, lang: lang.to_string(), language_id: spec.language_id, settle: spec.settle, repo: repo.to_vec(), log, deadline, per_question: false, opened: HashMap::new() })
+    }
+
+    /// Sets the deadline for the next question when one Live serves many.
+    pub fn begin(&mut self, deadline: Instant) {
+        self.deadline = deadline;
+        self.per_question = true;
+    }
+
+    /// Whether the server process is still running and its channel is open.
+    pub fn is_alive(&mut self) -> bool {
+        self.client.is_alive()
     }
 
     /// Any request about a file (its path from the repo), at a place in it
@@ -150,7 +162,7 @@ impl Live {
         self.open(rel)?;
         let key = [&self.repo[..], b"/", rel].concat();
         let sent = &self.opened[rel];
-        let (uri, at, publishes, checks) = (sent.uri.clone(), sent.at, sent.publishes, sent.checks);
+        let (uri, version, at, publishes, checks) = (sent.uri.clone(), sent.version, sent.at, sent.publishes, sent.checks);
         let deadline = self.deadline;
         let settled = match self.settle {
             // The file's next published set for the text sent (pyright, the
@@ -158,13 +170,13 @@ impl Live {
             // for a clean file (lua-language-server) has said all it will
             // once it has been silent that long since the question.
             Settle::Publish { quiet } => {
-                let set = |h: &Heard| current(h, &key, publishes).is_some();
+                let set = |h: &Heard| current(h, &key, publishes, version).is_some();
                 let silent = |h: &Heard| quiet.is_some_and(|q| at.elapsed() >= q && h.last_heard.max(at).elapsed() >= q);
                 let held = self.client.wait_until(deadline, |h| set(h) || silent(h)).map_err(|e| self.said(e))?;
                 if held && set(self.client.heard()) {
                     self.last_set()?;
                 }
-                held.then(|| self.items(&key, publishes))
+                held.then(|| self.items(&key, publishes, version))
             }
             // Asked for (textDocument/diagnostic) once the server is ready
             // (Go's server, through SolidLSP).
@@ -195,7 +207,7 @@ impl Live {
                     return Ok(Diagnosed::Unsettled(self.out_of_time()));
                 }
                 self.last_set()?;
-                let items = self.items(&key, 0);
+                let items = self.items(&key, 0, version);
                 if let Some(said) = self.client.heard().status.as_ref().and_then(check_not_run) {
                     if !items.iter().any(|d| d.severity == "error") {
                         return Ok(Diagnosed::Unsettled(format!("not settled: {said}")));
@@ -212,24 +224,68 @@ impl Live {
     }
 
     /// Shuts the server down with what is left of the budget, 3 s at most.
+    /// When begin() was used for per-question budgets, always allows up to 3 s
+    /// so a long-lived server still shuts down cleanly after an idle stretch
+    /// or a timed-out question.
     pub fn stop(self) {
-        let t = self.left().min(Duration::from_secs(3));
+        let t = if self.per_question { Duration::from_secs(3) } else { self.left().min(Duration::from_secs(3)) };
         self.client.shutdown_within(t);
     }
 
-    // The file's text as it is on disk now, sent to the server unless it was
-    // sent already: its URI. A file whose text changed since is refused.
-    fn open(&mut self, rel: &[u8]) -> Result<String, String> {
-        let text = read_text(&[&self.repo[..], b"/", rel].concat(), rel)?;
-        if let Some(sent) = self.opened.get(rel) {
-            if sent.text != text {
-                return Err(format!("{} changed on disk after it was sent to the server, which is not told of changes: ask again in a new command", lossy(rel)));
-            }
-            return Ok(sent.uri.clone());
+    /// Shuts the server down with up to grace (capped at 3 s), regardless of
+    /// the current question deadline.
+    pub fn stop_within(self, grace: Duration) {
+        self.client.shutdown_within(grace.min(Duration::from_secs(3)));
+    }
+
+    /// Sends textDocument/didClose and forgets rel if it was opened in this
+    /// server; does nothing when rel was never opened.
+    pub fn close_if_open(&mut self, rel: &[u8]) {
+        if let Some(sent) = self.opened.remove(rel) {
+            let _ = self.client.notify("textDocument/didClose", json!({"textDocument": {"uri": sent.uri}}));
         }
+    }
+
+    /// Ensures the server holds the file's text as it stands on disk now,
+    /// sending didOpen on first use, didChange (whole text, version + 1) and
+    /// didSave when its text changed, or didClose before returning the read
+    /// error if the file was deleted.
+    pub fn open(&mut self, rel: &[u8]) -> Result<String, String> {
+        let path = [&self.repo[..], b"/", rel].concat();
+        let text = match read_text(&path, rel) {
+            Ok(text) => text,
+            Err(err) => {
+                if !sys::file_exists(&path) {
+                    self.close_if_open(rel);
+                }
+                return Err(err);
+            }
+        };
+        if let Some(sent) = self.opened.get(rel) {
+            if sent.text == text {
+                let uri = sent.uri.clone();
+                self.client.drain().map_err(|e| self.said(e))?;
+                return Ok(uri);
+            }
+            let uri = sent.uri.clone();
+            let version = sent.version + 1;
+            self.client.drain().map_err(|e| self.said(e))?;
+            let h = self.client.heard();
+            let next = Sent { text, uri: uri.clone(), version, at: Instant::now(), publishes: h.publishes, checks: checks_ended(h) };
+            let change = json!({
+                "textDocument": {"uri": uri, "version": version},
+                "contentChanges": [{"text": next.text}]
+            });
+            self.client.notify("textDocument/didChange", change).map_err(|e| self.said(e))?;
+            // Tell the server the new text is saved on disk (rust-analyzer starts its check on save).
+            self.client.notify("textDocument/didSave", json!({"textDocument": {"uri": uri}})).map_err(|e| self.said(e))?;
+            self.opened.insert(rel.to_vec(), next);
+            return Ok(uri);
+        }
+        self.client.drain().map_err(|e| self.said(e))?;
         let uri = self.client.uri(rel);
         let h = self.client.heard();
-        let sent = Sent { text, uri: uri.clone(), at: Instant::now(), publishes: h.publishes, checks: checks_ended(h) };
+        let sent = Sent { text, uri: uri.clone(), version: 1, at: Instant::now(), publishes: h.publishes, checks: checks_ended(h) };
         let open = json!({"textDocument": {"uri": uri, "languageId": language_id(&self.language_id, rel), "version": 1, "text": sent.text}});
         self.client.notify("textDocument/didOpen", open).map_err(|e| self.said(e))?;
         if self.settle == Settle::Check {
@@ -264,10 +320,10 @@ impl Live {
         self.client.wait_until(self.deadline, |h| h.last_heard.elapsed() >= SILENCE).map(|_| ()).map_err(|e| self.said(e))
     }
 
-    // The file's set published after the publish numbered after, as items;
-    // none when there is none.
-    fn items(&self, key: &[u8], after: u64) -> Vec<Diag> {
-        current(self.client.heard(), key, after).map(|ds| ds.iter().map(diag).collect()).unwrap_or_default()
+    // The file's set published after the publish numbered after for version,
+    // as items; none when there is none.
+    fn items(&self, key: &[u8], after: u64, version: i64) -> Vec<Diag> {
+        current(self.client.heard(), key, after, version).map(|ds| ds.iter().map(diag).collect()).unwrap_or_default()
     }
 
     fn left(&self) -> Duration {
@@ -284,11 +340,11 @@ impl Live {
 }
 
 // The diagnostics the server last published for the file, if it published
-// them after the publish numbered after and for the text sent (version 1,
-// when it says a version).
-fn current<'a>(h: &'a Heard, key: &[u8], after: u64) -> Option<&'a [Value]> {
+// them after the publish numbered after and for the version sent last (or
+// when the server says no version).
+fn current<'a>(h: &'a Heard, key: &[u8], after: u64, version: i64) -> Option<&'a [Value]> {
     let p = h.published.get(key)?;
-    (p.seq > after && p.version.is_none_or(|v| v == 1)).then_some(&p.diagnostics[..])
+    (p.seq > after && p.version.is_none_or(|v| v == version)).then_some(&p.diagnostics[..])
 }
 
 // rust-analyzer's checks: work under a "flycheck" token (its title is
@@ -441,29 +497,490 @@ fn ask(repo: &[u8], out: &[u8], file: &[u8], method: &str, place: Option<(u32, u
 mod tests {
     use super::*;
     use std::os::unix::ffi::OsStringExt;
+    use std::path::{Path, PathBuf};
+    use std::process::Command;
 
-    // Asked again about a file whose text on disk is still what was sent, the
-    // server answers; once the text has changed, the question is refused
-    // rather than answered from the text the server holds.
+    struct Scratch(PathBuf);
+
+    impl Scratch {
+        fn new(name: &str) -> (Scratch, Vec<u8>) {
+            let dir = std::env::temp_dir().join(format!("swan-live-unit-{}-{name}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            let real = dir.canonicalize().unwrap();
+            let bytes = real.clone().into_os_string().into_vec();
+            (Scratch(real), bytes)
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn fake_entry(mode: &str, settle: &str, quiet_ms: u64, events: Option<&[u8]>) -> Entry {
+        let fake = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fake_lsp.py");
+        let mut c = json!({"cmd": ["python3", "-I", fake, mode], "language_id": "fake", "settle": settle});
+        if quiet_ms > 0 {
+            c["quiet_ms"] = json!(quiet_ms);
+        }
+        if let Some(ev) = events {
+            c["env"] = json!([format!("FAKE_EVENTS={}", lossy(ev))]);
+        }
+        serde_json::from_value(json!({"match": [".fake"], "lsp": [c]})).unwrap()
+    }
+
+    fn read_events(path: &[u8]) -> Vec<Value> {
+        std::fs::read_to_string(sys::path(path))
+            .unwrap_or_default()
+            .lines()
+            .filter(|l| !l.is_empty())
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect()
+    }
+
+    fn real_entry(lang: &str) -> Entry {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").canonicalize().unwrap();
+        let home = root.to_str().unwrap();
+        let raw = std::fs::read_to_string(root.join("tools/modules.json")).unwrap();
+        let expanded = raw
+            .replace("{tools}", &format!("{home}/.tools"))
+            .replace("{bin}", &format!("{home}/tools/node_modules/.bin"))
+            .replace("{swan}", home);
+        let mods: Value = serde_json::from_str(&expanded).unwrap();
+        serde_json::from_value(mods[lang].clone()).unwrap()
+    }
+
+    fn copy_fixture(fixture: &str, name: &str) -> (Scratch, Vec<u8>, Vec<u8>) {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").canonicalize().unwrap();
+        let (scratch, base) = Scratch::new(name);
+        let repo = PathBuf::from(lossy(&base)).join("repo");
+        let out = PathBuf::from(lossy(&base)).join("out");
+        std::fs::create_dir_all(&out).unwrap();
+        let status = Command::new("cp").arg("-r").arg(root.join("fixtures").join(fixture)).arg(&repo).status().unwrap();
+        assert!(status.success());
+        let _ = std::fs::remove_dir_all(repo.join("target"));
+        let repo_bytes = repo.canonicalize().unwrap().into_os_string().into_vec();
+        let out_bytes = out.canonicalize().unwrap().into_os_string().into_vec();
+        (scratch, repo_bytes, out_bytes)
+    }
+
+    // Editing a file on disk resyncs it via didChange (whole text, version + 1)
+    // and didSave per file independently, and current() waits for the latest
+    // version instead of taking stale older-version publishes.
     #[test]
-    fn a_file_changed_since_it_was_sent_is_refused() {
-        let dir = std::env::temp_dir().join(format!("swan-live-unit-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        let dir = dir.canonicalize().unwrap().into_os_string().into_vec();
+    fn changed_file_sends_did_change_and_did_save_with_incrementing_versions() {
+        let (_guard, dir) = Scratch::new("didchange");
+        let a = [&dir[..], b"/a.fake"].concat();
+        let b = [&dir[..], b"/b.fake"].concat();
+        let events = [&dir[..], b"/events.jsonl"].concat();
+        std::fs::write(sys::path(&a), "fine\nan ERROR here\n").unwrap();
+        std::fs::write(sys::path(&b), "fine\n").unwrap();
+        let entry = fake_entry("publish", "publish", 0, Some(&events));
+        let mut live = Live::start(&Walk::default(), &dir, &dir, "fake", &entry, Instant::now() + Duration::from_secs(20)).unwrap();
+
+        assert!(matches!(live.diagnostics(b"a.fake"), Ok(Diagnosed::Settled(items)) if items.len() == 1));
+        assert!(matches!(live.diagnostics(b"b.fake"), Ok(Diagnosed::Settled(items)) if items.is_empty()));
+
+        // Mend a.fake (v2): fake_lsp immediately publishes stale v1 [ERROR], then v2 [].
+        std::fs::write(sys::path(&a), "fine\n").unwrap();
+        assert!(matches!(live.diagnostics(b"a.fake"), Ok(Diagnosed::Settled(items)) if items.is_empty()));
+
+        // Break a.fake again (v3): fake_lsp publishes stale v2 [], then v3 [ERROR].
+        std::fs::write(sys::path(&a), "line1\nan ERROR again\n").unwrap();
+        assert!(matches!(live.diagnostics(b"a.fake"), Ok(Diagnosed::Settled(items)) if items.len() == 1));
+
+        // Break b.fake (v2, independent of a.fake being at v3).
+        std::fs::write(sys::path(&b), "an ERROR in b\n").unwrap();
+        assert!(matches!(live.diagnostics(b"b.fake"), Ok(Diagnosed::Settled(items)) if items.len() == 1));
+
+        // Request after another edit to a.fake (v4) also resyncs cleanly.
+        std::fs::write(sys::path(&a), "clean for request\n").unwrap();
+        let def = live.request(b"a.fake", "textDocument/definition", Some((1, 1)), Map::new()).unwrap();
+        assert!(def[0]["uri"].as_str().unwrap().ends_with("/b.fake"));
+
+        live.stop();
+
+        let evs = read_events(&events);
+        let summary: Vec<(&str, &str, Option<i64>, Option<&str>)> = evs
+            .iter()
+            .map(|e| {
+                let method = e["method"].as_str().unwrap();
+                let uri = e["params"]["textDocument"]["uri"].as_str().unwrap();
+                let file = uri.rsplit('/').next().unwrap();
+                let ver = e["params"]["textDocument"]["version"].as_i64();
+                let text = e["params"]["contentChanges"][0]["text"].as_str();
+                (method, file, ver, text)
+            })
+            .collect();
+        assert_eq!(
+            summary,
+            vec![
+                ("textDocument/didOpen", "a.fake", Some(1), None),
+                ("textDocument/didOpen", "b.fake", Some(1), None),
+                ("textDocument/didChange", "a.fake", Some(2), Some("fine\n")),
+                ("textDocument/didSave", "a.fake", None, None),
+                ("textDocument/didChange", "a.fake", Some(3), Some("line1\nan ERROR again\n")),
+                ("textDocument/didSave", "a.fake", None, None),
+                ("textDocument/didChange", "b.fake", Some(2), Some("an ERROR in b\n")),
+                ("textDocument/didSave", "b.fake", None, None),
+                ("textDocument/didChange", "a.fake", Some(4), Some("clean for request\n")),
+                ("textDocument/didSave", "a.fake", None, None),
+            ]
+        );
+    }
+
+    // Settle::Check: editing a file sends didChange + didSave, starting a new
+    // check whose diagnostics replace the earlier set.
+    #[test]
+    fn check_mode_rechecks_after_edit_on_disk() {
+        let (_guard, dir) = Scratch::new("check-edit");
+        let file = [&dir[..], b"/a.fake"].concat();
+        let events = [&dir[..], b"/events.jsonl"].concat();
+        std::fs::write(sys::path(&file), "fine\nan ERROR here\n").unwrap();
+        let entry = fake_entry("check", "check", 0, Some(&events));
+        let mut live = Live::start(&Walk::default(), &dir, &dir, "fake", &entry, Instant::now() + Duration::from_secs(20)).unwrap();
+
+        assert!(matches!(live.diagnostics(b"a.fake"), Ok(Diagnosed::Settled(items)) if items.len() == 1));
+        std::fs::write(sys::path(&file), "fine\n").unwrap();
+        assert!(matches!(live.diagnostics(b"a.fake"), Ok(Diagnosed::Settled(items)) if items.is_empty()));
+        live.stop();
+
+        let evs = read_events(&events);
+        let methods: Vec<&str> = evs.iter().map(|e| e["method"].as_str().unwrap()).collect();
+        assert_eq!(methods, ["textDocument/didOpen", "textDocument/didSave", "textDocument/didChange", "textDocument/didSave"]);
+    }
+
+    // Servers that omit version in publishDiagnostics settle on the next
+    // publish after the change; quiet servers settle clean after silence even
+    // when the file had an error on the previous version.
+    #[test]
+    fn quiet_and_noversion_servers_settle_after_edit() {
+        let (_guard, dir) = Scratch::new("quiet-edit");
         let file = [&dir[..], b"/a.fake"].concat();
         std::fs::write(sys::path(&file), "fine\nan ERROR here\n").unwrap();
-        let fake = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fake_lsp.py");
-        let entry: Entry = serde_json::from_value(json!({"match": [".fake"], "lsp": [{"cmd": ["python3", "-I", fake, "publish"], "language_id": "fake"}]})).unwrap();
+        let entry = fake_entry("quiet", "publish", 1000, None);
         let mut live = Live::start(&Walk::default(), &dir, &dir, "fake", &entry, Instant::now() + Duration::from_secs(20)).unwrap();
-        for _ in 0..2 {
-            assert!(matches!(live.diagnostics(b"a.fake"), Ok(Diagnosed::Settled(items)) if items.len() == 1));
-        }
+
+        assert!(matches!(live.diagnostics(b"a.fake"), Ok(Diagnosed::Settled(items)) if items.len() == 1));
         std::fs::write(sys::path(&file), "fine\n").unwrap();
-        let refused = live.request(b"a.fake", "textDocument/definition", Some((1, 1)), Map::new()).unwrap_err();
-        assert!(refused.contains("a.fake changed on disk after it was sent to the server"), "{refused}");
-        assert!(live.diagnostics(b"a.fake").is_err());
+        assert!(matches!(live.diagnostics(b"a.fake"), Ok(Diagnosed::Settled(items)) if items.is_empty()));
+        std::fs::write(sys::path(&file), "an ERROR returns\n").unwrap();
+        assert!(matches!(live.diagnostics(b"a.fake"), Ok(Diagnosed::Settled(items)) if items.len() == 1));
         live.stop();
-        let _ = std::fs::remove_dir_all(sys::path(&dir));
+
+        let (_guard2, dir2) = Scratch::new("noversion-edit");
+        let file2 = [&dir2[..], b"/a.fake"].concat();
+        std::fs::write(sys::path(&file2), "fine\nan ERROR here\n").unwrap();
+        let entry2 = fake_entry("publish-noversion", "publish", 0, None);
+        let mut live2 = Live::start(&Walk::default(), &dir2, &dir2, "fake", &entry2, Instant::now() + Duration::from_secs(20)).unwrap();
+
+        assert!(matches!(live2.diagnostics(b"a.fake"), Ok(Diagnosed::Settled(items)) if items.len() == 1));
+        std::fs::write(sys::path(&file2), "fine\n").unwrap();
+        assert!(matches!(live2.diagnostics(b"a.fake"), Ok(Diagnosed::Settled(items)) if items.is_empty()));
+        live2.stop();
+    }
+
+    // Settle::Pull: textDocument/diagnostic sees edits resynced via didChange.
+    #[test]
+    fn pull_mode_reflects_edits_on_disk() {
+        let (_guard, dir) = Scratch::new("pull-edit");
+        let file = [&dir[..], b"/a.fake"].concat();
+        std::fs::write(sys::path(&file), "fine\nan ERROR here\n").unwrap();
+        let entry = fake_entry("pull", "pull", 0, None);
+        let mut live = Live::start(&Walk::default(), &dir, &dir, "fake", &entry, Instant::now() + Duration::from_secs(20)).unwrap();
+
+        assert!(matches!(live.diagnostics(b"a.fake"), Ok(Diagnosed::Settled(items)) if items.len() == 1));
+        std::fs::write(sys::path(&file), "fine\n").unwrap();
+        assert!(matches!(live.diagnostics(b"a.fake"), Ok(Diagnosed::Settled(items)) if items.is_empty()));
+        live.stop();
+    }
+
+    // A file deleted after it was sent triggers textDocument/didClose and
+    // returns the read error; if recreated later, it opens again at version 1.
+    #[test]
+    fn deleted_file_sends_did_close_and_returns_read_error() {
+        let (_guard, dir) = Scratch::new("deleted");
+        let file = [&dir[..], b"/a.fake"].concat();
+        let events = [&dir[..], b"/events.jsonl"].concat();
+        std::fs::write(sys::path(&file), "fine\nan ERROR here\n").unwrap();
+        let entry = fake_entry("publish", "publish", 0, Some(&events));
+        let mut live = Live::start(&Walk::default(), &dir, &dir, "fake", &entry, Instant::now() + Duration::from_secs(20)).unwrap();
+
+        assert!(matches!(live.diagnostics(b"a.fake"), Ok(Diagnosed::Settled(items)) if items.len() == 1));
+        std::fs::remove_file(sys::path(&file)).unwrap();
+        let err = live.diagnostics(b"a.fake").err().expect("deleted file should error");
+        assert!(err.contains("cannot read a.fake"), "{err}");
+
+        // Recreated file opens fresh at version 1.
+        std::fs::write(sys::path(&file), "fine\n").unwrap();
+        assert!(matches!(live.diagnostics(b"a.fake"), Ok(Diagnosed::Settled(items)) if items.is_empty()));
+        live.stop();
+
+        let evs = read_events(&events);
+        let summary: Vec<(&str, Option<i64>)> = evs
+            .iter()
+            .map(|e| (e["method"].as_str().unwrap(), e["params"]["textDocument"]["version"].as_i64()))
+            .collect();
+        assert_eq!(
+            summary,
+            vec![
+                ("textDocument/didOpen", Some(1)),
+                ("textDocument/didClose", None),
+                ("textDocument/didOpen", Some(1)),
+            ]
+        );
+    }
+
+    // Notifications sent while Live sat idle between questions are drained
+    // before recording publish counters for an edit, so a stale publish is
+    // never mistaken for the post-edit set.
+    #[test]
+    fn drain_discards_stale_publishes_sent_while_idle() {
+        let (_guard, dir) = Scratch::new("idle-drain");
+        let file = [&dir[..], b"/a.fake"].concat();
+        std::fs::write(sys::path(&file), "fine\nan ERROR here\n").unwrap();
+        let entry = fake_entry("idle-publish", "publish", 0, None);
+        let mut live = Live::start(&Walk::default(), &dir, &dir, "fake", &entry, Instant::now() + Duration::from_secs(20)).unwrap();
+
+        assert!(matches!(live.diagnostics(b"a.fake"), Ok(Diagnosed::Settled(items)) if items.len() == 1));
+        std::thread::sleep(Duration::from_millis(500));
+        std::fs::write(sys::path(&file), "fine\n").unwrap();
+        assert!(matches!(live.diagnostics(b"a.fake"), Ok(Diagnosed::Settled(items)) if items.is_empty()));
+        live.stop();
+    }
+
+    // On a quiet server, a publish that arrived while Live sat idle after
+    // open() must be drained before wait_until() evaluates silence, so an
+    // unchanged broken file is never reported clean.
+    #[test]
+    fn unchanged_file_drains_publishes_arrived_while_idle_on_quiet_server() {
+        let (_guard, dir) = Scratch::new("quiet-idle-open");
+        let file = [&dir[..], b"/a.fake"].concat();
+        std::fs::write(sys::path(&file), "fine\nan ERROR here\n").unwrap();
+        let entry = fake_entry("quiet", "publish", 600, None);
+        let mut live = Live::start(&Walk::default(), &dir, &dir, "fake", &entry, Instant::now() + Duration::from_secs(20)).unwrap();
+
+        live.open(b"a.fake").unwrap();
+        // Wait past both the 0.5 s error publish and the 0.6 s quiet window so
+        // the unread publish sits buffered in the channel when diagnostics() runs.
+        std::thread::sleep(Duration::from_millis(900));
+        assert!(matches!(live.diagnostics(b"a.fake"), Ok(Diagnosed::Settled(items)) if items.len() == 1));
+        live.stop();
+    }
+
+    // close_if_open() sends didClose once for an open file, ignores files that
+    // were never opened, and forgets the entry so a later open() sends didOpen v1.
+    #[test]
+    fn close_if_open_notifies_only_when_open_and_forgets_entry() {
+        let (_guard, dir) = Scratch::new("close-if-open");
+        let file = [&dir[..], b"/a.fake"].concat();
+        let events = [&dir[..], b"/events.jsonl"].concat();
+        std::fs::write(sys::path(&file), "fine\n").unwrap();
+        let entry = fake_entry("publish", "publish", 0, Some(&events));
+        let mut live = Live::start(&Walk::default(), &dir, &dir, "fake", &entry, Instant::now() + Duration::from_secs(20)).unwrap();
+
+        live.close_if_open(b"never.fake");
+        assert!(matches!(live.diagnostics(b"a.fake"), Ok(Diagnosed::Settled(items)) if items.is_empty()));
+        live.close_if_open(b"a.fake");
+        live.close_if_open(b"a.fake");
+        assert!(matches!(live.diagnostics(b"a.fake"), Ok(Diagnosed::Settled(items)) if items.is_empty()));
+        live.stop();
+
+        let evs = read_events(&events);
+        let summary: Vec<(&str, Option<i64>)> = evs
+            .iter()
+            .map(|e| (e["method"].as_str().unwrap(), e["params"]["textDocument"]["version"].as_i64()))
+            .collect();
+        assert_eq!(
+            summary,
+            vec![
+                ("textDocument/didOpen", Some(1)),
+                ("textDocument/didClose", None),
+                ("textDocument/didOpen", Some(1)),
+            ]
+        );
+    }
+
+    // begin() sets a fresh deadline for the next question: a short or expired
+    // deadline ends promptly, and a later begin() lets the same Live answer.
+    #[test]
+    fn begin_sets_a_fresh_deadline_per_question() {
+        let (_guard, dir) = Scratch::new("begin-deadline");
+        let file = [&dir[..], b"/a.fake"].concat();
+        std::fs::write(sys::path(&file), "fine\nan ERROR here\n").unwrap();
+        let entry = fake_entry("silent", "publish", 0, None);
+        let mut live = Live::start(&Walk::default(), &dir, &dir, "fake", &entry, Instant::now() + Duration::from_secs(20)).unwrap();
+
+        let t0 = Instant::now();
+        live.begin(Instant::now() + Duration::from_millis(300));
+        assert!(matches!(live.diagnostics(b"a.fake"), Ok(Diagnosed::Unsettled(_))));
+        assert!(t0.elapsed() < Duration::from_secs(2), "took {:?}", t0.elapsed());
+        live.stop();
+
+        let (_guard2, dir2) = Scratch::new("begin-recover");
+        let file2 = [&dir2[..], b"/a.fake"].concat();
+        std::fs::write(sys::path(&file2), "fine\nan ERROR here\n").unwrap();
+        let entry2 = fake_entry("publish", "publish", 0, None);
+        let mut live2 = Live::start(&Walk::default(), &dir2, &dir2, "fake", &entry2, Instant::now() + Duration::from_secs(20)).unwrap();
+
+        live2.begin(Instant::now());
+        assert!(matches!(live2.diagnostics(b"a.fake"), Ok(Diagnosed::Unsettled(_))));
+
+        live2.begin(Instant::now() + Duration::from_secs(20));
+        assert!(matches!(live2.diagnostics(b"a.fake"), Ok(Diagnosed::Settled(items)) if items.len() == 1));
+        live2.stop_within(Duration::from_secs(3));
+    }
+
+    // current() accepts only the set published for the version sent last, or
+    // for a server that omits version, a set published after the change.
+    #[test]
+    fn current_matches_latest_version_and_no_version_by_publishes() {
+        use crate::lsp::Published;
+
+        let key = b"/repo/a.fake".to_vec();
+        let make = |seq: u64, version: Option<i64>| {
+            let mut published = HashMap::new();
+            published.insert(key.clone(), Published { seq, version, diagnostics: vec![json!({"message": "err"})] });
+            Heard { published, publishes: seq, working: HashMap::new(), ended: HashMap::new(), quiescent: None, status: None, last_heard: Instant::now() }
+        };
+
+        let h1 = make(1, Some(1));
+        assert!(current(&h1, &key, 0, 1).is_some());
+        assert!(current(&h1, &key, 0, 2).is_none());
+        assert!(current(&h1, &key, 1, 1).is_none());
+
+        let h2 = make(2, Some(2));
+        assert!(current(&h2, &key, 1, 2).is_some());
+        assert!(current(&h2, &key, 1, 1).is_none());
+
+        let h_none = make(2, None);
+        assert!(current(&h_none, &key, 1, 2).is_some());
+        assert!(current(&h_none, &key, 2, 2).is_none());
+    }
+
+    // is_alive() is true for a running server and false once the server dies
+    // mid-question or exits while idle; open() sends didOpen for warm-up.
+    #[test]
+    fn is_alive_reports_false_after_server_dies() {
+        let (_guard, dir) = Scratch::new("alive");
+        let file = [&dir[..], b"/a.fake"].concat();
+        std::fs::write(sys::path(&file), "fine\n").unwrap();
+        let entry = fake_entry("die", "publish", 0, None);
+        let mut live = Live::start(&Walk::default(), &dir, &dir, "fake", &entry, Instant::now() + Duration::from_secs(20)).unwrap();
+
+        assert!(live.is_alive());
+        let uri = live.open(b"a.fake").unwrap();
+        assert!(uri.ends_with("/a.fake"));
+        assert!(live.diagnostics(b"a.fake").is_err());
+        assert!(!live.is_alive());
+        live.stop();
+    }
+
+    #[test]
+    #[ignore = "requires lua-language-server (.tools/lua-ls/bin/lua-language-server) not present in this scratch copy"]
+    fn lua_live_edit_and_mend_in_same_server() {
+        let (_guard, repo, out) = copy_fixture("lsp-lua", "real-lua");
+        let file = [&repo[..], b"/alpha.lua"].concat();
+        let orig = std::fs::read_to_string(sys::path(&file)).unwrap();
+        std::fs::write(sys::path(&file), format!("{orig}\nlocal broken = (1 +\n")).unwrap();
+        let entry = real_entry("lua");
+        let mut walk = Walk::default();
+        walk.load(&repo, &out);
+        let mut live = Live::start(&walk, &repo, &out, "lua", &entry, Instant::now() + Duration::from_secs(60)).unwrap();
+
+        live.begin(Instant::now() + Duration::from_secs(60));
+        let broken = live.diagnostics(b"alpha.lua").unwrap();
+        assert!(matches!(broken, Diagnosed::Settled(ref items) if items.iter().any(|d| d.severity == "error")));
+        std::fs::write(sys::path(&file), orig).unwrap();
+        live.begin(Instant::now() + Duration::from_secs(60));
+        let fixed = live.diagnostics(b"alpha.lua").unwrap();
+        assert!(matches!(fixed, Diagnosed::Settled(ref items) if !items.iter().any(|d| d.severity == "error")));
+        live.stop_within(Duration::from_secs(3));
+    }
+
+    // Makes <swan_home()>/bin/eggshell point at the repo's bin/eggshell while
+    // a sealed real-server unit test runs, removing only what it created.
+    struct TempEggshell {
+        link: Option<PathBuf>,
+        dir: Option<PathBuf>,
+    }
+
+    impl TempEggshell {
+        fn ensure() -> TempEggshell {
+            let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").canonicalize().unwrap();
+            let src = root.join("bin/eggshell");
+            assert!(src.exists(), "bin/eggshell is missing at {}", src.display());
+            let home = PathBuf::from(lossy(&crate::run::swan_home()));
+            let bin = home.join("bin");
+            let dst = bin.join("eggshell");
+            if dst.exists() {
+                return TempEggshell { link: None, dir: None };
+            }
+            let created_dir = !bin.exists();
+            if created_dir {
+                std::fs::create_dir_all(&bin).unwrap();
+            }
+            std::os::unix::fs::symlink(&src, &dst).unwrap();
+            TempEggshell { link: Some(dst), dir: created_dir.then_some(bin) }
+        }
+    }
+
+    impl Drop for TempEggshell {
+        fn drop(&mut self) {
+            if let Some(link) = &self.link {
+                let _ = std::fs::remove_file(link);
+            }
+            if let Some(dir) = &self.dir {
+                let _ = std::fs::remove_dir(dir);
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "requires rust-analyzer (.tools/rust-analyzer/rust-analyzer) not present in this scratch copy; run with SWAN_TRUST_BUILD=1 for fixtures/tiny-rs"]
+    fn rust_live_edit_and_mend_in_same_server() {
+        let (_guard, repo, out) = copy_fixture("tiny-rs", "real-rust");
+        let file = [&repo[..], b"/src/lib.rs"].concat();
+        let orig = std::fs::read_to_string(sys::path(&file)).unwrap();
+        std::fs::write(sys::path(&file), format!("{orig}\npub fn broken() -> Tile {{ Tile::new(1, 2) }}\n")).unwrap();
+        let entry = real_entry("rust");
+        let mut walk = Walk::default();
+        walk.load(&repo, &out);
+        let mut live = Live::start(&walk, &repo, &out, "rust", &entry, Instant::now() + Duration::from_secs(90))
+            .unwrap_or_else(|r| panic!("rust_live_edit_and_mend_in_same_server requires SWAN_TRUST_BUILD=1 for fixtures/tiny-rs: {}", r.why));
+
+        live.begin(Instant::now() + Duration::from_secs(90));
+        let broken = live.diagnostics(b"src/lib.rs").unwrap();
+        assert!(matches!(broken, Diagnosed::Settled(ref items) if items.iter().any(|d| d.code == "E0061")));
+        std::fs::write(sys::path(&file), orig).unwrap();
+        live.begin(Instant::now() + Duration::from_secs(90));
+        let fixed = live.diagnostics(b"src/lib.rs").unwrap();
+        assert!(matches!(fixed, Diagnosed::Settled(ref items) if !items.iter().any(|d| d.severity == "error")));
+        live.stop_within(Duration::from_secs(3));
+    }
+
+    #[test]
+    #[ignore = "requires gopls, solidlsp (.tools/solidlsp/venv/bin/python) and bin/eggshell not present in this scratch copy"]
+    fn go_live_edit_and_mend_in_same_server() {
+        let _eggshell = TempEggshell::ensure();
+        let (_guard, repo, out) = copy_fixture("tiny-go", "real-go");
+        let file = [&repo[..], b"/main.go"].concat();
+        let orig = std::fs::read_to_string(sys::path(&file)).unwrap();
+        std::fs::write(sys::path(&file), format!("{orig}\nvar broken int = \"text\"\n")).unwrap();
+        let entry = real_entry("go");
+        let mut walk = Walk::default();
+        walk.load(&repo, &out);
+        let mut live = Live::start(&walk, &repo, &out, "go", &entry, Instant::now() + Duration::from_secs(90)).unwrap();
+
+        live.begin(Instant::now() + Duration::from_secs(90));
+        let broken = live.diagnostics(b"main.go").unwrap();
+        assert!(matches!(broken, Diagnosed::Settled(ref items) if items.iter().any(|d| d.severity == "error")));
+        std::fs::write(sys::path(&file), orig).unwrap();
+        live.begin(Instant::now() + Duration::from_secs(90));
+        let fixed = live.diagnostics(b"main.go").unwrap();
+        assert!(matches!(fixed, Diagnosed::Settled(ref items) if !items.iter().any(|d| d.severity == "error")));
+        live.stop_within(Duration::from_secs(3));
     }
 }

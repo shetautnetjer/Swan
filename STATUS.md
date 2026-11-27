@@ -3454,3 +3454,47 @@ Telling those apart (a reference "through the interface") is a possible next cha
 The judge was fixed twice on the way, and its relate numbers do not change (RustRover's documentation has no table):
 GoLand's documentation opens with a table ("| Package: |"), so the symbol's key is now the first two lines that are
 not table markup; and a name path matches every symbol whose path ends with it, so only the symbol asked is scored.
+
+## 2026-11-27T20:30Z: the Rust `swan serve` keeps its language server and is told of edits (step 4)
+
+Plan: docs/superpowers/plans/2026-11-27-rust-serve-live.md, tasks 1 and 2 by an Antigravity swarm, task 3 and the
+fixes below by Aya.
+
+- `Live` (rust/src/live.rs) lives across questions: a deadline per question; a file whose text on disk changed since
+  it was sent goes again as `didChange` (the whole text, the next version) and `didSave`; a deleted one is closed;
+  diagnostics are taken for the version sent last. The refusal "not told of changes" is gone.
+- The server (rust/src/serve_live.rs) keeps one `Live` at a time, as the Goose server does: another language or repo
+  stops it first, a dead one is started again, the server's end stops it. `live: true` on get_diagnostics and
+  find_implementations is answered in Rust with the Goose server's JSON and refusals. `SWAN_WARM` as `live_warm`.
+- Live diagnostics for Java, Kotlin and C# stay the Goose server's (decision A): the Rust `Live` has never run their
+  servers (HANDOFF.md). Everything else live is Rust's.
+
+Judged in the microVM (Rust binary beside Swan's tools):
+
+| | Goose | Rust |
+|---|---|---|
+| live suite | 22 of 28 | 22 of 28 (the same checks) |
+| trust | 20 of 20 | 20 of 20 |
+| game | 28 of 36 | 28 of 36 |
+| kotlin | 1 of 6 | 1 of 6 |
+| diag | 6 of 7 | 6 of 7 |
+| mcp, maps, edit, lang, structural | 31, 27, 16, 131, 31 | the same |
+
+With the Goose server switched off (`SWAN_GOOSE_SERVE=/nonexistent`), the live, game and kotlin suites give the same
+result except the Java and C# checks, the ones forwarded: no other live answer comes from Goose.
+
+Real servers, through the MCP server, plant an error, ask, mend it on disk, ask again in the same server: Rust
+(rust-analyzer, tiny-rs, trusted), Lua and Go pass; the same in `Live` directly for Rust.
+
+Found and fixed on the way:
+- **A killed `swan` left its language server running wherever `/bin/sh` is dash** (Debian, Ubuntu, the microVM). The
+  watcher that kills the server's group when swan dies ran `kill -KILL -- "-<group>"`, which dash refuses ("Illegal
+  number"); `kill -s KILL -- "-<group>"` works in dash and bash. `a_server_does_not_outlive_a_killed_swan` (from
+  `rust-live-answers`) and the new `live_server_does_not_outlive_killed_swan_serve` failed every run in the microVM and
+  passed on this host (bash); with the fix both pass 3 of 3 there. The Goose library kills another way.
+- The server tests that build maps or run Spread-Wings started the binary from cargo's target folder, where swan finds
+  none of its tools (its home is two folders up from itself): rust/tests/common/mod.rs makes a Swan home with the
+  binary under test hard-linked as `bin/swan`, an empty `data/` of its own, and links to the rest. Five `use_repo` tests
+  and the Spread-Wings test, ignored in the swarms' copies, pass in the microVM. Two faults of the first version, both
+  seen: linking `data/` gave the tests the maps a suite run had left there (4 failed after `scripts/test.sh`), and a
+  copied binary was "Text file busy" while other test threads forked.

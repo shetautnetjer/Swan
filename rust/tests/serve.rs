@@ -1,6 +1,8 @@
 // End-to-end checks of `swan serve <db>` over stdin and stdout, porting
 // tests/check/mcp_suite.goose's checks on fixtures/tiny-ts.
 
+mod common;
+
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
@@ -133,7 +135,7 @@ impl Server {
             &[fixture_root.to_str().unwrap()],
         );
 
-        let mut cmd = Command::new(env!("CARGO_BIN_EXE_swan"));
+        let mut cmd = Command::new(common::swan_beside_tools());
         cmd.arg("serve")
             .arg(&db)
             .stdin(Stdio::piped())
@@ -831,4 +833,634 @@ fn wings_tools_end_to_end_with_spread_wings() {
     assert!(bad_text.contains("no definition named"), "{bad_text}");
 
     assert_eq!(srv.close_and_wait(), 0);
+}
+
+// Live mode MCP tests covering resident language servers, refusals, switching and warming.
+
+struct FakeLiveHome {
+    dir: PathBuf,
+    home: PathBuf,
+    repo: PathBuf,
+    map: PathBuf,
+    db: PathBuf,
+}
+
+impl Drop for FakeLiveHome {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.dir);
+    }
+}
+
+fn setup_fake_live_home(name: &str) -> FakeLiveHome {
+    let dir = std::env::temp_dir().join(format!("swan-serve-live-{}-{name}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    let home = dir.join("home");
+    let repo = dir.join("repo");
+    let map = dir.join("map");
+    for d in [home.join("bin"), home.join("tools"), repo.clone(), map.clone()] {
+        fs::create_dir_all(d).unwrap();
+    }
+    fs::copy(env!("CARGO_BIN_EXE_swan"), home.join("bin/swan")).unwrap();
+    let fake = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fake_lsp.py");
+    let mods = json!({
+        "nolsp": {"match": [".nl"]},
+        "fake": {
+            "match": [".fake"],
+            "lsp": [{
+                "cmd": [python(), "-I", fake, "publish"],
+                "language_id": "fake",
+                "settle": "publish",
+                "env": ["FAKE_PIDS={out}/pids", "FAKE_EVENTS={out}/events.jsonl"]
+            }]
+        },
+        "quiet": {
+            "match": [".qt"],
+            "lsp": [{
+                "cmd": [python(), "-I", fake, "quiet"],
+                "language_id": "quiet",
+                "settle": "publish",
+                "quiet_ms": 800,
+                "env": ["FAKE_PIDS={out}/pids", "FAKE_EVENTS={out}/events.jsonl"]
+            }]
+        },
+        "silent": {
+            "match": [".sl"],
+            "lsp": [{
+                "cmd": [python(), "-I", fake, "silent"],
+                "language_id": "silent",
+                "settle": "publish",
+                "env": ["FAKE_PIDS={out}/pids"]
+            }]
+        },
+        "dies": {
+            "match": [".dd"],
+            "lsp": [{
+                "cmd": [python(), "-I", fake, "die"],
+                "language_id": "dies",
+                "settle": "publish",
+                "env": ["FAKE_PIDS={out}/pids"]
+            }]
+        },
+        "stubborn": {
+            "match": [".st"],
+            "lsp": [{
+                "cmd": [python(), "-I", fake, "stubborn"],
+                "language_id": "stubborn",
+                "settle": "publish",
+                "env": ["FAKE_PIDS={out}/pids"]
+            }]
+        },
+        "guarded": {
+            "match": [".tr"],
+            "lsp": [{
+                "cmd": [python(), "-I", fake, "publish"],
+                "language_id": "guarded",
+                "settle": "publish",
+                "runs_repo_code": true,
+                "env": ["FAKE_PIDS={out}/pids"]
+            }]
+        },
+        "typescript": {
+            "match": [".ts"],
+            "lsp": [{
+                "cmd": [python(), "-I", fake, "publish"],
+                "language_id": "typescript",
+                "settle": "publish",
+                "env": ["FAKE_PIDS={out}/pids", "FAKE_EVENTS={out}/events.jsonl"]
+            }]
+        }
+    });
+    fs::write(home.join("tools/modules.json"), mods.to_string()).unwrap();
+    fs::write(repo.join("a.fake"), "fine\nan ERROR here\na WARN here\n").unwrap();
+    fs::write(repo.join("b.fake"), "fine\n").unwrap();
+    fs::write(repo.join("a.qt"), "fine\n").unwrap();
+    fs::write(repo.join("a.sl"), "fine\n").unwrap();
+    fs::write(repo.join("a.dd"), "fine\n").unwrap();
+    fs::write(repo.join("a.st"), "fine\n").unwrap();
+    fs::write(repo.join("a.tr"), "fine\n").unwrap();
+    fs::write(repo.join("note.nl"), "plain\n").unwrap();
+    fs::write(repo.join("app.ts"), "fine\n").unwrap();
+    let repo_real = repo.canonicalize().unwrap();
+    let db = map.join("swan.db");
+    fs::copy(repo_root().join("rust/tests/data/tiny-ts.swan.db"), &db).unwrap();
+    sqlite_exec(
+        &db,
+        "INSERT OR REPLACE INTO meta (key, value) VALUES ('root', ?)",
+        &[repo_real.to_str().unwrap()],
+    );
+    sqlite_exec(
+        &db,
+        "INSERT OR REPLACE INTO meta (key, value) VALUES ('source', ?)",
+        &[map.to_str().unwrap()],
+    );
+    // Replace symbols/occurrences/files with clean rows pointing at a.fake and b.fake.
+    sqlite_exec(&db, "DELETE FROM occurrences", &[]);
+    sqlite_exec(&db, "DELETE FROM symbols", &[]);
+    sqlite_exec(&db, "DELETE FROM files", &[]);
+    sqlite_exec(
+        &db,
+        "INSERT INTO files (file, hash, rows, edited_mtime) VALUES ('a.fake', 'h1', 10, NULL), ('b.fake', 'h2', 2, NULL)",
+        &[],
+    );
+    sqlite_exec(
+        &db,
+        "INSERT INTO symbols (id, scip, name, name_path, kind, signature, doc, def_file, def_line, def_col, body_start, body_end, in_repo, language) VALUES (1, 'fake Thing#', 'Thing', 'Thing', 'interface', 'interface Thing', '', 'a.fake', 0, 0, 0, 0, 1, 'fake')",
+        &[],
+    );
+    sqlite_exec(
+        &db,
+        "INSERT INTO occurrences (symbol_id, file, start_line, start_col, end_line, end_col, is_def, enclosing_id, by_name, is_import) VALUES (1, 'a.fake', 0, 0, 0, 5, 1, NULL, 0, 0)",
+        &[],
+    );
+    FakeLiveHome { dir, home, repo: repo_real, map, db }
+}
+
+fn spawn_fake_serve(
+    home: &Path,
+    args: &[&str],
+    vars: &[(&str, &str)],
+    budget_ms: u64,
+) -> (Server, std::process::ChildStderr) {
+    let mut cmd = Command::new(home.join("bin/swan"));
+    cmd.args(args)
+        .env_remove("SWAN_TRUST_BUILD")
+        .env_remove("SWAN_SANDBOX")
+        .env_remove("SWAN_WARM")
+        .env("SWAN_GOOSE_SERVE", "/nonexistent")
+        .env("SWAN_LIVE_BUDGET_MS", budget_ms.to_string())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    for (k, v) in vars {
+        cmd.env(k, v);
+    }
+    let mut child = cmd.spawn().expect("spawn fake swan serve");
+    let stdin = child.stdin.take().unwrap();
+    let stdout = BufReader::new(child.stdout.take().unwrap());
+    let stderr = child.stderr.take().unwrap();
+    let mut srv = Server {
+        dir: home.join("__unused_cleanup__"),
+        db: PathBuf::new(),
+        child,
+        stdin: Some(stdin),
+        stdout,
+        next_id: 1,
+    };
+    let init = srv.rpc(
+        "initialize",
+        Some(json!({
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": {"name": "swan-live-test", "version": "0"}
+        })),
+    );
+    assert_eq!(init["result"]["serverInfo"]["name"], "swan", "{init}");
+    srv.notify("notifications/initialized");
+    (srv, stderr)
+}
+
+fn read_pids(path: &Path) -> Vec<i32> {
+    fs::read_to_string(path)
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|l| l.trim().parse::<i32>().ok())
+        .collect()
+}
+
+fn proc_running(pid: i32) -> bool {
+    fs::read_to_string(format!("/proc/{pid}/stat"))
+        .is_ok_and(|st| !st.rsplit(')').next().unwrap_or("").trim_start().starts_with('Z'))
+}
+
+fn wait_proc_dead(pid: i32) -> bool {
+    let until = Instant::now() + Duration::from_secs(3);
+    while proc_running(pid) && Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    !proc_running(pid)
+}
+
+#[test]
+fn live_diagnostics_keeps_server_and_sees_disk_edits() {
+    let f = setup_fake_live_home("diag-edits");
+    let (mut srv, _err) = spawn_fake_serve(&f.home, &["serve", f.db.to_str().unwrap()], &[], 20000);
+
+    // First ask sees planted error and warning in a.fake.
+    let r1 = srv.call_tool("get_diagnostics", json!({"relative_path": "a.fake", "live": true}));
+    assert_eq!(r1["ok"], true, "{r1}");
+    assert_eq!(r1["settled"], true, "{r1}");
+    let ds1 = r1["diagnostics"].as_array().expect("diagnostics");
+    assert!(
+        ds1.iter().any(|d| d["severity"] == "error" && d["line"] == 2 && d["col"] == 4 && d["code"] == "E1"),
+        "{r1}"
+    );
+    let pids1 = read_pids(&f.map.join("pids"));
+    assert_eq!(pids1.len(), 1, "expected 1 live server start: {pids1:?}");
+
+    // Mend file on disk and ask again in the SAME server: 0 errors, same pid reused.
+    fs::write(f.repo.join("a.fake"), "fine\n").unwrap();
+    let r2 = srv.call_tool("get_diagnostics", json!({"relative_path": "a.fake", "live": true}));
+    assert_eq!(r2["ok"], true, "{r2}");
+    assert_eq!(r2["diagnostics"], json!([]), "{r2}");
+    let pids2 = read_pids(&f.map.join("pids"));
+    assert_eq!(pids2, pids1, "server must be reused across edits");
+
+    assert_eq!(srv.close_and_wait(), 0);
+    assert!(wait_proc_dead(pids1[0]), "live server {} outlived swan serve", pids1[0]);
+}
+
+#[test]
+fn live_diagnostics_deleted_file_sends_did_close_and_reopens_on_recreate() {
+    let f = setup_fake_live_home("diag-delete");
+    let (mut srv, _err) = spawn_fake_serve(&f.home, &["serve", f.db.to_str().unwrap()], &[], 20000);
+    let file = f.repo.join("b.fake");
+    let orig = fs::read_to_string(&file).unwrap();
+
+    // Open and ask while file exists.
+    let r1 = srv.call_tool("get_diagnostics", json!({"relative_path": "b.fake", "live": true}));
+    assert_eq!(r1["ok"], true, "{r1}");
+    let pids1 = read_pids(&f.map.join("pids"));
+    assert_eq!(pids1.len(), 1);
+
+    // Delete file and ask: returns error and sends textDocument/didClose on the running server.
+    fs::remove_file(&file).unwrap();
+    let (is_err, err_text) = srv.call_tool_raw("get_diagnostics", json!({"relative_path": "b.fake", "live": true}));
+    assert!(is_err && err_text.contains("no such file"), "{err_text}");
+    let until = Instant::now() + Duration::from_secs(2);
+    let mut events_after_delete = String::new();
+    while Instant::now() < until {
+        events_after_delete = fs::read_to_string(f.map.join("events.jsonl")).unwrap_or_default();
+        if events_after_delete.lines().any(|l| l.contains("textDocument/didClose") && l.contains("b.fake")) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let closes = events_after_delete.lines().filter(|l| l.contains("textDocument/didClose") && l.contains("b.fake")).count();
+    assert_eq!(closes, 1, "expected textDocument/didClose after delete: {events_after_delete}");
+
+    // Recreate with identical text and ask again: must send a fresh textDocument/didOpen (not skip it).
+    fs::write(&file, &orig).unwrap();
+    let r2 = srv.call_tool("get_diagnostics", json!({"relative_path": "b.fake", "live": true}));
+    assert_eq!(r2["ok"], true, "{r2}");
+    let events_after_recreate = fs::read_to_string(f.map.join("events.jsonl")).unwrap_or_default();
+    let opens = events_after_recreate.lines().filter(|l| l.contains("textDocument/didOpen") && l.contains("b.fake")).count();
+    assert_eq!(opens, 2, "expected second textDocument/didOpen after recreate: {events_after_recreate}");
+    assert_eq!(read_pids(&f.map.join("pids")), pids1, "same server should stay reused");
+
+    assert_eq!(srv.close_and_wait(), 0);
+}
+
+#[test]
+fn live_diagnostics_refusals_and_dead_server_restart() {
+    let f = setup_fake_live_home("diag-refusals");
+    let (mut srv, _err) = spawn_fake_serve(&f.home, &["serve", f.db.to_str().unwrap()], &[], 1500);
+
+    // Missing relative_path
+    let (e1, t1) = srv.call_tool_raw("get_diagnostics", json!({"live": true}));
+    assert!(e1 && t1 == "live diagnostics need relative_path (one file)", "{t1}");
+
+    // Unknown extension on nonexistent file (live_suite check)
+    let (e2, t2) = srv.call_tool_raw("get_diagnostics", json!({"relative_path": "src/missing.rb", "live": true}));
+    assert!(e2 && t2.contains("no live server"), "{t2}");
+
+    // Language with no lsp entry
+    let (e3, t3) = srv.call_tool_raw("get_diagnostics", json!({"relative_path": "note.nl", "live": true}));
+    assert!(e3 && t3.contains("no live server"), "{t3}");
+
+    // Untrusted language names swan trust <repo>
+    let (e4, t4) = srv.call_tool_raw("get_diagnostics", json!({"relative_path": "a.tr", "live": true}));
+    assert!(e4 && t4.contains("swan trust "), "{t4}");
+
+    // Unsettled server returns isError:true starting with "not settled:"
+    let (e5, t5) = srv.call_tool_raw("get_diagnostics", json!({"relative_path": "a.sl", "live": true}));
+    assert!(e5 && t5.starts_with("not settled:"), "{t5}");
+
+    // Dead server returns error and the next question starts a fresh server.
+    let (e6, t6) = srv.call_tool_raw("get_diagnostics", json!({"relative_path": "a.dd", "live": true}));
+    assert!(e6 && t6.contains("stopped before it answered"), "{t6}");
+    let pids_after_first_die = read_pids(&f.map.join("pids"));
+    let (e7, t7) = srv.call_tool_raw("get_diagnostics", json!({"relative_path": "a.dd", "live": true}));
+    assert!(e7 && t7.contains("stopped before it answered"), "{t7}");
+    let pids_after_second_die = read_pids(&f.map.join("pids"));
+    assert!(
+        pids_after_second_die.len() > pids_after_first_die.len(),
+        "dead server must restart on next question: {pids_after_first_die:?} -> {pids_after_second_die:?}"
+    );
+
+    assert_eq!(srv.close_and_wait(), 0);
+}
+
+#[test]
+fn live_diagnostics_switches_language_and_stops_previous_server() {
+    let f = setup_fake_live_home("lang-switch");
+    let (mut srv, _err) = spawn_fake_serve(&f.home, &["serve", f.db.to_str().unwrap()], &[], 20000);
+
+    let r1 = srv.call_tool("get_diagnostics", json!({"relative_path": "b.fake", "live": true}));
+    assert_eq!(r1["ok"], true, "{r1}");
+    let pids1 = read_pids(&f.map.join("pids"));
+    assert_eq!(pids1.len(), 1);
+    assert!(proc_running(pids1[0]));
+
+    // Switch to .qt (quiet language): previous server stops before next runs.
+    let r2 = srv.call_tool("get_diagnostics", json!({"relative_path": "a.qt", "live": true}));
+    assert_eq!(r2["ok"], true, "{r2}");
+    assert!(wait_proc_dead(pids1[0]), "first server {} still running after language switch", pids1[0]);
+    let pids2 = read_pids(&f.map.join("pids"));
+    assert_eq!(pids2.len(), 2);
+    assert!(proc_running(pids2[1]));
+
+    assert_eq!(srv.close_and_wait(), 0);
+    assert!(wait_proc_dead(pids2[1]), "second server {} still running after EOF", pids2[1]);
+}
+
+#[test]
+fn live_implementations_returns_locations_with_source_lines() {
+    let f = setup_fake_live_home("impls-mcp");
+    let (mut srv, _err) = spawn_fake_serve(&f.home, &["serve", f.db.to_str().unwrap()], &[], 20000);
+
+    // Unknown symbol returns empty implementations without starting a server.
+    let empty = srv.call_tool("find_implementations", json!({"name_path": "NoSuch", "live": true}));
+    assert_eq!(empty["implementations"], json!([]), "{empty}");
+    assert!(empty.get("live").is_none(), "{empty}");
+    assert!(!f.map.join("pids").exists(), "unknown symbol must not start a server");
+
+    // Known symbol asks textDocument/implementation and attaches trimmed source line.
+    let res = srv.call_tool("find_implementations", json!({"name_path": "Thing", "live": true}));
+    assert_eq!(res["live"], true, "{res}");
+    assert_eq!(res["targets"][0]["name_path"], "Thing", "{res}");
+    let impls = res["implementations"].as_array().expect("implementations");
+    assert_eq!(impls.len(), 1, "{res}");
+    assert_eq!(impls[0]["relative_path"], "b.fake", "{res}");
+    assert_eq!(impls[0]["line"], 1, "{res}");
+    assert_eq!(impls[0]["column"], 1, "{res}");
+    assert_eq!(impls[0]["source"], "fine", "{res}");
+
+    assert_eq!(srv.close_and_wait(), 0);
+}
+
+#[test]
+fn use_repo_switch_stops_live_server_and_reselect_keeps_it() {
+    let f = setup_fake_live_home("repo-switch");
+    let maps = f.dir.join("maps");
+    let repo_a = f.dir.join("repo_a");
+    let repo_b = f.dir.join("repo_b");
+    let map_a = maps.join("repo_a");
+    let map_b = maps.join("repo_b");
+    for d in [&repo_a, &repo_b, &map_a, &map_b] {
+        fs::create_dir_all(d).unwrap();
+    }
+    fs::write(repo_a.join("a.fake"), "fine\n").unwrap();
+    fs::write(repo_b.join("b.fake"), "fine\n").unwrap();
+    let repo_a_real = repo_a.canonicalize().unwrap();
+    let repo_b_real = repo_b.canonicalize().unwrap();
+    for (map_dir, repo_real) in [(&map_a, &repo_a_real), (&map_b, &repo_b_real)] {
+        let db = map_dir.join("swan.db");
+        fs::copy(repo_root().join("rust/tests/data/tiny-ts.swan.db"), &db).unwrap();
+        sqlite_exec(&db, "INSERT OR REPLACE INTO meta (key, value) VALUES ('root', ?)", &[repo_real.to_str().unwrap()]);
+        sqlite_exec(&db, "INSERT OR REPLACE INTO meta (key, value) VALUES ('source', ?)", &[map_dir.to_str().unwrap()]);
+    }
+
+    let (mut srv, _err) = spawn_fake_serve(&f.home, &["serve", "--maps", maps.to_str().unwrap()], &[], 20000);
+
+    // Select repo_a and start live server.
+    let _ = srv.call_tool("use_repo", json!({"path": repo_a_real.to_str().unwrap()}));
+    let r1 = srv.call_tool("get_diagnostics", json!({"relative_path": "a.fake", "live": true}));
+    assert_eq!(r1["ok"], true, "{r1}");
+    let pids_a = read_pids(&map_a.join("pids"));
+    assert_eq!(pids_a.len(), 1);
+    assert!(proc_running(pids_a[0]));
+
+    // Reselecting repo_a is a no-op and keeps its live server running.
+    let same = srv.call_tool("use_repo", json!({"path": repo_a_real.to_str().unwrap()}));
+    assert_eq!(same["switched"], false, "{same}");
+    assert!(proc_running(pids_a[0]), "reselecting same repo must not stop live server");
+
+    // Switching to repo_b via use_repo stops repo_a's live server.
+    let sw = srv.call_tool("use_repo", json!({"path": repo_b_real.to_str().unwrap()}));
+    assert_eq!(sw["switched"], true, "{sw}");
+    assert!(wait_proc_dead(pids_a[0]), "use_repo switch did not stop repo_a server {}", pids_a[0]);
+
+    // Ask repo_b, then switch back via per-call repo argument: stops repo_b's server.
+    let r2 = srv.call_tool("get_diagnostics", json!({"relative_path": "b.fake", "live": true}));
+    assert_eq!(r2["ok"], true, "{r2}");
+    let pids_b = read_pids(&map_b.join("pids"));
+    assert_eq!(pids_b.len(), 1);
+    assert!(proc_running(pids_b[0]));
+
+    let _ = srv.call_tool("index_info", json!({"repo": repo_a_real.to_str().unwrap()}));
+    assert!(wait_proc_dead(pids_b[0]), "per-call repo switch did not stop repo_b server {}", pids_b[0]);
+
+    assert_eq!(srv.close_and_wait(), 0);
+}
+
+#[test]
+fn swan_warm_starts_server_after_initialize_and_is_off_by_default() {
+    use std::io::Read;
+
+    // 1. Off by default: initialize + initialized starts no server.
+    let f_off = setup_fake_live_home("warm-off");
+    let (mut srv_off, _err_off) =
+        spawn_fake_serve(&f_off.home, &["serve", f_off.db.to_str().unwrap()], &[], 20000);
+    let _ = srv_off.rpc("tools/list", None);
+    assert!(!f_off.map.join("pids").exists(), "SWAN_WARM must be off by default");
+    assert_eq!(srv_off.close_and_wait(), 0);
+
+    // 2. SWAN_WARM=fake: starts fake server after initialize, opens largest .fake file, and reuses it.
+    let f_on = setup_fake_live_home("warm-on");
+    let (mut srv_on, mut err_on) = spawn_fake_serve(
+        &f_on.home,
+        &["serve", f_on.db.to_str().unwrap()],
+        &[("SWAN_WARM", "fake")],
+        20000,
+    );
+    // tools/list runs after notifications/initialized so warm has completed.
+    let _ = srv_on.rpc("tools/list", None);
+    let pids_warm = read_pids(&f_on.map.join("pids"));
+    assert_eq!(pids_warm.len(), 1, "SWAN_WARM=fake should start 1 server after initialize");
+    let events = fs::read_to_string(f_on.map.join("events.jsonl")).unwrap_or_default();
+    assert!(events.contains("textDocument/didOpen") && events.contains("a.fake"), "warm should open a.fake: {events}");
+
+    // Subsequent live call reuses the warmed server (still 1 pid).
+    let diag = srv_on.call_tool("get_diagnostics", json!({"relative_path": "a.fake", "live": true}));
+    assert_eq!(diag["ok"], true, "{diag}");
+    assert_eq!(read_pids(&f_on.map.join("pids")), pids_warm, "first live call must reuse warmed server");
+    assert_eq!(srv_on.close_and_wait(), 0);
+    let mut stderr_text = String::new();
+    let _ = err_on.read_to_string(&mut stderr_text);
+    assert!(stderr_text.contains("fake server started (warm)"), "expected warm log on stderr: {stderr_text}");
+
+    // 3. SWAN_WARM=auto picks typescript when .ts files dominate the map.
+    let f_auto = setup_fake_live_home("warm-auto");
+    sqlite_exec(&f_auto.db, "DELETE FROM files", &[]);
+    sqlite_exec(
+        &f_auto.db,
+        "INSERT INTO files (file, hash, rows, edited_mtime) VALUES ('app.ts', 'h1', 5, NULL)",
+        &[],
+    );
+    let (mut srv_auto, mut err_auto) = spawn_fake_serve(
+        &f_auto.home,
+        &["serve", f_auto.db.to_str().unwrap()],
+        &[("SWAN_WARM", "auto")],
+        20000,
+    );
+    let _ = srv_auto.rpc("tools/list", None);
+    let pids_auto = read_pids(&f_auto.map.join("pids"));
+    assert_eq!(pids_auto.len(), 1, "SWAN_WARM=auto should start typescript server");
+    let events_auto = fs::read_to_string(f_auto.map.join("events.jsonl")).unwrap_or_default();
+    assert!(events_auto.contains("app.ts"), "SWAN_WARM=auto should open app.ts: {events_auto}");
+    assert_eq!(srv_auto.close_and_wait(), 0);
+    let mut err_auto_text = String::new();
+    let _ = err_auto.read_to_string(&mut err_auto_text);
+    assert!(err_auto_text.contains("typescript server started (warm)"), "stderr: {err_auto_text}");
+}
+
+#[test]
+fn live_server_does_not_outlive_killed_swan_serve() {
+    let f = setup_fake_live_home("killed-serve");
+    let (mut srv, _err) = spawn_fake_serve(&f.home, &["serve", f.db.to_str().unwrap()], &[], 20000);
+
+    // Send a live call against the stubborn server asynchronously by writing raw request.
+    srv.write_json(&json!({
+        "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+        "params": {"name": "get_diagnostics", "arguments": {"relative_path": "a.st", "live": true}}
+    }));
+    let pids_path = f.map.join("pids");
+    let until = Instant::now() + Duration::from_secs(10);
+    while read_pids(&pids_path).len() < 2 && Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let pids = read_pids(&pids_path);
+    assert_eq!(pids.len(), 2, "expected stubborn server and child pids, got {pids:?}");
+    assert!(pids.iter().all(|&p| proc_running(p)));
+
+    // SIGKILL swan serve directly; watcher kills stubborn process group.
+    srv.child.kill().unwrap();
+    let _ = srv.child.wait();
+    let mut left = Vec::new();
+    for &p in &pids {
+        if !wait_proc_dead(p) {
+            left.push(p);
+            unsafe { libc::kill(p, libc::SIGKILL) };
+        }
+    }
+    assert!(left.is_empty(), "processes outlived killed swan serve: {left:?}");
+}
+
+// Helper for real-server MCP tests (ignored when servers are not in this copy).
+fn setup_real_live_mcp(name: &str, fixture: &str) -> (PathBuf, PathBuf, PathBuf) {
+    let root = repo_root();
+    let dir = std::env::temp_dir().join(format!("swan-serve-real-{}-{name}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    let home = dir.join("home");
+    let copy = dir.join("repo");
+    let map = dir.join("map");
+    fs::create_dir_all(home.join("bin")).unwrap();
+    fs::create_dir_all(&map).unwrap();
+    std::os::unix::fs::symlink(root.join("tools"), home.join("tools")).unwrap();
+    std::os::unix::fs::symlink(root.join(".tools"), home.join(".tools")).unwrap();
+    fs::copy(env!("CARGO_BIN_EXE_swan"), home.join("bin/swan")).unwrap();
+    if root.join("bin/eggshell").exists() {
+        fs::copy(root.join("bin/eggshell"), home.join("bin/eggshell")).unwrap();
+    }
+    copy_dir(&root.join("fixtures").join(fixture), &copy);
+    let copy_real = copy.canonicalize().unwrap();
+    let db = map.join("swan.db");
+    fs::copy(root.join("rust/tests/data/tiny-ts.swan.db"), &db).unwrap();
+    sqlite_exec(&db, "INSERT OR REPLACE INTO meta (key, value) VALUES ('root', ?)", &[copy_real.to_str().unwrap()]);
+    sqlite_exec(&db, "INSERT OR REPLACE INTO meta (key, value) VALUES ('source', ?)", &[map.to_str().unwrap()]);
+    (home, copy_real, db)
+}
+
+fn spawn_real_serve(home: &Path, args: &[&str], budget_ms: u64) -> Server {
+    let mut cmd = Command::new(home.join("bin/swan"));
+    cmd.args(args)
+        .env_remove("SWAN_SANDBOX")
+        .env_remove("SWAN_WARM")
+        .env("SWAN_GOOSE_SERVE", "/nonexistent")
+        .env("SWAN_LIVE_BUDGET_MS", budget_ms.to_string())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = cmd.spawn().expect("spawn real swan serve");
+    let stdin = child.stdin.take().unwrap();
+    let stdout = BufReader::new(child.stdout.take().unwrap());
+    let mut srv = Server {
+        dir: home.join("__unused_cleanup__"),
+        db: PathBuf::new(),
+        child,
+        stdin: Some(stdin),
+        stdout,
+        next_id: 1,
+    };
+    let init = srv.rpc(
+        "initialize",
+        Some(json!({
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": {"name": "swan-live-real-test", "version": "0"}
+        })),
+    );
+    assert_eq!(init["result"]["serverInfo"]["name"], "swan", "{init}");
+    srv.notify("notifications/initialized");
+    srv
+}
+
+#[test]
+#[ignore = "requires .tools/lua-ls/bin/lua-language-server not present in this scratch copy"]
+fn live_mcp_lua_plant_ask_mend_ask() {
+    let (home, copy, db) = setup_real_live_mcp("lua", "lsp-lua");
+    let mut srv = spawn_real_serve(&home, &["serve", db.to_str().unwrap()], 60000);
+    let file = copy.join("alpha.lua");
+    let orig = fs::read_to_string(&file).unwrap();
+    fs::write(&file, format!("{orig}\nlocal broken = (1 +\n")).unwrap();
+    let bad = srv.call_tool("get_diagnostics", json!({"relative_path": "alpha.lua", "live": true}));
+    let bad_errs = bad["diagnostics"].as_array().unwrap().iter().filter(|d| d["severity"] == "error").count();
+    assert!(bad_errs > 0, "expected Lua syntax error: {bad}");
+    fs::write(&file, &orig).unwrap();
+    let fixed = srv.call_tool("get_diagnostics", json!({"relative_path": "alpha.lua", "live": true}));
+    let fixed_errs = fixed["diagnostics"].as_array().unwrap().iter().filter(|d| d["severity"] == "error").count();
+    assert_eq!(fixed_errs, 0, "expected error gone after mend: {fixed}");
+    assert_eq!(srv.close_and_wait(), 0);
+    let _ = fs::remove_dir_all(home.parent().unwrap());
+}
+
+#[test]
+#[ignore = "requires .tools/rust-analyzer/rust-analyzer not present in this scratch copy (run with SWAN_TRUST_BUILD=1 for fixtures/tiny-rs)"]
+fn live_mcp_rust_plant_ask_mend_ask() {
+    let (home, copy, db) = setup_real_live_mcp("rust", "tiny-rs");
+    let mut srv = spawn_real_serve(&home, &["serve", db.to_str().unwrap()], 100000);
+    let file = copy.join("src/lib.rs");
+    let orig = fs::read_to_string(&file).unwrap();
+    let broken = orig.replace("Tile::new(2).area()", "Tile::new(2, 3).area()");
+    fs::write(&file, &broken).unwrap();
+    let bad = srv.call_tool("get_diagnostics", json!({"relative_path": "src/lib.rs", "live": true}));
+    assert!(
+        bad["diagnostics"].as_array().unwrap().iter().any(|d| d["code"] == "E0061"),
+        "expected E0061: {bad}"
+    );
+    fs::write(&file, &orig).unwrap();
+    let fixed = srv.call_tool("get_diagnostics", json!({"relative_path": "src/lib.rs", "live": true}));
+    let fixed_errs = fixed["diagnostics"].as_array().unwrap().iter().filter(|d| d["severity"] == "error").count();
+    assert_eq!(fixed_errs, 0, "expected 0 errors after mend: {fixed}");
+    assert_eq!(srv.close_and_wait(), 0);
+    let _ = fs::remove_dir_all(home.parent().unwrap());
+}
+
+#[test]
+#[ignore = "requires .tools/gopls, .tools/solidlsp and bin/eggshell not present in this scratch copy"]
+fn live_mcp_go_plant_ask_mend_ask() {
+    let (home, copy, db) = setup_real_live_mcp("go", "tiny-go");
+    let mut srv = spawn_real_serve(&home, &["serve", db.to_str().unwrap()], 100000);
+    let file = copy.join("main.go");
+    let orig = fs::read_to_string(&file).unwrap();
+    fs::write(&file, format!("{orig}\nvar broken int = \"text\"\n")).unwrap();
+    let bad = srv.call_tool("get_diagnostics", json!({"relative_path": "main.go", "live": true}));
+    let bad_errs = bad["diagnostics"].as_array().unwrap().iter().filter(|d| d["severity"] == "error").count();
+    assert!(bad_errs > 0, "expected Go type error: {bad}");
+    fs::write(&file, &orig).unwrap();
+    let fixed = srv.call_tool("get_diagnostics", json!({"relative_path": "main.go", "live": true}));
+    let fixed_errs = fixed["diagnostics"].as_array().unwrap().iter().filter(|d| d["severity"] == "error").count();
+    assert_eq!(fixed_errs, 0, "expected 0 errors after mend: {fixed}");
+    assert_eq!(srv.close_and_wait(), 0);
+    let _ = fs::remove_dir_all(home.parent().unwrap());
 }
